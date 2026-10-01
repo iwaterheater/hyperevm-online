@@ -6,9 +6,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createCat } from './cat.js';
 import { createSkeleton, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
-import { CAST_TIME, WORLD_R, TOWN_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
+import { CAST_TIME, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
 
 const TEAL = 0x7fe8d6;
+const FIRE = 0xffa040;
 const ZONE_COLORS = [TEAL, 0x6fbf55, 0xb59a6a, 0xff5a70];   // town, meadows, graveyard, cursed lands
 const OTHER_HOODIES = [0x3b4a7a, 0x7a3b5a, 0x7a5a2b, 0x4a3b7a, 0x2b6a7a, 0x7a2b2b, 0x4d4d57];
 const glow = (hex, k = 2.5) => new THREE.Color(hex).multiplyScalar(k);
@@ -129,6 +130,7 @@ const meshPool = (geo, mat, scale) => makePool(() => {
   return { mesh };
 });
 const bulletMat = new THREE.MeshBasicMaterial({ color: glow(TEAL, 3) });
+const fireMat = new THREE.MeshBasicMaterial({ color: glow(FIRE, 3) });
 const bulletPool = meshPool(sphereGeo, bulletMat, 0.32);
 const orbPool = meshPool(sphereGeo, new THREE.MeshBasicMaterial({ color: glow(0xff3b6b, 3) }), 0.32);
 const gemPool = meshPool(new THREE.OctahedronGeometry(0.28), new THREE.MeshBasicMaterial({ color: glow(0xffd76a, 1.8) }), 1);
@@ -199,7 +201,7 @@ function makeAvatar(hoodie) {
   cat.group.add(orb);
   scene.add(root);
   return {
-    root, cat, orb, castT: -1, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
+    root, cat, orb, swingT: -1, castT: -1, castDur: CAST_TIME, castSkill: 1, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
     speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, shootPose: 0,
   };
@@ -257,13 +259,13 @@ let state = 'menu';   // menu | connecting | playing | lost
 let ws = null, myId = 0, time = 0, shake = 0, online = 1;
 const names = new Map();
 const others = new Map(), mobViews = new Map(), gemViews = new Map();
-let bullets = [], orbs = [];
+let bullets = [], orbs = [], meteors = [];
 
 const me = makeAvatar();
 me.z = 6;   // menu pose: on the plaza, in front of the fountain
 const stats = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, weapon: 1, energy: 0, dead: false };
 const local = {
-  vy: 0, jumps: 0, invuln: 0, fireCd: 0, dashT: 0, dashCd: 0, sendT: 0,
+  vy: 0, jumps: 0, invuln: 0, fireCd: 0, meteorCd: 0, swordCd: 0, dashT: 0, dashCd: 0, sendT: 0,
   dashDir: new THREE.Vector2(0, 1), aim: new THREE.Vector2(0, 1), zone: '',
 };
 
@@ -271,6 +273,24 @@ const reticle = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.4, 32), new THREE.
 reticle.rotation.x = -Math.PI / 2;
 reticle.visible = false;
 scene.add(reticle);
+
+// the arc a sword swing leaves in the air
+const slashes = [];
+const slashGeo = new THREE.RingGeometry(1.2, SWORD.range + 0.3, 24, 1, -1.1, 2.2);
+function spawnSlash(x, z, dx, dz) {
+  const mesh = new THREE.Mesh(slashGeo, new THREE.MeshBasicMaterial({ color: glow(0xffffff, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+  mesh.rotation.set(-Math.PI / 2, 0, Math.atan2(-dz, dx));
+  mesh.position.set(x, 1.0, z);
+  scene.add(mesh);
+  slashes.push({ mesh, t: 0 });
+}
+
+// preview of where Starfall will land while it is being cast
+const aoeMarker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
+aoeMarker.rotation.x = -Math.PI / 2;
+aoeMarker.scale.setScalar(METEOR.radius);
+aoeMarker.visible = false;
+scene.add(aoeMarker);
 
 let bannerTimer = 0;
 function banner(text) {
@@ -406,7 +426,30 @@ function onEvent(ev) {
       if (others.has(ev.o)) others.get(ev.o).shootPose = 0.25;
       break;
     case 'cast':
-      if (ev.o !== myId && others.has(ev.o)) others.get(ev.o).castT = 0;
+      if (ev.o !== myId && others.has(ev.o)) Object.assign(others.get(ev.o), { castT: 0, castDur: ev.d, castSkill: ev.s });
+      break;
+    case 'swing':
+      if (ev.o === myId || !others.has(ev.o)) break;
+      others.get(ev.o).swingT = 0;
+      spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz);
+      break;
+    case 'meteor': {
+      const marker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+      marker.rotation.x = -Math.PI / 2;
+      marker.position.set(ev.x, 0.08, ev.z);
+      marker.scale.setScalar(METEOR.radius);
+      const star = new THREE.Mesh(sphereGeo, fireMat);
+      star.scale.setScalar(0.7);
+      scene.add(marker, star);
+      meteors.push({ marker, star, t: 0, d: ev.d, x: ev.x, z: ev.z });
+      sfx(900, ev.d, 'sawtooth', 0.04, -700);
+      break;
+    }
+    case 'boom':
+      spawnRing(ev.x, ev.z, ev.r, FIRE);
+      burst(ev.x, 0.5, ev.z, FIRE, 45, 12);
+      if (Math.hypot(ev.x - me.x, ev.z - me.z) < 25) shake = Math.max(shake, 0.5);
+      sfx(70, 0.5, 'sawtooth', 0.12, -40);
       break;
     case 'orb':
       spawnProjectile(orbs, orbPool, ev.x, ev.z, ev.dx, ev.dz, 10, 3.5);
@@ -538,7 +581,9 @@ const camTarget = new THREE.Vector3(0, 0.45, 0), camGoal = new THREE.Vector3(), 
 
 function updateLocal(dt) {
   local.dashCd -= dt;
+  local.meteorCd -= dt;
   local.invuln -= dt;
+  aoeMarker.visible = false;
   me.shootPose -= dt;
   if (stats.dead) { me.speed = 0; me.castT = -1; return; }
 
@@ -575,19 +620,46 @@ function updateLocal(dt) {
   if (me.y <= 0) { me.y = 0; local.vy = 0; local.jumps = 0; }
 
   local.fireCd -= dt;
-  if (me.castT < 0 && firing && local.fireCd <= 0 && local.dashT <= 0) {
-    me.castT = 0;   // start channelling; the bolt is released when the cast completes
-    send({ t: 'k' });
-    sfx(220, CAST_TIME, 'sine', 0.04, 500);
+  // basic attack: sword swing on the left mouse button; the cat can keep moving
+  local.swordCd -= dt;
+  if (firing && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
+    local.swordCd = SWORD.cd;
+    me.swingT = 0;
+    spawnSlash(me.x, me.z, local.aim.x, local.aim.y);
+    send({ t: 'a', dx: local.aim.x, dz: local.aim.y });
+    sfx(300, 0.12, 'sawtooth', 0.04, 500);
+  }
+
+  // skills: hold 1 for Bolt, 2 for Starfall; both root the cat while channelling
+  if (me.castT < 0 && local.fireCd <= 0 && local.dashT <= 0) {
+    const skill = keys.has('Digit2') && local.meteorCd <= 0 ? 2 : keys.has('Digit1') ? 1 : 0;
+    if (skill) {
+      Object.assign(me, { castT: 0, castSkill: skill, castDur: skill === 2 ? METEOR.cast : CAST_TIME });
+      send({ t: 'k', s: skill });
+      sfx(skill === 2 ? 160 : 220, me.castDur, 'sine', 0.04, 500);
+    }
   } else if (me.castT >= 0) {
     me.castT += dt;
-    if (me.castT >= CAST_TIME) {
+    // Starfall lands on the cursor, limited to its range
+    let tx = aimPoint.x - me.x, tz = aimPoint.z - me.z;
+    const td = Math.hypot(tx, tz);
+    if (td > METEOR.range) { tx *= METEOR.range / td; tz *= METEOR.range / td; }
+    if (me.castSkill === 2) {
+      aoeMarker.visible = true;
+      aoeMarker.position.set(me.x + tx, 0.08, me.z + tz);
+    }
+    if (me.castT >= me.castDur) {
       me.castT = -1;
       local.fireCd = 0.08;
       me.shootPose = 0.25;
-      spawnProjectile(bullets, bulletPool, me.x + local.aim.x * 0.8, me.z + local.aim.y * 0.8, local.aim.x, local.aim.y, 34, 1.1);
-      send({ t: 'f', dx: local.aim.x, dz: local.aim.y });
-      sfx(660, 0.12, 'square', 0.04, -400);
+      if (me.castSkill === 2) {
+        local.meteorCd = METEOR.cd;
+        send({ t: 'q', x: me.x + tx, z: me.z + tz });
+      } else {
+        spawnProjectile(bullets, bulletPool, me.x + local.aim.x * 0.8, me.z + local.aim.y * 0.8, local.aim.x, local.aim.y, 34, 1.1);
+        send({ t: 'f', dx: local.aim.x, dz: local.aim.y });
+        sfx(660, 0.12, 'square', 0.04, -400);
+      }
     }
   }
 
@@ -610,16 +682,18 @@ function updateAvatar(a, dt, isMe) {
     a.x += (a.tx - a.x) * k; a.y += (a.ty - a.y) * k; a.z += (a.tz - a.z) * k;
     a.yaw = lerpAngle(a.yaw, a.tyaw, k);
     a.shootPose -= dt;
-    if (a.castT >= 0 && (a.castT += dt) >= CAST_TIME) a.castT = -1;
+    if (a.castT >= 0 && (a.castT += dt) >= a.castDur) a.castT = -1;
     a.bar.set(a.hp / a.maxHp, !a.dead && a.hp < a.maxHp);
   }
   a.root.position.set(a.x, 0, a.z);
   a.cat.group.position.y = a.y;
   a.cat.group.rotation.y = a.yaw;
-  const charge = a.castT >= 0 ? a.castT / CAST_TIME : 0;
+  if (a.swingT >= 0 && (a.swingT += dt / 0.4) >= 1) a.swingT = -1;
+  const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
   a.orb.visible = a.castT >= 0;
+  a.orb.material = a.castSkill === 2 ? fireMat : bulletMat;
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0 });
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, swing: a.swingT });
 }
 
 function updateViews(dt) {
@@ -671,6 +745,25 @@ function updateViews(dt) {
     return !dead;
   });
 
+  for (let j = slashes.length - 1; j >= 0; j--) {
+    const s = slashes[j];
+    s.t += dt / 0.2;
+    s.mesh.scale.setScalar(0.85 + s.t * 0.25);
+    s.mesh.material.opacity = 0.8 * (1 - s.t);
+    if (s.t >= 1) { scene.remove(s.mesh); s.mesh.material.dispose(); slashes.splice(j, 1); }
+  }
+
+  meteors = meteors.filter((m) => {
+    m.t += dt;
+    const k = Math.min(1, m.t / m.d);
+    m.star.position.set(m.x + (1 - k) * 7, (1 - k) * 22 + 0.5, m.z - (1 - k) * 4);
+    m.marker.material.opacity = 0.4 + 0.5 * Math.abs(Math.sin(m.t * 25));
+    if (k < 1) return true;
+    scene.remove(m.marker, m.star);
+    m.marker.material.dispose();
+    return false;
+  });
+
   for (let j = rings.length - 1; j >= 0; j--) {
     const r = rings[j];
     r.t += dt / 0.45;
@@ -692,7 +785,11 @@ function updateHud() {
   $('enHint').textContent = stats.energy >= 100 ? 'press Q!' : '';
   $('dashFill').style.width = `${Math.max(0, Math.min(1, 1 - local.dashCd / 1.2)) * 100}%`;
   $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
-  $('castFill').style.width = `${Math.max(0, me.castT) / CAST_TIME * 100}%`;
+  $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
+  $('sk1').classList.toggle('active', me.castT >= 0 && me.castSkill === 1);
+  $('sk2').classList.toggle('active', me.castT >= 0 && me.castSkill === 2);
+  $('sk2cd').style.height = `${Math.max(0, local.meteorCd) / METEOR.cd * 100}%`;
+  $('sk2time').textContent = local.meteorCd > 0 ? Math.ceil(local.meteorCd) : '';
   $('gold').textContent = stats.gold;
   $('weapon').textContent = `Lv ${stats.weapon}`;
   $('online').textContent = online;

@@ -79,6 +79,8 @@ function getShared() {
       eye: new THREE.MeshBasicMaterial({ color: COLORS.eye }),
       white: new THREE.MeshBasicMaterial({ color: 0xffffff }),
       teal: new THREE.MeshBasicMaterial({ color: COLORS.teal }),
+      steel: toon(0xcfd8e0),
+      gold: toon(0xe7b93c),
       outline: new THREE.MeshBasicMaterial({ color: COLORS.outline, side: THREE.BackSide }),
     },
     sphere: new THREE.SphereGeometry(1, 32, 24),
@@ -89,6 +91,9 @@ function getShared() {
     ear: new THREE.ConeGeometry(0.27, 0.5, 20),
     arm: new THREE.CapsuleGeometry(0.125, 0.26, 6, 14),
     leg: new THREE.CapsuleGeometry(0.15, 0.14, 6, 14),
+    blade: new THREE.BoxGeometry(0.08, 0.03, 0.85),
+    guard: new THREE.BoxGeometry(0.26, 0.06, 0.07),
+    hilt: new THREE.CylinderGeometry(0.032, 0.032, 0.2, 8),
   };
   return shared;
 }
@@ -180,6 +185,10 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     part(arm, sphereLo, mats.fur, [0, -0.44, 0], 0.135, 1.1);
     arms.push(arm);
   }
+  // sword in the right paw, pointing forward along the arm's +Z
+  part(arms[1], S.hilt, mats.gold, [0, -0.44, 0.04]).rotation.x = Math.PI / 2;
+  part(arms[1], S.guard, mats.gold, [0, -0.44, 0.16]);
+  part(arms[1], S.blade, mats.steel, [0, -0.44, 0.62]);
 
   // ---- legs ----
   const legGeo = S.leg;
@@ -210,7 +219,7 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
 
   let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0;
 
-  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false } = {}) {
+  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, swing: slash = -1 } = {}) {
     t += dt;
     const k = Math.min(1, dt * 12);
     move += (Math.min(1, speed / 9) - move) * k;
@@ -237,6 +246,17 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     }
 
     inner.position.y = Math.abs(Math.sin(runPhase)) * 0.09 * move * (1 - air) + Math.sin(t * 2.2) * 0.012;
+    // sword swing (0..1): raise overhead, chop down, recover
+    if (slash >= 0) {
+      const mix = (a, b, k) => a + (b - a) * k;
+      arms[1].rotation.x = slash < 0.3 ? mix(-1.0, -2.8, slash / 0.3)
+        : slash < 0.6 ? mix(-2.8, -0.3, (slash - 0.3) / 0.3)
+        : mix(-0.3, arms[1].rotation.x, (slash - 0.6) / 0.4);
+      arms[1].rotation.z = 0.12;
+      inner.rotation.y = Math.sin(slash * Math.PI) * -0.4;
+    } else {
+      inner.rotation.y = 0;
+    }
     inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0) - cast * 0.1;
     head.rotation.z = Math.sin(t * 1.3) * 0.04;
     head.rotation.x = -move * 0.1 + Math.sin(t * 1.7) * 0.02;

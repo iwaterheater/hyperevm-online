@@ -38,18 +38,29 @@
     letter-spacing: .04em; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .8), 0 0 24px rgba(127, 232, 214, .9); opacity: 0;
     transition: opacity .4s; }
   #banner.on { opacity: 1; }
-  #shop { position: absolute; bottom: 54px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
+  #shop { position: absolute; bottom: 150px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
     border-radius: 999px; background: rgba(6, 24, 21, .75); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold);
     display: none; }
   #cast { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); width: 150px; height: 10px; display: none;
     border-radius: 6px; background: rgba(0, 0, 0, .55); border: 1px solid rgba(127, 232, 214, .6); overflow: hidden; }
   #castFill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--teal-dim), #d9fff7); }
+  #skills { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+  .skill { position: relative; width: 74px; height: 74px; padding-top: 9px; text-align: center; font-size: 12px; overflow: hidden;
+    background: rgba(6, 24, 21, .7); border: 2px solid rgba(127, 232, 214, .3); border-radius: 12px; }
+  .skill.active { border-color: #fff; box-shadow: 0 0 16px rgba(127, 232, 214, .8); }
+  .skill .icon { display: block; width: 22px; height: 22px; margin: 5px auto 4px; border-radius: 50%; }
+  #sk0 .icon { width: 6px; border-radius: 2px; background: linear-gradient(#fff, #cfd8e0 70%, #e7b93c 70%); transform: rotate(35deg); }
+  #sk1 .icon { background: radial-gradient(#fff, var(--teal)); box-shadow: 0 0 10px var(--teal); }
+  #sk2 .icon { background: radial-gradient(#fff, #ffa040); box-shadow: 0 0 10px #ffa040; }
+  .skill kbd { position: absolute; top: 3px; left: 4px; margin: 0; padding: 0 5px; font-size: 11px; }
+  .skill .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
+  .skill .time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; }
   #hint { position: absolute; bottom: 14px; left: 16px; right: 16px; text-align: center; font-size: 12px; opacity: .85;
     text-shadow: 0 1px 3px #000; }
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
     background: radial-gradient(transparent 40%, rgba(255, 60, 110, .55)); transition: opacity .25s; }
 
-  #chat { position: absolute; left: 16px; bottom: 96px; width: min(380px, 60vw); font-size: 13px; }
+  #chat { position: absolute; left: 16px; bottom: 150px; width: min(380px, 60vw); font-size: 13px; }
   #chatLog div { padding: 1px 0; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
   #chatLog .sys { color: var(--teal); opacity: .8; }
   #chatLog b { color: var(--gold); }
@@ -106,8 +117,13 @@
   <div id="banner"></div>
   <div id="chat"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…"></div>
   <div id="cast"><i id="castFill"></i></div>
+  <div id="skills">
+    <div class="skill" id="sk0"><kbd>LMB</kbd><i class="icon"></i>Sword</div>
+    <div class="skill" id="sk1"><kbd>1</kbd><i class="icon"></i>Bolt</div>
+    <div class="skill" id="sk2"><kbd>2</kbd><i class="icon"></i>Starfall<i class="cd" id="sk2cd"></i><span class="time" id="sk2time"></span></div>
+  </div>
   <div id="shop"></div>
-  <div id="hint">WASD — move · hold LMB — cast bolt · Space — jump · Shift — dash · Q / RMB — hyper wave · Enter — chat · B — upgrade weapon in town · M — mute</div>
+  <div id="hint">WASD — move · LMB — sword · 1 — Bolt · 2 — Starfall · Space — jump · Shift — dash · Q / RMB — hyper wave · Enter — chat · B — upgrade weapon in town · M — mute</div>
 </div>
 <div id="flash"></div>
 
@@ -116,7 +132,9 @@
   <p>An open online world of cats: level up and hunt skeletons together with other players</p>
   <div class="keys">
     <div><kbd>WASD</kbd>move</div>
-    <div><kbd>LMB</kbd>cast bolt</div>
+    <div><kbd>LMB</kbd>sword</div>
+    <div><kbd>1</kbd>Bolt</div>
+    <div><kbd>2</kbd>Starfall</div>
     <div><kbd>Space</kbd>jump</div>
     <div><kbd>Shift</kbd>dash</div>
     <div><kbd>Q</kbd>hyper wave</div>

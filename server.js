@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
+  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, METEOR, SWORD, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
 } from './src/shared.js';
 
 const PORT = process.env.PORT || 8765;
@@ -52,7 +52,7 @@ function flush() {
 let nextId = 1, now = 0;
 const players = new Map();
 const mobs = [];
-let bullets = [], orbs = [], gems = [];
+let bullets = [], orbs = [], gems = [], meteors = [];
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -313,6 +313,20 @@ function tick() {
     return true;
   });
 
+  meteors = meteors.filter((mt) => {
+    if (now < mt.at) return true;
+    emit({ k: 'boom', x: r2(mt.x), z: r2(mt.z), r: METEOR.radius }, mt.x, mt.z);
+    const p = players.get(mt.owner);
+    if (p) {
+      for (const m of mobs) {
+        if (m.dead) continue;
+        const dx = m.x - mt.x, dz = m.z - mt.z, d = Math.hypot(dx, dz) || 1;
+        if (d < METEOR.radius + m.r) damageMob(m, METEOR.dmg * dmgMult(p.level, p.weapon), dx / d, dz / d, 10, p);
+      }
+    }
+    return false;
+  });
+
   orbs = orbs.filter((o) => {
     const ox = o.x, oz = o.z;
     o.x += o.vx * dt; o.z += o.vz * dt;
@@ -394,10 +408,37 @@ const handlers = {
     bullets.push({ x, z, vx: ux * 34, vz: uz * 34, life: 1.1, owner: p.id, dmg: BOLT_DMG * dmgMult(p.level, p.weapon) });
     emit({ k: 'shot', o: p.id, x: r2(x), z: r2(z), dx: r2(ux), dz: r2(uz) }, p.x, p.z);
   },
-  k(p) {        // started casting: only tells nearby players to play the animation
+  a(p, msg) {   // basic attack: sword swing in a cone
+    if (p.dead || now < p.swingAt) return;
+    const dx = num(msg.dx), dz = num(msg.dz), l = Math.hypot(dx, dz);
+    if (!l) return;
+    p.swingAt = now + SWORD.cd * 0.85;
+    const ux = dx / l, uz = dz / l;
+    emit({ k: 'swing', o: p.id, dx: r2(ux), dz: r2(uz) }, p.x, p.z);
+    for (const m of mobs) {
+      if (m.dead) continue;
+      const mx = m.x - p.x, mz = m.z - p.z, d = Math.hypot(mx, mz) || 0.001;
+      // monsters right on top of the cat are hit regardless of facing
+      if (d < SWORD.range + m.r && (d < m.r + 0.8 || (mx * ux + mz * uz) / d > SWORD.minDot)) {
+        damageMob(m, SWORD.dmg * dmgMult(p.level, p.weapon), mx / d, mz / d, 7, p);
+      }
+    }
+  },
+  k(p, msg) {   // started casting: only tells nearby players to play the animation
     if (p.dead || now < p.castAt) return;
     p.castAt = now + CAST_TIME * 0.85;
-    emit({ k: 'cast', o: p.id }, p.x, p.z);
+    const s = msg.s === 2 ? 2 : 1;
+    emit({ k: 'cast', o: p.id, s, d: s === 2 ? METEOR.cast : CAST_TIME }, p.x, p.z);
+  },
+  q(p, msg) {   // skill 2: Starfall at a ground point
+    if (p.dead || now < p.meteorAt) return;
+    p.meteorAt = now + METEOR.cd * 0.9;
+    let dx = num(msg.x) - p.x, dz = num(msg.z) - p.z;
+    const d = Math.hypot(dx, dz);
+    if (d > METEOR.range) { dx *= METEOR.range / d; dz *= METEOR.range / d; }
+    const x = p.x + dx, z = p.z + dz;
+    meteors.push({ at: now + METEOR.delay, x, z, owner: p.id });
+    emit({ k: 'meteor', x: r2(x), z: r2(z), d: METEOR.delay }, x, z);
   },
   d(p) {        // dash
     if (p.dead || now < p.dashCdAt) return;
@@ -453,7 +494,7 @@ wss.on('connection', (ws) => {
         x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r, yaw: 0, speed: 0,
         level, xp: data.xp || 0, gold: data.gold || 0, weapon: data.weapon || 1, energy: 0,
         hp: maxHpFor(level), maxHp: maxHpFor(level), dead: false, deadUntil: 0,
-        fireAt: 0, castAt: 0, dashUntil: 0, dashCdAt: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
+        fireAt: 0, castAt: 0, meteorAt: 0, swingAt: 0, dashUntil: 0, dashCdAt: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
         lastMoveAt: now, events: [],
       };
       players.set(p.id, p);

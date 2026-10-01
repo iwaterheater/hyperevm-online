@@ -5,6 +5,10 @@ export const TOWN_R = 16;
 export const TICK = 1 / 15;
 export const CAST_TIME = 0.65;      // seconds a player stands still channelling before a bolt is released
 export const BOLT_DMG = 3;          // base damage of one bolt, before level and weapon multipliers
+// Basic attack: a sword swing that hits every monster in a cone in front of the cat.
+export const SWORD = { cd: 0.45, range: 2.4, minDot: 0.3, dmg: 2 };
+// Skill 2, Starfall: a ground-targeted area blast that lands shortly after the cast completes.
+export const METEOR = { cast: 0.9, cd: 6, range: 16, radius: 4.5, dmg: 10, delay: 0.45 };
 export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its swing and the hit landing
 
 export const MOB_TYPES = {
