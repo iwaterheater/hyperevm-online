@@ -201,7 +201,7 @@ function makeAvatar(hoodie) {
   cat.group.add(orb);
   scene.add(root);
   return {
-    root, cat, orb, swingT: -1, castT: -1, castDur: CAST_TIME, castSkill: 1, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
+    root, cat, orb, swingT: -1, swingKind: 0, castT: -1, castDur: CAST_TIME, castSkill: 1, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
     speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, shootPose: 0,
   };
@@ -265,7 +265,7 @@ const me = makeAvatar();
 me.z = 6;   // menu pose: on the plaza, in front of the fountain
 const stats = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, weapon: 1, energy: 0, dead: false };
 const local = {
-  vy: 0, jumps: 0, invuln: 0, fireCd: 0, meteorCd: 0, swordCd: 0, dashT: 0, dashCd: 0, sendT: 0,
+  vy: 0, jumps: 0, invuln: 0, fireCd: 0, meteorCd: 0, swordCd: 0, combo: 0, dashT: 0, dashCd: 0, sendT: 0,
   dashDir: new THREE.Vector2(0, 1), aim: new THREE.Vector2(0, 1), zone: '',
 };
 
@@ -277,12 +277,14 @@ scene.add(reticle);
 // the arc a sword swing leaves in the air
 const slashes = [];
 const slashGeo = new THREE.RingGeometry(1.2, SWORD.range + 0.3, 24, 1, -1.1, 2.2);
-function spawnSlash(x, z, dx, dz) {
-  const mesh = new THREE.Mesh(slashGeo, new THREE.MeshBasicMaterial({ color: glow(0xffffff, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+const chopGeo = new THREE.PlaneGeometry(SWORD.range, 0.4).translate(SWORD.range / 2 + 0.6, 0, 0);
+// kind 0 / 1: horizontal arc revealed in the direction of the sweep; kind 2: a straight streak ahead
+function spawnSlash(x, z, dx, dz, kind) {
+  const mesh = new THREE.Mesh(kind === 2 ? chopGeo : slashGeo, new THREE.MeshBasicMaterial({ color: glow(0xffffff, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
   mesh.rotation.set(-Math.PI / 2, 0, Math.atan2(-dz, dx));
   mesh.position.set(x, 1.0, z);
   scene.add(mesh);
-  slashes.push({ mesh, t: 0 });
+  slashes.push({ mesh, t: 0, kind, yaw: mesh.rotation.z });
 }
 
 // preview of where Starfall will land while it is being cast
@@ -430,8 +432,8 @@ function onEvent(ev) {
       break;
     case 'swing':
       if (ev.o === myId || !others.has(ev.o)) break;
-      others.get(ev.o).swingT = 0;
-      spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz);
+      Object.assign(others.get(ev.o), { swingT: 0, swingKind: ev.c });
+      spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
       break;
     case 'meteor': {
       const marker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
@@ -625,8 +627,10 @@ function updateLocal(dt) {
   if (firing && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
     local.swordCd = SWORD.cd;
     me.swingT = 0;
-    spawnSlash(me.x, me.z, local.aim.x, local.aim.y);
-    send({ t: 'a', dx: local.aim.x, dz: local.aim.y });
+    me.swingKind = local.combo;            // combo: left-to-right, right-to-left, overhead chop
+    local.combo = (local.combo + 1) % 3;
+    spawnSlash(me.x, me.z, local.aim.x, local.aim.y, me.swingKind);
+    send({ t: 'a', dx: local.aim.x, dz: local.aim.y, c: me.swingKind });
     sfx(300, 0.12, 'sawtooth', 0.04, 500);
   }
 
@@ -693,7 +697,7 @@ function updateAvatar(a, dt, isMe) {
   a.orb.visible = a.castT >= 0;
   a.orb.material = a.castSkill === 2 ? fireMat : bulletMat;
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, swing: a.swingT });
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, swing: a.swingT, swingKind: a.swingKind });
 }
 
 function updateViews(dt) {
@@ -749,6 +753,8 @@ function updateViews(dt) {
     const s = slashes[j];
     s.t += dt / 0.2;
     s.mesh.scale.setScalar(0.85 + s.t * 0.25);
+    // horizontal arcs travel across the front in the direction of the sweep
+    if (s.kind !== 2) s.mesh.rotation.z = s.yaw + (s.kind === 1 ? -1 : 1) * (s.t - 0.5) * 0.9;
     s.mesh.material.opacity = 0.8 * (1 - s.t);
     if (s.t >= 1) { scene.remove(s.mesh); s.mesh.material.dispose(); slashes.splice(j, 1); }
   }

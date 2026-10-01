@@ -30,7 +30,7 @@ PORT=3000 npm start
 | --- | --- |
 | `W` `A` `S` `D` / arrows | Move |
 | Mouse | Aim |
-| Left mouse button (hold) | **Sword** — basic attack; hits every monster in a short cone in front of the cat, can be used on the move |
+| Left mouse button (hold) | **Sword** — basic attack; hits every monster in a short cone in front of the cat, can be used on the move. Swings cycle through three animations: left-to-right, right-to-left and an overhead chop |
 | `1` (hold) | **Bolt** — a single projectile at the cursor; 0.65 s cast |
 | `2` | **Starfall** — a falling star that blasts an area at the cursor (range 16, radius 4.5); 0.9 s cast, 6 s cooldown |
 | | The cat stands still while casting a skill; dashing cancels the cast |

@@ -414,7 +414,8 @@ const handlers = {
     if (!l) return;
     p.swingAt = now + SWORD.cd * 0.85;
     const ux = dx / l, uz = dz / l;
-    emit({ k: 'swing', o: p.id, dx: r2(ux), dz: r2(uz) }, p.x, p.z);
+    const kind = [0, 1, 2].includes(msg.c) ? msg.c : 2;   // which of the three swing animations to show
+    emit({ k: 'swing', o: p.id, dx: r2(ux), dz: r2(uz), c: kind }, p.x, p.z);
     for (const m of mobs) {
       if (m.dead) continue;
       const mx = m.x - p.x, mz = m.z - p.z, d = Math.hypot(mx, mz) || 0.001;

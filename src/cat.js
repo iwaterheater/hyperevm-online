@@ -219,7 +219,7 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
 
   let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0;
 
-  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, swing: slash = -1 } = {}) {
+  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
     t += dt;
     const k = Math.min(1, dt * 12);
     move += (Math.min(1, speed / 9) - move) * k;
@@ -246,16 +246,27 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     }
 
     inner.position.y = Math.abs(Math.sin(runPhase)) * 0.09 * move * (1 - air) + Math.sin(t * 2.2) * 0.012;
-    // sword swing (0..1): raise overhead, chop down, recover
+    // sword swing (0..1). Kinds: 0 = left to right, 1 = right to left, 2 = overhead chop.
+    arms[1].rotation.y = 0;
+    inner.rotation.y = 0;
     if (slash >= 0) {
       const mix = (a, b, k) => a + (b - a) * k;
-      arms[1].rotation.x = slash < 0.3 ? mix(-1.0, -2.8, slash / 0.3)
-        : slash < 0.6 ? mix(-2.8, -0.3, (slash - 0.3) / 0.3)
-        : mix(-0.3, arms[1].rotation.x, (slash - 0.6) / 0.4);
-      arms[1].rotation.z = 0.12;
-      inner.rotation.y = Math.sin(slash * Math.PI) * -0.4;
-    } else {
-      inner.rotation.y = 0;
+      if (slashKind === 2) {
+        arms[1].rotation.x = slash < 0.3 ? mix(-1.0, -2.8, slash / 0.3)
+          : slash < 0.6 ? mix(-2.8, -0.3, (slash - 0.3) / 0.3)
+          : mix(-0.3, arms[1].rotation.x, (slash - 0.6) / 0.4);
+        arms[1].rotation.z = 0.12;
+        inner.rotation.y = Math.sin(slash * Math.PI) * -0.25;
+      } else {
+        // wind up to one side, sweep the blade across to the other, then recover
+        const dir = slashKind === 1 ? -1 : 1;
+        const sweep = slash < 0.2 ? mix(0, -1, slash / 0.2) : slash < 0.55 ? mix(-1, 1, (slash - 0.2) / 0.35) : mix(1, 0, (slash - 0.55) / 0.45);
+        const hold = slash < 0.2 ? slash / 0.2 : slash < 0.55 ? 1 : 1 - (slash - 0.55) / 0.45;
+        arms[1].rotation.x = mix(arms[1].rotation.x, -0.55, hold);
+        arms[1].rotation.z = mix(arms[1].rotation.z, 0.1, hold);
+        arms[1].rotation.y = sweep * dir * 1.1;
+        inner.rotation.y = sweep * dir * 0.9;
+      }
     }
     inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0) - cast * 0.1;
     head.rotation.z = Math.sin(t * 1.3) * 0.04;
