@@ -41,6 +41,9 @@
   #shop { position: absolute; bottom: 54px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
     border-radius: 999px; background: rgba(6, 24, 21, .75); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold);
     display: none; }
+  #cast { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); width: 150px; height: 10px; display: none;
+    border-radius: 6px; background: rgba(0, 0, 0, .55); border: 1px solid rgba(127, 232, 214, .6); overflow: hidden; }
+  #castFill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--teal-dim), #d9fff7); }
   #hint { position: absolute; bottom: 14px; left: 16px; right: 16px; text-align: center; font-size: 12px; opacity: .85;
     text-shadow: 0 1px 3px #000; }
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
@@ -102,8 +105,9 @@
   </div>
   <div id="banner"></div>
   <div id="chat"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…"></div>
+  <div id="cast"><i id="castFill"></i></div>
   <div id="shop"></div>
-  <div id="hint">WASD — move · LMB — fire · Space — jump · Shift — dash · Q / RMB — hyper wave · Enter — chat · B — upgrade weapon in town · M — mute</div>
+  <div id="hint">WASD — move · hold LMB — cast bolt · Space — jump · Shift — dash · Q / RMB — hyper wave · Enter — chat · B — upgrade weapon in town · M — mute</div>
 </div>
 <div id="flash"></div>
 
@@ -112,7 +116,7 @@
   <p>An open online world of cats: level up and hunt skeletons together with other players</p>
   <div class="keys">
     <div><kbd>WASD</kbd>move</div>
-    <div><kbd>LMB</kbd>fire</div>
+    <div><kbd>LMB</kbd>cast bolt</div>
     <div><kbd>Space</kbd>jump</div>
     <div><kbd>Shift</kbd>dash</div>
     <div><kbd>Q</kbd>hyper wave</div>

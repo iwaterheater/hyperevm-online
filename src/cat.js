@@ -208,14 +208,15 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     joint = next;
   }
 
-  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0;
+  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0;
 
-  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false } = {}) {
+  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false } = {}) {
     t += dt;
     const k = Math.min(1, dt * 12);
     move += (Math.min(1, speed / 9) - move) * k;
     air += ((airborne ? 1 : 0) - air) * k;
     shoot += ((shooting ? 1 : 0) - shoot) * Math.min(1, dt * 20);
+    cast += ((casting ? 1 : 0) - cast) * Math.min(1, dt * 14);
     runPhase += dt * (6 + speed * 1.1);
 
     const swing = Math.sin(runPhase) * 0.95 * move * (1 - air);
@@ -226,9 +227,17 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     // right arm points forward while firing
     arms[1].rotation.x = swing * 0.8 * (1 - shoot) - 1.5 * shoot;
     arms[1].rotation.z = (0.35 + air * 0.9) * (1 - shoot);
+    // casting: both paws held out in front, cupping the charging bolt
+    if (cast > 0.01) {
+      const tremble = Math.sin(t * 40) * 0.04 * cast;
+      for (const [i, s] of [[0, 1], [1, -1]]) {
+        arms[i].rotation.x += (-1.4 + tremble - arms[i].rotation.x) * cast;
+        arms[i].rotation.z += (s * 0.35 - arms[i].rotation.z) * cast;
+      }
+    }
 
     inner.position.y = Math.abs(Math.sin(runPhase)) * 0.09 * move * (1 - air) + Math.sin(t * 2.2) * 0.012;
-    inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0);
+    inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0) - cast * 0.1;
     head.rotation.z = Math.sin(t * 1.3) * 0.04;
     head.rotation.x = -move * 0.1 + Math.sin(t * 1.7) * 0.02;
 

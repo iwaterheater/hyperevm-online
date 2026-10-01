@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
+  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
 } from './src/shared.js';
 
 const PORT = process.env.PORT || 8765;
@@ -389,10 +389,15 @@ const handlers = {
     if (p.dead || now < p.fireAt) return;
     const dx = num(msg.dx), dz = num(msg.dz), l = Math.hypot(dx, dz);
     if (!l) return;
-    p.fireAt = now + 0.12;
+    p.fireAt = now + CAST_TIME * 0.85;   // a bolt cannot come faster than a cast takes
     const ux = dx / l, uz = dz / l, x = p.x + ux * 0.8, z = p.z + uz * 0.8;
-    bullets.push({ x, z, vx: ux * 34, vz: uz * 34, life: 1.1, owner: p.id, dmg: dmgMult(p.level, p.weapon) });
+    bullets.push({ x, z, vx: ux * 34, vz: uz * 34, life: 1.1, owner: p.id, dmg: BOLT_DMG * dmgMult(p.level, p.weapon) });
     emit({ k: 'shot', o: p.id, x: r2(x), z: r2(z), dx: r2(ux), dz: r2(uz) }, p.x, p.z);
+  },
+  k(p) {        // started casting: only tells nearby players to play the animation
+    if (p.dead || now < p.castAt) return;
+    p.castAt = now + CAST_TIME * 0.85;
+    emit({ k: 'cast', o: p.id }, p.x, p.z);
   },
   d(p) {        // dash
     if (p.dead || now < p.dashCdAt) return;
@@ -408,7 +413,7 @@ const handlers = {
     for (const m of mobs) {
       if (m.dead) continue;
       const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 1;
-      if (d < R + m.r) damageMob(m, 8 * dmgMult(p.level, p.weapon), dx / d, dz / d, 22, p);
+      if (d < R + m.r) damageMob(m, 12 * dmgMult(p.level, p.weapon), dx / d, dz / d, 22, p);
     }
     orbs = orbs.filter((o) => Math.hypot(o.x - p.x, o.z - p.z) > R);
   },
@@ -448,7 +453,7 @@ wss.on('connection', (ws) => {
         x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r, yaw: 0, speed: 0,
         level, xp: data.xp || 0, gold: data.gold || 0, weapon: data.weapon || 1, energy: 0,
         hp: maxHpFor(level), maxHp: maxHpFor(level), dead: false, deadUntil: 0,
-        fireAt: 0, dashUntil: 0, dashCdAt: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
+        fireAt: 0, castAt: 0, dashUntil: 0, dashCdAt: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
         lastMoveAt: now, events: [],
       };
       players.set(p.id, p);

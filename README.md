@@ -30,7 +30,7 @@ PORT=3000 npm start
 | --- | --- |
 | `W` `A` `S` `D` / arrows | Move |
 | Mouse | Aim |
-| Left mouse button | Fire |
+| Left mouse button (hold) | Cast a bolt — the cat stands still while channelling (0.65 s); dashing cancels the cast |
 | `Space` | Jump (double jump) |
 | `Shift` | Dash — brief invulnerability, damages enemies you pass through |
 | `Q` / `E` / right mouse button | Hyper wave (needs full hyper energy) |

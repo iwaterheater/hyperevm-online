@@ -6,7 +6,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createCat } from './cat.js';
 import { createSkeleton, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
-import { WORLD_R, TOWN_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
+import { CAST_TIME, WORLD_R, TOWN_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
 
 const TEAL = 0x7fe8d6;
 const ZONE_COLORS = [TEAL, 0x6fbf55, 0xb59a6a, 0xff5a70];   // town, meadows, graveyard, cursed lands
@@ -128,7 +128,8 @@ const meshPool = (geo, mat, scale) => makePool(() => {
   scene.add(mesh);
   return { mesh };
 });
-const bulletPool = meshPool(sphereGeo, new THREE.MeshBasicMaterial({ color: glow(TEAL, 3) }), 0.2);
+const bulletMat = new THREE.MeshBasicMaterial({ color: glow(TEAL, 3) });
+const bulletPool = meshPool(sphereGeo, bulletMat, 0.32);
 const orbPool = meshPool(sphereGeo, new THREE.MeshBasicMaterial({ color: glow(0xff3b6b, 3) }), 0.32);
 const gemPool = meshPool(new THREE.OctahedronGeometry(0.28), new THREE.MeshBasicMaterial({ color: glow(0xffd76a, 1.8) }), 1);
 
@@ -192,9 +193,13 @@ function makeAvatar(hoodie) {
   const root = new THREE.Group();   // never rotates, so labels and bars stay screen-aligned
   root.add(cat.group);
   root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  const orb = new THREE.Mesh(sphereGeo, bulletMat);   // the bolt charging between the paws while casting
+  orb.position.set(0, 1.0, 0.85);
+  orb.visible = false;
+  cat.group.add(orb);
   scene.add(root);
   return {
-    root, cat, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
+    root, cat, orb, castT: -1, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
     speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, shootPose: 0,
   };
@@ -400,6 +405,9 @@ function onEvent(ev) {
       spawnProjectile(bullets, bulletPool, ev.x, ev.z, ev.dx, ev.dz, 34, 1.1);
       if (others.has(ev.o)) others.get(ev.o).shootPose = 0.25;
       break;
+    case 'cast':
+      if (ev.o !== myId && others.has(ev.o)) others.get(ev.o).castT = 0;
+      break;
     case 'orb':
       spawnProjectile(orbs, orbPool, ev.x, ev.z, ev.dx, ev.dz, 10, 3.5);
       break;
@@ -515,6 +523,7 @@ function dash() {
   if (local.dashCd > 0 || stats.dead) return;
   local.dashDir.copy(moveDir.lengthSq() > 0 ? moveDir : local.aim).normalize();
   local.dashT = 0.18;
+  me.castT = -1;   // dashing interrupts a cast
   local.dashCd = 1.2;
   send({ t: 'd' });
   sfx(700, 0.15, 'sawtooth', 0.05, -500);
@@ -531,7 +540,7 @@ function updateLocal(dt) {
   local.dashCd -= dt;
   local.invuln -= dt;
   me.shootPose -= dt;
-  if (stats.dead) { me.speed = 0; return; }
+  if (stats.dead) { me.speed = 0; me.castT = -1; return; }
 
   raycaster.setFromCamera(mouse, camera);
   if (raycaster.ray.intersectPlane(groundPlane, aimPoint)) {
@@ -550,6 +559,8 @@ function updateLocal(dt) {
     me.z += local.dashDir.y * 32 * dt;
     me.speed = 9;
     burst(me.x, me.y + 0.8, me.z, TEAL, 2, 2);
+  } else if (me.castT >= 0) {
+    me.speed = 0;   // rooted while casting
   } else {
     me.x += moveDir.x * 9 * dt;
     me.z += moveDir.y * 9 * dt;
@@ -564,12 +575,20 @@ function updateLocal(dt) {
   if (me.y <= 0) { me.y = 0; local.vy = 0; local.jumps = 0; }
 
   local.fireCd -= dt;
-  if (firing && local.fireCd <= 0 && local.dashT <= 0) {
-    local.fireCd = 0.13;
-    me.shootPose = 0.25;
-    spawnProjectile(bullets, bulletPool, me.x + local.aim.x * 0.8, me.z + local.aim.y * 0.8, local.aim.x, local.aim.y, 34, 1.1);
-    send({ t: 'f', dx: local.aim.x, dz: local.aim.y });
-    sfx(880, 0.06, 'square', 0.025, -300);
+  if (me.castT < 0 && firing && local.fireCd <= 0 && local.dashT <= 0) {
+    me.castT = 0;   // start channelling; the bolt is released when the cast completes
+    send({ t: 'k' });
+    sfx(220, CAST_TIME, 'sine', 0.04, 500);
+  } else if (me.castT >= 0) {
+    me.castT += dt;
+    if (me.castT >= CAST_TIME) {
+      me.castT = -1;
+      local.fireCd = 0.08;
+      me.shootPose = 0.25;
+      spawnProjectile(bullets, bulletPool, me.x + local.aim.x * 0.8, me.z + local.aim.y * 0.8, local.aim.x, local.aim.y, 34, 1.1);
+      send({ t: 'f', dx: local.aim.x, dz: local.aim.y });
+      sfx(660, 0.12, 'square', 0.04, -400);
+    }
   }
 
   me.yaw = lerpAngle(me.yaw, Math.atan2(local.aim.x, local.aim.y), Math.min(1, dt * 16));
@@ -591,12 +610,16 @@ function updateAvatar(a, dt, isMe) {
     a.x += (a.tx - a.x) * k; a.y += (a.ty - a.y) * k; a.z += (a.tz - a.z) * k;
     a.yaw = lerpAngle(a.yaw, a.tyaw, k);
     a.shootPose -= dt;
+    if (a.castT >= 0 && (a.castT += dt) >= CAST_TIME) a.castT = -1;
     a.bar.set(a.hp / a.maxHp, !a.dead && a.hp < a.maxHp);
   }
   a.root.position.set(a.x, 0, a.z);
   a.cat.group.position.y = a.y;
   a.cat.group.rotation.y = a.yaw;
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0 });
+  const charge = a.castT >= 0 ? a.castT / CAST_TIME : 0;
+  a.orb.visible = a.castT >= 0;
+  a.orb.scale.setScalar(0.06 + charge * 0.26);
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0 });
 }
 
 function updateViews(dt) {
@@ -668,6 +691,8 @@ function updateHud() {
   $('enFill').classList.toggle('full', stats.energy >= 100);
   $('enHint').textContent = stats.energy >= 100 ? 'press Q!' : '';
   $('dashFill').style.width = `${Math.max(0, Math.min(1, 1 - local.dashCd / 1.2)) * 100}%`;
+  $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
+  $('castFill').style.width = `${Math.max(0, me.castT) / CAST_TIME * 100}%`;
   $('gold').textContent = stats.gold;
   $('weapon').textContent = `Lv ${stats.weapon}`;
   $('online').textContent = online;
