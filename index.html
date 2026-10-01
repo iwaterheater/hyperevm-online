@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyperCat Arena</title>
+<style>
+  :root { --teal: #7fe8d6; --teal-dim: #2b8f80; --bg: #06110f; --danger: #ff4d7a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: #e8fffa;
+    font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif; user-select: none; }
+  canvas { display: block; cursor: crosshair; }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s; }
+  #hud.on { opacity: 1; }
+  .panel { position: absolute; top: 16px; padding: 10px 14px; background: rgba(6, 24, 21, .6);
+    border: 1px solid rgba(127, 232, 214, .25); border-radius: 12px; backdrop-filter: blur(6px); }
+  #stats { left: 16px; width: 240px; }
+  #scoreBox { right: 16px; text-align: right; }
+  #waveBox { left: 50%; transform: translateX(-50%); text-align: center; }
+  .label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--teal); opacity: .8; }
+  .big { font-size: 26px; font-weight: 800; line-height: 1.1; }
+  .bar { height: 10px; margin: 4px 0 8px; border-radius: 6px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  .bar:last-child { margin-bottom: 0; }
+  .bar > i { display: block; height: 100%; width: 100%; border-radius: 6px; transition: width .12s; }
+  #hpFill { background: linear-gradient(90deg, #ff6b8e, #ffb3c4); }
+  #enFill { background: linear-gradient(90deg, var(--teal-dim), var(--teal)); }
+  #enFill.full { animation: pulse .6s infinite alternate; }
+  #dashFill { background: #cfd8dc; }
+  @keyframes pulse { to { filter: brightness(1.6); } }
+
+  #banner { position: absolute; top: 28%; left: 0; right: 0; text-align: center; font-size: 54px; font-weight: 900;
+    letter-spacing: .06em; color: var(--teal); text-shadow: 0 0 24px rgba(127, 232, 214, .7); opacity: 0;
+    transition: opacity .4s; }
+  #banner.on { opacity: 1; }
+  #hint { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; font-size: 12px; opacity: .55; }
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(transparent 40%, rgba(255, 60, 110, .55)); transition: opacity .25s; }
+
+  .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: flex-end; padding-bottom: 7vh; text-align: center;
+    background: linear-gradient(transparent 35%, rgba(4, 14, 12, .88) 75%); }
+  .overlay.center { justify-content: center; padding: 0; background: rgba(4, 14, 12, .78); }
+  .overlay.hidden { display: none; }
+  h1 { margin: 0 0 6px; font-size: clamp(36px, 7vw, 72px); font-weight: 900; letter-spacing: .04em;
+    color: var(--teal); text-shadow: 0 0 30px rgba(127, 232, 214, .6); }
+  h1 span { color: #fff; }
+  p { margin: 4px 0; opacity: .85; }
+  .keys { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; margin: 14px 0 20px; font-size: 14px; }
+  kbd { display: inline-block; padding: 2px 8px; margin-right: 4px; border-radius: 6px; font: inherit; font-weight: 700;
+    background: rgba(127, 232, 214, .15); border: 1px solid rgba(127, 232, 214, .4); color: var(--teal); }
+  button { pointer-events: auto; padding: 14px 44px; font: inherit; font-size: 20px; font-weight: 800; cursor: pointer;
+    color: #04211c; background: var(--teal); border: 0; border-radius: 999px;
+    box-shadow: 0 0 30px rgba(127, 232, 214, .5); transition: transform .12s; }
+  button:hover { transform: scale(1.06); }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hud">
+  <div class="panel" id="stats">
+    <div class="label">Здоровье</div>
+    <div class="bar"><i id="hpFill"></i></div>
+    <div class="label">Гипер-энергия <span id="enHint"></span></div>
+    <div class="bar"><i id="enFill"></i></div>
+    <div class="label">Рывок</div>
+    <div class="bar"><i id="dashFill"></i></div>
+  </div>
+  <div class="panel" id="waveBox"><div class="label">Волна</div><div class="big" id="wave">1</div></div>
+  <div class="panel" id="scoreBox"><div class="label">Очки</div><div class="big" id="score">0</div></div>
+  <div id="banner"></div>
+  <div id="hint">WASD — бег · мышь — прицел · ЛКМ — огонь · Пробел — прыжок · Shift — рывок · Q / ПКМ — гипер-волна · Esc — пауза · M — звук</div>
+</div>
+<div id="flash"></div>
+
+<div class="overlay" id="menu">
+  <h1>HYPER<span>CAT</span> ARENA</h1>
+  <p>Отбивайся от глитчей и продержись как можно больше волн</p>
+  <div class="keys">
+    <div><kbd>WASD</kbd>бег</div>
+    <div><kbd>ЛКМ</kbd>огонь</div>
+    <div><kbd>Пробел</kbd>прыжок ×2</div>
+    <div><kbd>Shift</kbd>рывок</div>
+    <div><kbd>Q</kbd>гипер-волна</div>
+  </div>
+  <button id="playBtn">Играть</button>
+</div>
+
+<div class="overlay center hidden" id="over">
+  <h1>ИГРА <span>ОКОНЧЕНА</span></h1>
+  <p id="overStats"></p>
+  <p id="overBest"></p>
+  <br>
+  <button id="againBtn">Ещё раз</button>
+</div>
+
+<div class="overlay center hidden" id="pause">
+  <h1>ПАУЗА</h1>
+  <p>Нажми Esc, чтобы продолжить</p>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
