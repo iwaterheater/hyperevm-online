@@ -144,7 +144,7 @@ function damageMob(m, dmg, dx, dz, knock, p) {
     const q = players.get(id);
     if (q && !q.dead) { addXp(q, m.xp); q.energy = Math.min(100, q.energy + 4); }
   }
-  if (m.type === 'boss') broadcast({ t: 'c', sys: 1, m: `The Glitch King has fallen! Final blow: ${p.name}` });
+  if (m.type === 'boss') broadcast({ t: 'c', sys: 1, m: `The Skeleton King has fallen! Final blow: ${p.name}` });
   m.dmgBy.clear();
   m.target = 0;
 }

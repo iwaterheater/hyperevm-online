@@ -35,13 +35,14 @@
   #minimap { display: block; width: 144px; height: 144px; margin-top: 8px; border-radius: 50%; }
 
   #banner { position: absolute; top: 20%; left: 0; right: 0; text-align: center; font-size: 40px; font-weight: 900;
-    letter-spacing: .04em; color: var(--teal); text-shadow: 0 0 24px rgba(127, 232, 214, .7); opacity: 0;
+    letter-spacing: .04em; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .8), 0 0 24px rgba(127, 232, 214, .9); opacity: 0;
     transition: opacity .4s; }
   #banner.on { opacity: 1; }
   #shop { position: absolute; bottom: 54px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
     border-radius: 999px; background: rgba(6, 24, 21, .75); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold);
     display: none; }
-  #hint { position: absolute; bottom: 14px; left: 16px; right: 16px; text-align: center; font-size: 12px; opacity: .55; }
+  #hint { position: absolute; bottom: 14px; left: 16px; right: 16px; text-align: center; font-size: 12px; opacity: .85;
+    text-shadow: 0 1px 3px #000; }
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
     background: radial-gradient(transparent 40%, rgba(255, 60, 110, .55)); transition: opacity .25s; }
 
@@ -108,7 +109,7 @@
 
 <div class="overlay" id="menu">
   <h1>HYPER<span>CAT</span> ONLINE</h1>
-  <p>An open online world of cats: level up and hunt glitches together with other players</p>
+  <p>An open online world of cats: level up and hunt skeletons together with other players</p>
   <div class="keys">
     <div><kbd>WASD</kbd>move</div>
     <div><kbd>LMB</kbd>fire</div>

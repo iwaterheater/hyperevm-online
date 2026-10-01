@@ -4,10 +4,12 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createCat } from './cat.js';
+import { createSkeleton, SKELETON_HEIGHT, BONE } from './skeleton.js';
+import { createWorld } from './world.js';
 import { WORLD_R, TOWN_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
 
 const TEAL = 0x7fe8d6;
-const ZONE_COLORS = [TEAL, TEAL, 0x9a73ff, 0xff5a70];   // town, fields, wastes, core
+const ZONE_COLORS = [TEAL, 0x6fbf55, 0xb59a6a, 0xff5a70];   // town, meadows, graveyard, cursed lands
 const OTHER_HOODIES = [0x3b4a7a, 0x7a3b5a, 0x7a5a2b, 0x4a3b7a, 0x2b6a7a, 0x7a2b2b, 0x4d4d57];
 const glow = (hex, k = 2.5) => new THREE.Color(hex).multiplyScalar(k);
 const css = (hex) => `#${hex.toString(16).padStart(6, '0')}`;
@@ -19,17 +21,18 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.id = 'view';
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x040d0b);
 const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 700);
 camera.position.set(0, 1.2, 6.4);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.5, 1.0));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.4, 1.0));
 composer.addPass(new OutputPass());
 
 addEventListener('resize', () => {
@@ -39,108 +42,7 @@ addEventListener('resize', () => {
   composer.setSize(innerWidth, innerHeight);
 });
 
-scene.add(new THREE.HemisphereLight(0xd8fff6, 0x0a2a25, 0.95));
-const sun = new THREE.DirectionalLight(0xffffff, 1.7);
-sun.position.set(6, 14, 8);
-scene.add(sun);
-
-// ---------------------------------------------------------------- world
-
-const floorMat = new THREE.ShaderMaterial({
-  uniforms: {
-    uTime: { value: 0 }, uR: { value: WORLD_R }, uTown: { value: TOWN_R },
-    uZ1: { value: ZONES[1].r }, uZ2: { value: ZONES[2].r },
-  },
-  vertexShader: /* glsl */`
-    varying vec2 vP;
-    void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-  fragmentShader: /* glsl */`
-    uniform float uTime; uniform float uR; uniform float uTown; uniform float uZ1; uniform float uZ2;
-    varying vec2 vP;
-    void main() {
-      float d = length(vP);
-      float warp = sin(vP.x * 0.35 + uTime * 0.3) * 1.5 + cos(vP.y * 0.3 - uTime * 0.2) * 1.5;
-      float line = smoothstep(0.9, 1.0, sin(d * 1.5 - uTime * 1.1 + warp));
-      // zone tint: teal fields -> violet wastes -> red core
-      vec3 tint = mix(vec3(0.25, 0.9, 0.75), vec3(0.6, 0.45, 1.0), smoothstep(uZ1 - 8.0, uZ1 + 8.0, d));
-      tint = mix(tint, vec3(1.0, 0.35, 0.45), smoothstep(uZ2 - 8.0, uZ2 + 8.0, d));
-      vec3 col = tint * mix(0.05, 0.15, 0.5 + 0.5 * sin(d * 0.22 + warp * 0.3));
-      col += tint * line * 0.3;
-      col += vec3(0.3, 1.0, 0.85) * (1.0 - smoothstep(0.0, 0.3, abs(d - uTown))) * 0.7;
-      col += vec3(0.02, 0.06, 0.05) * (1.0 - step(uTown, d));
-      col += tint * smoothstep(uR - 4.0, uR, d) * 0.3;
-      gl_FragColor = vec4(col, 1.0);
-    }`,
-});
-const floor = new THREE.Mesh(new THREE.CircleGeometry(WORLD_R, 160), floorMat);
-floor.rotation.x = -Math.PI / 2;
-scene.add(floor);
-
-const rim = new THREE.Mesh(new THREE.TorusGeometry(WORLD_R, 0.14, 8, 300), new THREE.MeshBasicMaterial({ color: glow(0xff5a70, 1.5) }));
-rim.rotation.x = Math.PI / 2;
-scene.add(rim);
-
-// town fountain
-const fountain = new THREE.Mesh(
-  new THREE.OctahedronGeometry(1.2),
-  new THREE.MeshStandardMaterial({ color: 0x0b2a25, emissive: TEAL, emissiveIntensity: 1.4, flatShading: true }),
-);
-fountain.position.y = 3.2;
-fountain.scale.y = 1.8;
-scene.add(fountain);
-const fountainRing = new THREE.Mesh(new THREE.TorusGeometry(2.2, 0.06, 8, 48), new THREE.MeshBasicMaterial({ color: glow(TEAL, 1.6) }));
-fountainRing.position.y = 3.2;
-scene.add(fountainRing);
-
-// decorative crystals, tinted per zone (deterministic so every client sees the same world)
-{
-  let seed = 1337;
-  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-  const geo = new THREE.OctahedronGeometry(1);
-  const dummy = new THREE.Object3D();
-  for (let zi = 1; zi < ZONES.length; zi++) {
-    const rMin = ZONES[zi - 1].r + 1, rMax = ZONES[zi].r + (zi === ZONES.length - 1 ? 8 : 0);
-    const count = Math.round((rMax * rMax - rMin * rMin) / 110);
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({
-      color: 0x0a1614, emissive: ZONE_COLORS[zi], emissiveIntensity: 0.75, flatShading: true,
-    }), count);
-    for (let i = 0; i < count; i++) {
-      const a = rnd() * Math.PI * 2, r = Math.sqrt(rMin * rMin + rnd() * (rMax * rMax - rMin * rMin));
-      const s = 0.3 + rnd() * (0.5 + zi * 0.25);   // crystals grow taller towards the core
-      dummy.position.set(Math.cos(a) * r, s * 1.2, Math.sin(a) * r);
-      dummy.scale.set(s, s * (2 + rnd() * 2), s);
-      dummy.rotation.set(rnd() * 0.3, rnd() * 3, rnd() * 0.3);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-    }
-    mesh.frustumCulled = false;
-    scene.add(mesh);
-  }
-  // boss lair marker
-  const lair = new THREE.Mesh(new THREE.TorusGeometry(9, 0.12, 8, 64), new THREE.MeshBasicMaterial({ color: glow(0xff2244, 1.6) }));
-  lair.rotation.x = Math.PI / 2;
-  lair.position.set(BOSS.x, 0.1, BOSS.z);
-  scene.add(lair);
-
-  const n = 5000, pos = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) {
-    const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * (WORLD_R + 20);
-    pos.set([Math.cos(a) * r, rnd() * 22, Math.sin(a) * r], i * 3);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: glow(TEAL, 1.5), size: 0.09, transparent: true, opacity: 0.7 })));
-}
-
-const shadowGeo = new THREE.CircleGeometry(1, 24);
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false });
-function makeShadow(r) {
-  const s = new THREE.Mesh(shadowGeo, shadowMat);
-  s.rotation.x = -Math.PI / 2;
-  s.position.y = 0.03;
-  s.scale.setScalar(r);
-  return s;
-}
+const world = createWorld(scene);
 
 // ---------------------------------------------------------------- labels & bars
 
@@ -288,11 +190,11 @@ function spawnRing(x, z, maxR, hex) {
 function makeAvatar(hoodie) {
   const cat = createCat({ hoodie });
   const root = new THREE.Group();   // never rotates, so labels and bars stay screen-aligned
-  const shadow = makeShadow(0.6);
-  root.add(cat.group, shadow);
+  root.add(cat.group);
+  root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   scene.add(root);
   return {
-    root, cat, shadow, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
+    root, cat, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
     speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, shootPose: 0,
   };
@@ -319,43 +221,28 @@ function lerpAngle(a, b, k) {
 
 // ---------------------------------------------------------------- mobs
 
-const MOB_GEO = {
-  chaser: new THREE.IcosahedronGeometry(1, 0),
-  runner: new THREE.OctahedronGeometry(1, 0),
-  shooter: new THREE.TetrahedronGeometry(1.2, 0),
-  tank: new THREE.DodecahedronGeometry(1, 0),
-  boss: new THREE.IcosahedronGeometry(1, 1),
-};
-const eyeMat = new THREE.MeshBasicMaterial({ color: glow(0xffffff, 2) });
 const lvlLabels = new Map();
 
 function makeMobView(ti, lvl) {
   const type = MOB_KEYS[ti], def = MOB_TYPES[type];
-  const root = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x1a0a18, emissive: def.color, emissiveIntensity: 0.7, flatShading: true, roughness: 0.5 });
-  const body = new THREE.Mesh(MOB_GEO[type], mat);
-  body.scale.setScalar(def.r);
-  for (const s of [-1, 1]) {
-    const eye = new THREE.Mesh(sphereGeo, eyeMat);
-    eye.scale.set(0.16, 0.22, 0.1);
-    eye.position.set(s * 0.33, 0.18, 0.78);
-    body.add(eye);
-  }
-  root.add(body, makeShadow(def.r * 0.9));
+  const root = new THREE.Group();   // never rotates, so the label and bar stay screen-aligned
+  const skeleton = createSkeleton(type, def);
+  root.add(skeleton.group);
+  const top = SKELETON_HEIGHT * skeleton.group.scale.y + (type === 'shooter' ? 0.5 : 0);
 
-  const text = type === 'boss' ? `Glitch King · Lv ${lvl}` : `Lv ${lvl}`;
-  if (!lvlLabels.has(text)) lvlLabels.set(text, textSprite(text, type === 'boss' ? '#ff8095' : '#c9b8c4', type === 'boss' ? 0.7 : 0.4));
+  const text = type === 'boss' ? `Skeleton King · Lv ${lvl}` : `Lv ${lvl}`;
+  if (!lvlLabels.has(text)) lvlLabels.set(text, textSprite(text, type === 'boss' ? '#ff8095' : '#f0e6d8', type === 'boss' ? 0.8 : 0.4));
   const proto = lvlLabels.get(text);
   const label = new THREE.Sprite(proto.material);   // material shared between mobs of the same level
   label.scale.copy(proto.scale);
-  label.position.y = def.r * 2 + 1.25;
+  label.position.y = top + 0.75;
   root.add(label);
 
   root.scale.setScalar(0.01);
   scene.add(root);
   return {
-    root, body, mat, def, bar: makeBar(root, def.r * 2 + 0.8, Math.max(1.2, def.r * 1.6), 0xff5577),
-    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flash: 0, age: 0, phase: Math.random() * 6, yaw: 0,
+    root, skeleton, mat: skeleton.mat, def, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
+    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flash: 0, age: 0, yaw: 0,
   };
 }
 
@@ -368,6 +255,7 @@ const others = new Map(), mobViews = new Map(), gemViews = new Map();
 let bullets = [], orbs = [];
 
 const me = makeAvatar();
+me.z = 6;   // menu pose: on the plaza, in front of the fountain
 const stats = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, weapon: 1, energy: 0, dead: false };
 const local = {
   vy: 0, jumps: 0, invuln: 0, fireCd: 0, dashT: 0, dashCd: 0, sendT: 0,
@@ -517,13 +405,13 @@ function onEvent(ev) {
       break;
     case 'hit': {
       const v = mobViews.get(ev.id);
-      if (v) { v.flash = 1; burst(ev.x, v.def.r, ev.z, v.def.color, 4, 5); }
+      if (v) { v.flash = 1; burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
       sfx(520, 0.05, 'square', 0.025);
       break;
     }
     case 'kill': {
-      const def = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]] : { color: 0xffffff, r: 1 };
-      burst(ev.x, def.r, ev.z, def.color, 14 + def.r * 10, 8);
+      const r = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].r : 0.7;
+      burst(ev.x, r * 1.5, ev.z, ev.ti >= 0 ? BONE : 0xffffff, 16 + r * 14, 8);
       sfx(180, 0.18, 'sawtooth', 0.05, -120);
       break;
     }
@@ -666,6 +554,7 @@ function updateLocal(dt) {
   }
   const d = Math.hypot(me.x, me.z), max = WORLD_R - 1;
   if (d > max) { me.x *= max / d; me.z *= max / d; }
+  world.collide(me);
 
   local.vy -= 30 * dt;
   me.y += local.vy * dt;
@@ -704,7 +593,6 @@ function updateAvatar(a, dt, isMe) {
   a.root.position.set(a.x, 0, a.z);
   a.cat.group.position.y = a.y;
   a.cat.group.rotation.y = a.yaw;
-  a.shadow.scale.setScalar(0.6 / (1 + a.y * 0.3));
   a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0 });
 }
 
@@ -722,11 +610,10 @@ function updateViews(dt) {
     v.age += dt;
     v.root.position.set(v.x, 0, v.z);
     v.root.scale.setScalar(Math.min(1, v.age / 0.4));
-    v.body.rotation.y = v.yaw;
-    v.body.position.y = v.def.r + 0.15 + Math.sin(time * 4 + v.phase) * 0.12;
-    v.body.rotation.z = Math.sin(time * 3 + v.phase) * 0.15;
+    v.skeleton.group.rotation.y = v.yaw;
+    v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
     v.flash = Math.max(0, v.flash - dt * 6);
-    v.mat.emissiveIntensity = 0.7 + v.flash * 4;
+    v.skeleton.flash(v.flash);
     v.bar.set(v.hp / v.maxHp, v.hp < v.maxHp);
   }
 
@@ -858,12 +745,7 @@ let mapT = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   time += dt;
-  floorMat.uniforms.uTime.value = time;
-  fountain.rotation.y = time * 0.6;
-  fountain.position.y = 3.2 + Math.sin(time * 1.5) * 0.25;
-  fountainRing.rotation.set(time * 0.7, time * 0.4, 0);
-  // in the menu the cat poses in front of the fountain's glow, not inside it
-  fountain.visible = fountainRing.visible = state === 'playing';
+  world.update(time, me.x, me.z);
 
   if (state === 'playing') {
     updateLocal(dt);

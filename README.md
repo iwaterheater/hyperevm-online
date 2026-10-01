@@ -1,7 +1,7 @@
 # HyperCat Online
 
 A small open-world browser MMORPG starring a chibi cat in a green hoodie.
-Players share one seamless world, hunt glitches together, level up, collect gold and upgrade their weapon.
+Players share one seamless world, hunt skeletons together, level up, collect gold and upgrade their weapon.
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP and loot
@@ -45,21 +45,21 @@ One continuous map with no loading screens. Zones get harder the further you go 
 | Zone | Distance from centre | Monster levels |
 | --- | --- | --- |
 | Hypercat Town | 0 – 16 | Safe zone: fast healing, weapon shop |
-| Glitch Fields | 16 – 95 | 1 – 4 |
-| Bug Wastes | 95 – 175 | 5 – 9 |
-| Chaos Core | 175 – 260 | 10 – 15 |
+| Green Meadows | 16 – 95 | 1 – 4 |
+| Graveyard Wastes | 95 – 175 | 5 – 9 |
+| Cursed Lands | 175 – 260 | 10 – 15 |
 
-The **Glitch King** (level 18 boss) lives in the far north of the Chaos Core. The radar in the top-right corner always points to the town and to the boss lair.
+The **Skeleton King** (level 18 boss) waits inside a ring of pillars in the far north of the Cursed Lands. The radar in the top-right corner always points to the town and to the boss lair.
 
 ### Monsters
 
 | Type | Behaviour |
 | --- | --- |
-| Chaser | Runs at you |
-| Runner | Small, fast, fragile |
-| Shooter | Keeps its distance and fires orbs |
-| Tank | Slow, tough, hits hard, drops extra gold |
-| Glitch King | Boss; fires rings of orbs, respawns after 90 seconds |
+| Skeleton Swordsman | Runs at you |
+| Bone Runner | Small, hunched, fast, fragile |
+| Skeleton Mage | Keeps its distance and fires orbs |
+| Skeleton Brute | Slow, tough, hits hard, drops extra gold |
+| Skeleton King | Boss; fires rings of orbs, respawns after 90 seconds |
 
 ### Progression
 
@@ -76,6 +76,9 @@ index.html        Page, HUD and styles
 server.js         HTTP static server + WebSocket game server
 src/main.js       Client: rendering, input, networking, HUD
 src/cat.js        Procedural 3D cat model and its animations
+src/skeleton.js   Procedural skeleton monsters (five variants)
+src/world.js      Terrain, town, scenery, lighting and obstacle collision
+src/geo.js        Helpers for building vertex-coloured low-poly geometry
 src/shared.js     Constants and formulas used by both client and server
 data/             Saved player progress (created at runtime, git-ignored)
 ```
@@ -85,6 +88,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 - The server simulates the world at 15 ticks per second and sends each player a snapshot of everything nearby.
 - Monsters, projectile hits, damage, XP, gold and upgrades are decided by the server.
 - Player movement is simulated on the client for responsiveness; the server sanity-checks the speed and snaps cheaters back.
+- Trees, rocks and buildings block the local player only: the server does not know about scenery, so monsters and projectiles pass through it.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
 - Progress (level, XP, gold, weapon) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 
@@ -96,4 +100,5 @@ The server is a single Node.js process, so any host that can run Node and accept
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
 - No accounts, no PvP, no inventory beyond gold and a weapon level.
+- All models (cat, skeletons, scenery) are built from code; there are no imported 3D assets or textures.
 - The cat model is built from code to match the reference artwork, not sculpted or scanned.

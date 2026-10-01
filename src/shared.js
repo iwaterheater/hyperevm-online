@@ -21,9 +21,9 @@ export const upgradeCost = (weapon) => 40 * weapon;
 // One seamless world: concentric zones around the town, harder the further out you go.
 export const ZONES = [
   { r: TOWN_R, name: 'Hypercat Town' },
-  { r: 95, name: 'Glitch Fields · Lv 1–4', lvl: [1, 4], mobs: 110, types: ['chaser', 'chaser', 'chaser', 'runner', 'runner'] },
-  { r: 175, name: 'Bug Wastes · Lv 5–9', lvl: [5, 9], mobs: 130, types: ['chaser', 'runner', 'shooter', 'shooter'] },
-  { r: WORLD_R, name: 'Chaos Core · Lv 10–15', lvl: [10, 15], mobs: 150, types: ['chaser', 'runner', 'shooter', 'tank', 'tank'] },
+  { r: 95, name: 'Green Meadows · Lv 1–4', lvl: [1, 4], mobs: 110, types: ['chaser', 'chaser', 'chaser', 'runner', 'runner'] },
+  { r: 175, name: 'Graveyard Wastes · Lv 5–9', lvl: [5, 9], mobs: 130, types: ['chaser', 'runner', 'shooter', 'shooter'] },
+  { r: WORLD_R, name: 'Cursed Lands · Lv 10–15', lvl: [10, 15], mobs: 150, types: ['chaser', 'runner', 'shooter', 'tank', 'tank'] },
 ];
 export const zoneAt = (dist) => ZONES.find((z) => dist <= z.r) || ZONES[ZONES.length - 1];
 
