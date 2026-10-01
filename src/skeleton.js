@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { part, merge, box, cyl, cone, ball } from './geo.js';
+import { ATTACK_WINDUP } from './shared.js';
 
 // Procedural skeleton monsters. Every variant shares the same bones and differs in gear:
 // chaser = swordsman, runner = hunched bone runner, shooter = mage, tank = brute, boss = Skeleton King.
@@ -106,7 +107,8 @@ export function createSkeleton(type, def) {
   const hunched = type === 'runner';
   const armed = type !== 'runner';
   const seed = Math.random() * 10;
-  let phase = seed, move = 0;
+  let phase = seed, move = 0, attackT = -1;
+  const ATTACK_TIME = ATTACK_WINDUP + 0.35, lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
 
   function update(dt, time, moving) {
     move += ((moving ? 1 : 0) - move) * Math.min(1, dt * 8);
@@ -121,7 +123,28 @@ export function createSkeleton(type, def) {
     torso.rotation.z = Math.sin(time * 1.5 + seed) * 0.04;
     head.rotation.x = hunched ? -0.4 : 0;
     head.rotation.y = Math.sin(time * 1.1 + seed) * 0.3 * (1 - move);
+
+    // attack: raise the weapon during the wind-up, chop down when the hit lands, then recover
+    if (attackT >= 0) {
+      attackT += dt;
+      const base = armR.rotation.x, RAISED = -2.9, STRUCK = -0.25;
+      let arm, lunge;
+      if (attackT < ATTACK_WINDUP) {
+        const t = attackT / ATTACK_WINDUP;
+        arm = lerp(base, RAISED, t * 1.6);
+        lunge = -0.2 * t;
+      } else {
+        const t = (attackT - ATTACK_WINDUP) / (ATTACK_TIME - ATTACK_WINDUP);
+        arm = t < 0.3 ? lerp(RAISED, STRUCK, t / 0.3) : lerp(STRUCK, base, (t - 0.3) / 0.7);
+        lunge = t < 0.3 ? lerp(-0.2, 0.5, t / 0.3) : lerp(0.5, 0, (t - 0.3) / 0.7);
+      }
+      armR.rotation.x = arm;
+      if (hunched) armL.rotation.x = arm;   // the unarmed runner claws with both hands
+      torso.rotation.x += lunge;
+      head.rotation.y = 0;
+      if (attackT >= ATTACK_TIME) attackT = -1;
+    }
   }
 
-  return { group, mat, update, flash: (v) => mat.emissive.setScalar(v * 0.8) };
+  return { group, mat, update, attack: () => { attackT = 0; }, flash: (v) => mat.emissive.setScalar(v * 0.8) };
 }

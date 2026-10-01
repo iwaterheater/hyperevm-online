@@ -89,6 +89,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Monsters, projectile hits, damage, XP, gold and upgrades are decided by the server.
 - Player movement is simulated on the client for responsiveness; the server sanity-checks the speed and snaps cheaters back.
 - Trees, rocks and buildings block the local player only: the server does not know about scenery, so monsters and projectiles pass through it.
+- Melee monsters telegraph their attacks: they stop, raise the weapon and the hit lands 0.4 seconds later, so it can be dodged.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
 - Progress (level, XP, gold, weapon) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 

@@ -409,6 +409,9 @@ function onEvent(ev) {
       sfx(520, 0.05, 'square', 0.025);
       break;
     }
+    case 'atk':
+      mobViews.get(ev.id)?.skeleton.attack();
+      break;
     case 'kill': {
       const r = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].r : 0.7;
       burst(ev.x, r * 1.5, ev.z, ev.ti >= 0 ? BONE : 0xffffff, 16 + r * 14, 8);

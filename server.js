@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WORLD_R, TOWN_R, TICK, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
+  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
 } from './src/shared.js';
 
 const PORT = process.env.PORT || 8765;
@@ -65,7 +65,7 @@ function makeMob(type, lvl, sx, sz) {
     id: nextId++, type, ti: MOB_KEYS.indexOf(type), lvl, def, r: def.r, sx, sz, x: sx, z: sz,
     hp: maxHp, maxHp, dmg: Math.round(def.dmg * (1 + 0.15 * (lvl - 1))), xp: def.xp * lvl,
     kx: 0, kz: 0, target: 0, fireT: rand(1, 3), hitAt: 0, wx: sx, wz: sz, wanderAt: 0,
-    dead: false, respawnAt: 0, dmgBy: new Set(), dashHit: '', strafe: Math.random() < 0.5 ? 1 : -1,
+    dead: false, respawnAt: 0, dmgBy: new Set(), dashHit: '', swing: null, strafe: Math.random() < 0.5 ? 1 : -1,
   });
 }
 
@@ -178,7 +178,7 @@ function respawnPlayer(p) {
 
 function updateMob(m, dt) {
   if (m.dead) {
-    if (now >= m.respawnAt) Object.assign(m, { dead: false, x: m.sx, z: m.sz, hp: m.maxHp, kx: 0, kz: 0 });
+    if (now >= m.respawnAt) Object.assign(m, { dead: false, x: m.sx, z: m.sz, hp: m.maxHp, kx: 0, kz: 0, swing: null });
     return;
   }
 
@@ -209,6 +209,7 @@ function updateMob(m, dt) {
       m.fireT -= dt;
       if (m.fireT <= 0 && dist < 22) {
         m.fireT = m.type === 'boss' ? 1.4 : 2.2;
+        emit({ k: 'atk', id: m.id }, m.x, m.z);
         const shots = m.type === 'boss' ? 8 : 1;
         for (let i = 0; i < shots; i++) {
           const a = Math.atan2(dz, dx) + i * Math.PI * 2 / shots;
@@ -230,6 +231,16 @@ function updateMob(m, dt) {
     if (dist > 0.5) { mx = dx / dist; mz = dz / dist; speed *= leash > 12 ? 1.5 : 0.4; }
   }
 
+  // a melee swing: the monster plants its feet, and the hit lands after the wind-up if the target is still close
+  if (m.swing) {
+    speed = 0;
+    if (now >= m.swing.at) {
+      const p = players.get(m.swing.pid);
+      if (p && Math.hypot(p.x - m.x, p.z - m.z) < m.r + 1.1 && p.y < m.r * 2 + 0.2) hurtPlayer(p, m.dmg);
+      m.swing = null;
+    }
+  }
+
   m.x += (mx * speed + m.kx) * dt;
   m.z += (mz * speed + m.kz) * dt;
   const damp = Math.exp(-6 * dt);
@@ -241,7 +252,7 @@ function updateMob(m, dt) {
   for (const p of players.values()) {
     if (p.dead) continue;
     const dx = p.x - m.x, dz = p.z - m.z, dist = Math.hypot(dx, dz) || 0.001;
-    if (dist > m.r + 0.55 || p.y > m.r * 2 + 0.2) continue;
+    if (dist > m.r + 0.7 || p.y > m.r * 2 + 0.2) continue;
     if (now < p.dashUntil) {
       const key = `${p.id}:${p.dashSeq}`;
       if (m.dashHit !== key) {
@@ -249,10 +260,10 @@ function updateMob(m, dt) {
         damageMob(m, 3 * dmgMult(p.level, p.weapon), -dx / dist, -dz / dist, 14, p);
         if (m.dead) return;
       }
-    } else if (now >= m.hitAt) {
-      m.hitAt = now + 0.8;
-      hurtPlayer(p, m.dmg);
-      m.kx -= dx / dist * 8; m.kz -= dz / dist * 8;
+    } else if (now >= m.hitAt && !m.swing) {
+      m.hitAt = now + 1.2;
+      m.swing = { at: now + ATTACK_WINDUP, pid: p.id };
+      emit({ k: 'atk', id: m.id }, m.x, m.z);
     }
   }
 }

@@ -3,13 +3,14 @@
 export const WORLD_R = 260;
 export const TOWN_R = 16;
 export const TICK = 1 / 15;
+export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its swing and the hit landing
 
 export const MOB_TYPES = {
-  chaser:  { r: 0.7,  hp: 3,   speed: 4.2, dmg: 10, xp: 10,  color: 0xff3b8d },
-  runner:  { r: 0.45, hp: 1.5, speed: 7.2, dmg: 6,  xp: 8,   color: 0xff9a3b },
-  shooter: { r: 0.6,  hp: 3,   speed: 3.2, dmg: 8,  xp: 16,  color: 0xffe14d },
-  tank:    { r: 1.3,  hp: 14,  speed: 2.4, dmg: 20, xp: 45,  color: 0xb04dff },
-  boss:    { r: 2.8,  hp: 160, speed: 3.0, dmg: 14, xp: 600, color: 0xff2244 },
+  chaser:  { r: 0.7,  hp: 3,   speed: 3.0, dmg: 10, xp: 10,  color: 0xff3b8d },
+  runner:  { r: 0.45, hp: 1.5, speed: 5.2, dmg: 6,  xp: 8,   color: 0xff9a3b },
+  shooter: { r: 0.6,  hp: 3,   speed: 2.4, dmg: 8,  xp: 16,  color: 0xffe14d },
+  tank:    { r: 1.3,  hp: 14,  speed: 1.8, dmg: 20, xp: 45,  color: 0xb04dff },
+  boss:    { r: 2.8,  hp: 160, speed: 2.2, dmg: 14, xp: 600, color: 0xff2244 },
 };
 export const MOB_KEYS = Object.keys(MOB_TYPES);
 
