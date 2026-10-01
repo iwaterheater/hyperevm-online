@@ -8,7 +8,6 @@ const COLORS = {
   stripe: 0x9aa4b0,
   pink: 0xf5a3b5,
   hoodie: 0x35523f,
-  hoodieDark: 0x253b2d,
   eye: 0x18203a,
   teal: 0x7fe8d6,
   outline: 0x0c1a17,
@@ -64,24 +63,44 @@ function makeHeadTexture() {
   return tex;
 }
 
-export function createCat() {
+// Textures, geometries and fur materials are shared by every cat in the scene.
+let shared = null;
+function getShared() {
+  if (shared) return shared;
   const gradientMap = makeGradientMap();
   const toon = (color, extra = {}) => new THREE.MeshToonMaterial({ color, gradientMap, ...extra });
-  const mats = {
-    fur: toon(COLORS.fur),
-    head: toon(COLORS.fur, { map: makeHeadTexture() }),
-    stripe: toon(COLORS.stripe),
-    pink: toon(COLORS.pink),
-    hoodie: toon(COLORS.hoodie),
-    hoodieDark: toon(COLORS.hoodieDark),
-    eye: new THREE.MeshBasicMaterial({ color: COLORS.eye }),
-    white: new THREE.MeshBasicMaterial({ color: 0xffffff }),
-    teal: new THREE.MeshBasicMaterial({ color: COLORS.teal }),
-    outline: new THREE.MeshBasicMaterial({ color: COLORS.outline, side: THREE.BackSide }),
+  shared = {
+    toon,
+    mats: {
+      fur: toon(COLORS.fur),
+      head: toon(COLORS.fur, { map: makeHeadTexture() }),
+      stripe: toon(COLORS.stripe),
+      pink: toon(COLORS.pink),
+      eye: new THREE.MeshBasicMaterial({ color: COLORS.eye }),
+      white: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+      teal: new THREE.MeshBasicMaterial({ color: COLORS.teal }),
+      outline: new THREE.MeshBasicMaterial({ color: COLORS.outline, side: THREE.BackSide }),
+    },
+    sphere: new THREE.SphereGeometry(1, 32, 24),
+    sphereLo: new THREE.SphereGeometry(1, 16, 12),
+    collar: new THREE.TorusGeometry(0.4, 0.1, 12, 28),
+    string: new THREE.CylinderGeometry(0.015, 0.015, 0.22, 6),
+    bow: new THREE.ConeGeometry(0.05, 0.085, 4),
+    ear: new THREE.ConeGeometry(0.27, 0.5, 20),
+    arm: new THREE.CapsuleGeometry(0.125, 0.26, 6, 14),
+    leg: new THREE.CapsuleGeometry(0.15, 0.14, 6, 14),
   };
+  return shared;
+}
 
-  const sphere = new THREE.SphereGeometry(1, 32, 24);
-  const sphereLo = new THREE.SphereGeometry(1, 16, 12);
+export function createCat({ hoodie = COLORS.hoodie } = {}) {
+  const S = getShared();
+  const { sphere, sphereLo } = S;
+  const mats = {
+    ...S.mats,
+    hoodie: S.toon(hoodie),
+    hoodieDark: S.toon(new THREE.Color(hoodie).multiplyScalar(0.68)),
+  };
 
   // Adds a mesh; `outline` > 0 adds an inverted-hull contour.
   function part(parent, geo, mat, pos, scale = 1, outline = 0) {
@@ -104,16 +123,16 @@ export function createCat() {
   // ---- body & hoodie ----
   part(inner, sphere, mats.hoodie, [0, 0.8, 0], [0.5, 0.525, 0.425], 1.05);
   part(inner, sphere, mats.hoodieDark, [0, 0.66, 0.3], [0.26, 0.15, 0.12]);          // pocket
-  const collar = part(inner, new THREE.TorusGeometry(0.4, 0.1, 12, 28), mats.hoodieDark, [0, 1.14, 0], [1, 0.92, 1]);
+  const collar = part(inner, S.collar, mats.hoodieDark, [0, 1.14, 0], [1, 0.92, 1]);
   collar.rotation.x = Math.PI / 2;
   part(inner, sphere, mats.hoodieDark, [0, 1.2, -0.4], [0.42, 0.28, 0.3], 1.06);     // hood
-  const stringGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.22, 6);
+  const stringGeo = S.string;
   for (const s of [-1, 1]) {
     const str = part(inner, stringGeo, mats.white, [s * 0.08, 0.98, 0.41], 1);
     str.rotation.x = -0.25;
   }
   // bow emblem
-  const bowGeo = new THREE.ConeGeometry(0.05, 0.085, 4);
+  const bowGeo = S.bow;
   for (const s of [-1, 1]) {
     const b = part(inner, bowGeo, mats.white, [0.2 + s * 0.04, 0.95, 0.385], [1, 1, 0.3]);
     b.rotation.z = s * Math.PI / 2;
@@ -125,7 +144,7 @@ export function createCat() {
   inner.add(head);
   part(head, sphere, mats.head, [0, 0, 0], [0.694, 0.589, 0.62], 1.04);
 
-  const earGeo = new THREE.ConeGeometry(0.27, 0.5, 20);
+  const earGeo = S.ear;
   const ears = [];
   for (const s of [-1, 1]) {
     const ear = new THREE.Group();
@@ -151,7 +170,7 @@ export function createCat() {
   part(head, sphereLo, mats.pink, [0, -0.115, 0.605], [0.04, 0.03, 0.03]);           // nose
 
   // ---- arms ----
-  const armGeo = new THREE.CapsuleGeometry(0.125, 0.26, 6, 14);
+  const armGeo = S.arm;
   const arms = [];
   for (const s of [-1, 1]) {
     const arm = new THREE.Group();
@@ -163,7 +182,7 @@ export function createCat() {
   }
 
   // ---- legs ----
-  const legGeo = new THREE.CapsuleGeometry(0.15, 0.14, 6, 14);
+  const legGeo = S.leg;
   const legs = [];
   for (const s of [-1, 1]) {
     const leg = new THREE.Group();
