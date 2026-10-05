@@ -7,9 +7,10 @@ import { WORLD_R, TOWN_R, ZONES, BOSS } from './shared.js';
 // The visible world: terrain, water, town, per-zone scenery, lighting and zone mood.
 // Scenery is generated from a fixed seed so every client sees the same landscape.
 // Buildings, trees, rocks and props come from the KayKit Medieval Hexagon Pack (CC0, Kay Lousberg);
-// the graveyard and cursed-land scenery is built from code.
+// the graveyard comes from KayKit Halloween Bits (CC0); the cursed-land scenery is built from code.
 
 const MODEL_DIR = './assets/medieval/';
+const GRAVEYARD_DIR = './assets/halloween/';
 const MODEL_SCALE = 5;   // the pack is modelled for small hex tiles
 
 const HALF_PI = Math.PI / 2;
@@ -184,35 +185,6 @@ export function createWorld(scene) {
   instanced(part(new THREE.IcosahedronGeometry(0.1, 0), 0xffffff, { pos: [0, 0.28, 0] }),
     scatter(1100, TOWN_R + 4, Z1, { road: 2.6 }).map((it, i) => ({ ...it, color: FLOWERS[i % 4] })), { cast: false });
 
-  // ---- graveyard wastes
-  const deadTree = merge([
-    part(cyl(0.1, 0.22, 2.6, 6), 0x3d2f26, { pos: [0, 1.3, 0] }),
-    part(cyl(0.04, 0.08, 1.3, 5), 0x3d2f26, { pos: [0.45, 2.3, 0], rot: [0, 0, -0.9] }),
-    part(cyl(0.04, 0.07, 1.1, 5), 0x3d2f26, { pos: [-0.38, 1.9, 0.1], rot: [0.2, 0, 0.95] }),
-    part(cyl(0.03, 0.06, 0.9, 5), 0x3d2f26, { pos: [0.05, 2.9, -0.25], rot: [-0.7, 0, 0.1] }),
-  ]);
-  const tomb = merge([
-    part(box(0.62, 0.8, 0.16), 0x7d7f80, { pos: [0, 0.4, 0] }),
-    part(cyl(0.31, 0.31, 0.16, 12), 0x7d7f80, { pos: [0, 0.8, 0], rot: [HALF_PI, 0, 0] }),
-    part(box(0.8, 0.12, 0.3), 0x66686a, { pos: [0, 0.06, 0] }),
-  ]);
-  const cross = merge([
-    part(box(0.14, 1.3, 0.14), 0x5a4a3c, { pos: [0, 0.65, 0] }),
-    part(box(0.7, 0.14, 0.14), 0x5a4a3c, { pos: [0, 0.95, 0] }),
-  ]);
-  const bonePile = merge([
-    part(ball(0.16, 8, 6), 0xe9e3d2, { pos: [0.1, 0.14, 0] }),
-    part(cyl(0.035, 0.035, 0.6, 5), 0xe9e3d2, { pos: [-0.15, 0.05, 0.1], rot: [0, 0.6, HALF_PI] }),
-    part(cyl(0.035, 0.035, 0.5, 5), 0xe9e3d2, { pos: [0, 0.05, -0.2], rot: [0, -0.8, HALF_PI] }),
-  ]);
-  const tilt = (it) => ({ ...it, rx: (rnd() - 0.5) * 0.3, rz: (rnd() - 0.5) * 0.3 });
-  instanced(deadTree, scatter(380, Z1 - 2, Z2 + 4, { sMin: 0.8, sMax: 1.5 }), { solid: 0.3 });
-  instanced(tomb, scatter(420, Z1, Z2).map(tilt), { solid: 0.42 });
-  instanced(cross, scatter(200, Z1, Z2).map(tilt), { solid: 0.25 });
-  instanced(bonePile, scatter(500, Z1 - 10, WORLD_R - 4), { cast: false });
-  instanced(part(new THREE.DodecahedronGeometry(1, 0), 0x74685a, { pos: [0, 0.45, 0], scale: [1, 0.7, 0.85] }),
-    scatter(300, Z1, Z2, { sMin: 0.5, sMax: 1.7 }), { solid: 0.85 });
-
   // ---- cursed lands
   const spike = merge([
     part(cone(0.55, 2.8, 5), 0x1f191e, { pos: [0, 1.4, 0] }),
@@ -251,25 +223,134 @@ export function createWorld(scene) {
   ];
   for (const [, x, z] of LANDMARKS) keepOut.push({ x, z, r: 8 });
 
-  async function addModels() {
+  // ---- graveyard wastes: models from KayKit Halloween Bits (already at world scale)
+  const CRYPTS = [[40, -128, 0.3], [-46, 122, 3.4], [130, 40, -1.3], [-127, -44, 1.8], [96, 98, -0.8], [-99, -94, 2.4]];
+  for (const [x, z] of CRYPTS) keepOut.push({ x, z, r: 12 });
+  const PLOTS = scatter(18, Z1 + 14, Z2 - 14, { road: 17 });   // fenced cemeteries
+  for (const p of PLOTS) keepOut.push({ x: p.x, z: p.z, r: 13 });
+
+  async function addGraveyard() {
     const names = [
-      'building_home_A_blue', 'building_home_B_blue', 'building_home_A_red', 'building_home_B_red', 'building_home_A_green', 'building_home_B_green',
-      'building_tavern_blue', 'building_market_blue', 'building_blacksmith_blue', 'building_church_blue', 'building_well_blue',
-      'building_windmill_blue', 'building_tower_A_blue', 'building_destroyed', 'building_grain', 'building_stage_A',
-      'fence_stone_straight', 'fence_wood_straight', 'wall_straight', 'wall_straight_gate',
-      'tree_single_A', 'tree_single_B', 'tree_single_A_cut', 'tree_single_B_cut',
-      'trees_A_large', 'trees_A_medium', 'trees_A_small', 'trees_B_large', 'trees_B_medium', 'trees_B_small',
-      'rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E',
-      'hill_single_A', 'hill_single_B', 'hill_single_C',
-      'mountain_A', 'mountain_B', 'mountain_C', 'mountain_A_grass', 'mountain_B_grass', 'mountain_C_grass',
-      'barrel', 'crate_A_big', 'crate_B_small', 'crate_open', 'sack', 'tent', 'weaponrack', 'wheelbarrow', 'flag_blue', 'target',
-      'bucket_water', 'resource_lumber', 'resource_stone',
+      'arch', 'bone_A', 'bone_B', 'bone_C', 'coffin', 'coffin_decorated', 'crypt', 'fence', 'fence_broken', 'fence_pillar', 'fence_pillar_broken',
+      'grave_A', 'grave_A_destroyed', 'grave_B', 'gravemarker_A', 'gravemarker_B', 'gravestone', 'lantern_standing', 'pillar', 'plaque_candles',
+      'post_lantern', 'post_skull', 'pumpkin_orange', 'pumpkin_orange_jackolantern', 'pumpkin_orange_small', 'pumpkin_yellow',
+      'pumpkin_yellow_jackolantern', 'pumpkin_yellow_small', 'ribcage', 'shrine_candles', 'skull', 'skull_candle',
+      'tree_dead_large', 'tree_dead_large_decorated', 'tree_dead_medium', 'tree_dead_small',
+      'tree_pine_orange_large', 'tree_pine_orange_medium', 'tree_pine_orange_small', 'tree_pine_yellow_large', 'tree_pine_yellow_medium', 'tree_pine_yellow_small',
     ];
+    const { many } = await loadPack(GRAVEYARD_DIR, names, 1);
+
+    // autumn pines where the meadows give way to the wastes, dead trees beyond
+    for (const name of names.filter((n) => n.startsWith('tree_pine'))) many(name, scatter(42, Z1 - 18, Z1 + 16, { sMin: 0.8, sMax: 1.25 }), 0.2);
+    many('tree_dead_large', scatter(150, Z1, Z2 + 6, { sMin: 1, sMax: 1.6 }), 0.3);
+    many('tree_dead_medium', scatter(150, Z1, Z2 + 6, { sMin: 1, sMax: 1.6 }), 0.3);
+    many('tree_dead_small', scatter(120, Z1 - 6, WORLD_R - 6, { sMin: 1, sMax: 1.6 }), 0.3);
+    many('tree_dead_large_decorated', scatter(30, Z1, Z2, { sMin: 1, sMax: 1.4 }), 0.3);
+
+    // loose graves, coffins, bones and pumpkins
+    for (const name of ['grave_A', 'grave_B', 'grave_A_destroyed']) many(name, scatter(65, Z1, Z2), 0.55);
+    many('gravestone', scatter(120, Z1, Z2), 0.5);
+    many('gravemarker_A', scatter(90, Z1 - 4, Z2 + 4), 0.6);
+    many('gravemarker_B', scatter(90, Z1 - 4, Z2 + 4), 0.6);
+    many('coffin', scatter(16, Z1, Z2), 0.5);
+    many('coffin_decorated', scatter(10, Z1, Z2), 0.5);
+    for (const name of ['bone_A', 'bone_B', 'bone_C']) many(name, scatter(110, Z1 - 6, WORLD_R - 4).map((it) => ({ ...it, y: 0.14 })), 0, false);
+    many('skull', scatter(90, Z1 - 6, WORLD_R - 4, { sMin: 0.5, sMax: 0.8 }), 0, false);
+    many('ribcage', scatter(45, Z1, WORLD_R - 4).map((it) => ({ ...it, y: 0.39 })), 0, false);
+    for (const name of names.filter((n) => n.startsWith('pumpkin'))) many(name, scatter(12, Z1, Z2), name.includes('small') ? 0 : 0.7);
+
+    // hand-placed pieces are batched per model so each model stays one draw call
+    const batch = {}, glows = [];
+    const put = (name, x, z, ry = 0, s = 1) => (batch[name] ||= []).push({ x, z, ry, s });
+    const solid = (x, z, r) => obstacles.push({ x, z, r });
+    // local (lx, lz) of an object at (ox, oz) turned by ry -> world
+    const at = (ox, oz, ry, lx, lz) => [ox + lx * Math.cos(ry) + lz * Math.sin(ry), oz - lx * Math.sin(ry) + lz * Math.cos(ry)];
+    const lantern = (x, z) => { put('lantern_standing', x, z); glows.push({ x, y: 0.55, z, s: 1 }); };
+
+    // fenced cemeteries: 20 x 12, a gap in the south fence, two rows of graves inside
+    const GRAVES = ['grave_A', 'grave_B', 'grave_A_destroyed', 'grave_B', 'grave_A'];
+    for (const p of PLOTS) {
+      const L = (lx, lz) => at(p.x, p.z, p.ry, lx, lz);
+      const fence = (lx, lz, turn) => {
+        const [x, z] = L(lx, lz);
+        put(rnd() < 0.2 ? 'fence_broken' : 'fence', x, z, p.ry + turn);
+        for (const t of [-1.4, 0, 1.4]) solid(...L(lx + (turn ? 0 : t), lz + (turn ? t : 0)), 0.55);
+      };
+      for (const lx of [-8, -4, 0, 4, 8]) {
+        fence(lx, -6, 0);
+        if (lx !== 0) fence(lx, 6, 0);
+      }
+      for (const lz of [-4, 0, 4]) { fence(-10, lz, Math.PI / 2); fence(10, lz, Math.PI / 2); }
+      for (const [lx, lz] of [[-10, -6], [10, -6], [-10, 6], [10, 6], [-2, 6], [2, 6]]) {
+        const [x, z] = L(lx, lz);
+        put(rnd() < 0.15 ? 'fence_pillar_broken' : 'fence_pillar', x, z, p.ry);
+        solid(x, z, 0.45);
+      }
+      for (const lz of [-3.2, 2]) {
+        [-7, -3.5, 0, 3.5, 7].forEach((lx, i) => {
+          const [x, z] = L(lx, lz);
+          put(GRAVES[(i + (lz > 0 ? 2 : 0)) % GRAVES.length], x, z, p.ry);
+          solid(x, z, 0.6);
+        });
+      }
+      put('plaque_candles', ...L(0, -0.6), p.ry);
+      lantern(...L(-3.2, 7.3));
+      lantern(...L(3.2, 7.3));
+      if (rnd() < 0.6) put('pumpkin_orange_jackolantern', ...L(8.3, 4.3), p.ry + 0.4);
+    }
+
+    // crypts with pillars, candles and lanterns at the front
+    for (const [x, z, ry] of CRYPTS) {
+      put('crypt', x, z, ry);
+      for (const [lx, lz] of [[-1.8, -2.4], [1.8, -2.4], [-1.8, 2.4], [1.8, 2.4], [0, 0]]) solid(...at(x, z, ry, lx, lz), 2.3);
+      for (const lx of [-4.6, 4.6]) {
+        for (const lz of [5.6, -5.6]) { const q = at(x, z, ry, lx, lz); put('pillar', ...q, ry); solid(...q, 0.6); }
+        lantern(...at(x, z, ry, lx * 0.5, 6.2));
+        put('skull_candle', ...at(x, z, ry, lx * 0.8, 7.4), ry + lx);
+      }
+      put('shrine_candles', ...at(x, z, ry, 0, 8.2), ry);
+    }
+
+    // roads: an arch at each zone border, lantern posts through the wastes, skull posts through the cursed lands
+    const ROADS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+    for (const [dx, dz] of ROADS) {
+      const turn = dx ? Math.PI / 2 : 0;   // arches span the road
+      for (const r of [Z1 + 2, Z2 + 2]) {
+        put('arch', dx * r, dz * r, turn, 1.7);
+        for (const side of [-3, 3]) solid(dx * r + dz * side, dz * r + dx * side, 0.8);
+      }
+      let side = 1;
+      for (let r = Z1 + 12; r < WORLD_R - 16; r += 14) {
+        if (Math.abs(r - Z2) < 8 || Math.hypot(dx * r - BOSS.x, dz * r - BOSS.z) < 20) continue;
+        side = -side;
+        const x = dx * r + dz * side * 3.8, z = dz * r + dx * side * 3.8;
+        const ry = Math.atan2(-dz * side, -dx * side);   // the arm (local +Z) reaches over the road
+        put(r < Z2 ? 'post_lantern' : 'post_skull', x, z, ry);
+        solid(x, z, 0.35);
+        if (r < Z2) glows.push({ x: x + Math.sin(ry), y: 2.25, z: z + Math.cos(ry), s: 1.3 });
+      }
+    }
+
+    for (const [name, items] of Object.entries(batch)) many(name, items);
+    for (const it of scatter(60, Z1, Z2)) { (batch.loose ||= []).push(it); glows.push({ x: it.x, y: 0.55, z: it.z, s: 1 }); }
+    many('lantern_standing', batch.loose.map((it) => ({ ...it, s: 1 })));
+    // the lantern models do not shine by themselves: a soft additive halo around each one sells the light
+    instanced(new THREE.SphereGeometry(0.55, 12, 8), glows, {
+      cast: false,
+      mat: new THREE.MeshBasicMaterial({
+        color: new THREE.Color(0xffb050).multiplyScalar(1.6), transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+    });
+  }
+
+  // Loads a pack of glTF models. A pack shares one palette texture, so one material serves all its models.
+  // `scale` converts the pack's units to world units.
+  async function loadPack(dir, names, scale) {
     const loader = new GLTFLoader();
     const geo = {}, radius = {};
-    let material = null;   // every model shares one palette texture, so one material serves them all
+    let material = null;
     await Promise.all(names.map(async (name) => {
-      const gltf = await loader.loadAsync(`${MODEL_DIR}${name}.gltf`);
+      const gltf = await loader.loadAsync(`${dir}${name}.gltf`);
       gltf.scene.updateMatrixWorld(true);
       const parts = [];
       gltf.scene.traverse((o) => {
@@ -289,15 +370,34 @@ export function createWorld(scene) {
       const mesh = new THREE.Mesh(geo[name], material);
       mesh.position.set(x, 0, z);
       mesh.rotation.y = ry;
-      mesh.scale.setScalar(s * MODEL_SCALE);
+      mesh.scale.setScalar(s * scale);
       mesh.castShadow = mesh.receiveShadow = true;
       scene.add(mesh);
-      if (solid) obstacles.push({ x, z, r: radius[name] * s * MODEL_SCALE * solid });
+      if (solid) obstacles.push({ x, z, r: radius[name] * s * scale * solid });
       return mesh;
     }
-    const many = (name, items, solid = 0, cast = true) => instanced(geo[name], items.map((it) => ({ ...it, s: it.s * MODEL_SCALE })), {
+    // many copies of one model in a single draw call
+    const many = (name, items, solid = 0, cast = true) => instanced(geo[name], items.map((it) => ({ ...it, s: it.s * scale })), {
       mat: material, cast, solid: solid * radius[name],
     });
+    return { place, many };
+  }
+
+  async function addModels() {
+    const names = [
+      'building_home_A_blue', 'building_home_B_blue', 'building_home_A_red', 'building_home_B_red', 'building_home_A_green', 'building_home_B_green',
+      'building_tavern_blue', 'building_market_blue', 'building_blacksmith_blue', 'building_church_blue', 'building_well_blue',
+      'building_windmill_blue', 'building_tower_A_blue', 'building_destroyed', 'building_grain', 'building_stage_A',
+      'fence_stone_straight', 'fence_wood_straight', 'wall_straight', 'wall_straight_gate',
+      'tree_single_A', 'tree_single_B', 'tree_single_A_cut', 'tree_single_B_cut',
+      'trees_A_large', 'trees_A_medium', 'trees_A_small', 'trees_B_large', 'trees_B_medium', 'trees_B_small',
+      'rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E',
+      'hill_single_A', 'hill_single_B', 'hill_single_C',
+      'mountain_A', 'mountain_B', 'mountain_C', 'mountain_A_grass', 'mountain_B_grass', 'mountain_C_grass',
+      'barrel', 'crate_A_big', 'crate_B_small', 'crate_open', 'sack', 'tent', 'weaponrack', 'wheelbarrow', 'flag_blue', 'target',
+      'bucket_water', 'resource_lumber', 'resource_stone',
+    ];
+    const { place, many } = await loadPack(MODEL_DIR, names, MODEL_SCALE);
 
     // town: buildings around the plaza, doors towards the fountain
     // low buildings on the south side (nearer the camera), tall ones on the north, so the plaza stays visible
@@ -353,7 +453,7 @@ export function createWorld(scene) {
     many('mountain_A', scatter(4, Z1 + 12, Z2 - 10, { sMin: 1.2, sMax: 1.6, road: 12 }), 0.8);
     for (const name of ['mountain_A', 'mountain_B', 'mountain_C']) many(name, scatter(5, Z2 + 8, WORLD_R - 14, { sMin: 1.3, sMax: 1.9, road: 12 }), 0.8);
   }
-  const ready = addModels();
+  const ready = Promise.all([addModels(), addGraveyard()]);
 
   // Pushes a circle (object with x/z) out of trees, rocks and buildings.
   function collide(p, radius = 0.4) {
@@ -398,5 +498,5 @@ export function createWorld(scene) {
     crystal.position.y = 2.7 + Math.sin(time * 1.5) * 0.2;
   }
 
-  return { update, collide, ready };
+  return { update, collide, ready, plots: PLOTS };
 }

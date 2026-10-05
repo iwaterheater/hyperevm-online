@@ -5,7 +5,7 @@ Players share one seamless world, hunt skeletons together, level up, collect gol
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0)
-- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0) by Kay Lousberg (CC0)
+- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0) — both by Kay Lousberg (CC0)
 - **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP and loot
 
 ## Quick start
@@ -84,6 +84,7 @@ src/cat.js        Procedural 3D cat model and its animations
 src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations
 assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
 assets/medieval/  KayKit buildings, walls, trees, rocks and props, with their CC0 license
+assets/halloween/ KayKit graveyard models, with their CC0 license
 src/world.js      Terrain, town, scenery, lighting and obstacle collision
 src/geo.js        Helpers for building vertex-coloured low-poly geometry
 src/shared.js     Constants and formulas used by both client and server
@@ -108,5 +109,5 @@ The server is a single Node.js process, so any host that can run Node and accept
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
 - No accounts, no PvP, no inventory beyond gold and a weapon level.
-- The cat, the terrain and the graveyard / cursed-land scenery are built from code; skeletons, buildings, trees and rocks are imported models.
+- The cat, the terrain and the cursed-land scenery are built from code; skeletons, buildings, trees, rocks and the graveyard are imported models.
 - The cat model is built from code to match the reference artwork, not sculpted or scanned.

@@ -935,4 +935,4 @@ function frame() {
 frame();
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, get state() { return state; } };
