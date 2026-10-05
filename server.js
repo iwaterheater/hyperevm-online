@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, METEOR, SWORD, BLACKSMITH, SHOP_RANGE, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
+  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, METEOR, SWORD, BLACKSMITH, SHOP_RANGE, CHESTS, CHEST_REACH, FORT_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
 } from './src/shared.js';
 
 const PORT = process.env.PORT || 8765;
@@ -59,6 +59,7 @@ let nextId = 1, now = 0;
 const players = new Map();
 const mobs = [];
 let bullets = [], orbs = [], gems = [], meteors = [];
+const chests = CHESTS.map((c, i) => ({ ...c, i, openUntil: 0 }));
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -79,6 +80,7 @@ function spawnRing(count, rMin, rMax, lMin, lMax, types) {
   for (let i = 0; i < count; i++) {
     const a = rand(0, Math.PI * 2), r = Math.sqrt(rand(rMin * rMin, rMax * rMax));
     const lvl = Math.round(lMin + (lMax - lMin) * (r - rMin) / (rMax - rMin));
+    if (Math.hypot(Math.cos(a) * r - BOSS.x, Math.sin(a) * r - BOSS.z) < FORT_R + 4) continue;   // the fortress belongs to the King
     makeMob(types[Math.floor(Math.random() * types.length)], lvl, Math.cos(a) * r, Math.sin(a) * r);
   }
 }
@@ -361,6 +363,20 @@ function tick() {
     return true;
   });
 
+  // a closed chest opens for the first player who walks up to it, then refills after a while
+  for (const c of chests) {
+    if (now < c.openUntil) continue;
+    for (const p of players.values()) {
+      if (p.dead || Math.hypot(p.x - c.x, p.z - c.z) > CHEST_REACH) continue;
+      const gold = Math.round(c.gold * rand(0.8, 1.3));
+      p.gold += gold;
+      p.events.push({ k: 'chest', gold });
+      emit({ k: 'open', i: c.i }, c.x, c.z);
+      c.openUntil = now + (c.big ? 300 : 150);
+      break;
+    }
+  }
+
   for (const p of players.values()) {
     const near = (o) => Math.abs(o.x - p.x) < VIEW_R && Math.abs(o.z - p.z) < VIEW_R;
     const snap = {
@@ -371,6 +387,7 @@ function tick() {
         weapon: p.weapon, energy: p.energy, dead: p.dead ? 1 : 0,
       },
       p: [], m: [], g: [],
+      c: chests.filter((c) => now < c.openUntil && near(c)).map((c) => c.i),   // chests that currently stand open
       e: p.events,
     };
     for (const q of players.values()) {

@@ -3,11 +3,12 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createCat } from './cat.js';
 import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
-import { CAST_TIME, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SHOP_RANGE, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
+import { CAST_TIME, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SHOP_RANGE, CHESTS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
@@ -138,7 +139,40 @@ const bulletMat = new THREE.MeshBasicMaterial({ color: glow(TEAL, 3) });
 const fireMat = new THREE.MeshBasicMaterial({ color: glow(FIRE, 3) });
 const bulletPool = meshPool(sphereGeo, bulletMat, 0.32);
 const orbPool = meshPool(sphereGeo, new THREE.MeshBasicMaterial({ color: glow(0xff3b6b, 3) }), 0.32);
-const gemPool = meshPool(new THREE.OctahedronGeometry(0.28), new THREE.MeshBasicMaterial({ color: glow(0xffd76a, 1.8) }), 1);
+// dropped gold: a glowing placeholder until the coin model has loaded, then a spinning coin
+let gemLook = { geo: new THREE.OctahedronGeometry(0.28), mat: new THREE.MeshBasicMaterial({ color: glow(0xffd76a, 1.8) }) };
+const gemMeshes = [];
+const gemPool = makePool(() => {
+  const mesh = new THREE.Mesh(gemLook.geo, gemLook.mat);
+  scene.add(mesh);
+  gemMeshes.push(mesh);
+  return { mesh };
+});
+
+// ---------------------------------------------------------------- chests & coins (KayKit Dungeon Remastered)
+
+const chestViews = [];   // index-aligned with CHESTS; filled when the models arrive
+{
+  const loader = new GLTFLoader();
+  Promise.all(['chest', 'chest_gold', 'coin'].map((n) => loader.loadAsync(`./assets/dungeon/${n}.glb`))).then(([chest, gold, coin]) => {
+    CHESTS.forEach((c, i) => {
+      const model = (c.big ? gold : chest).scene.clone(true);
+      model.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      const root = new THREE.Group();
+      root.add(model);
+      root.position.set(c.x, 0, c.z);
+      // roadside chests face the road, the King's hoard faces the fortress gate
+      root.rotation.y = c.big ? 0 : Math.abs(c.x) < Math.abs(c.z) ? Math.atan2(-Math.sign(c.x), 0) : Math.atan2(0, -Math.sign(c.z));
+      root.scale.setScalar(c.big ? 2 : 1.3);
+      scene.add(root);
+      chestViews[i] = { root, lid: model.getObjectByName(c.big ? 'chest_gold_lid' : 'chest_lid'), open: false };
+    });
+    let coinMesh = null;
+    coin.scene.traverse((o) => { if (o.isMesh) coinMesh = o; });
+    gemLook = { geo: coinMesh.geometry.clone().rotateX(Math.PI / 2).scale(2.2, 2.2, 2.2), mat: coinMesh.material };
+    for (const m of gemMeshes) { m.geometry = gemLook.geo; m.material = gemLook.mat; }
+  }, (err) => console.error('Chest models failed to load', err));
+}
 
 const PMAX = 500;
 const pMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial(), PMAX);
@@ -439,6 +473,9 @@ function onSnapshot(s) {
     () => {},
     (g) => gemPool.release(g));
 
+  const open = new Set(s.c);
+  chestViews.forEach((v, i) => { v.open = open.has(i); });
+
   for (const ev of s.e) onEvent(ev);
 }
 
@@ -516,6 +553,15 @@ function onEvent(ev) {
     case 'up':
       banner(`Weapon upgraded · Lv ${ev.weapon}`);
       sfx(660, 0.3, 'triangle', 0.08, 400);
+      break;
+    case 'open': {
+      const c = CHESTS[ev.i];
+      burst(c.x, 1.2, c.z, 0xffd76a, c.big ? 60 : 24, 7);
+      sfx(520, 0.25, 'triangle', 0.07, 520);
+      break;
+    }
+    case 'chest':
+      banner(`+${ev.gold} gold`);
       break;
     case 'gem':
       sfx(1200, 0.08, 'sine', 0.05, 600);
@@ -762,6 +808,11 @@ function updateViews(dt) {
     if (c.t > 3) { removeMobView(c.v); corpses.splice(j, 1); }
   }
 
+  for (const v of chestViews) {
+    v.root.visible = (v.root.position.x - me.x) ** 2 + (v.root.position.z - me.z) ** 2 < 60 * 60;
+    if (v.root.visible && v.lid) v.lid.rotation.x += ((v.open ? -1.9 : 0) - v.lid.rotation.x) * Math.min(1, dt * 8);
+  }
+
   let i = 0;
   for (const g of gemViews.values()) {
     g.mesh.rotation.y += dt * 3;
@@ -885,6 +936,7 @@ function drawMinimap() {
   g.beginPath(); g.arc(ox, oz, TOWN_R * S, 0, 7); g.fill();
   for (const v of mobViews.values()) dot(v.x, v.z, v.def.r * 4 + 2, css(v.def.color));
   for (const gem of gemViews.values()) dot(gem.mesh.position.x, gem.mesh.position.z, 3, '#ffd76a');
+  chestViews.forEach((v, i) => { if (!v.open) dot(CHESTS[i].x, CHESTS[i].z, CHESTS[i].big ? 8 : 5, '#ffb020'); });
   dot(BOSS.x, BOSS.z, 8, '#ff2244', true);
   dot(0, 0, 8, '#7fe8d6', true);          // town
   for (const a of others.values()) dot(a.x, a.z, 6, '#ffffff');

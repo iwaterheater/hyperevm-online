@@ -5,7 +5,7 @@ Players share one seamless world, hunt skeletons together, level up, collect gol
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0)
-- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0) — both by Kay Lousberg (CC0)
+- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0); the King's fortress, ruins, chests and coins from [KayKit Dungeon Remastered](https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0) — all by Kay Lousberg (CC0)
 - **Townsfolk:** guards, blacksmith, sage and trader from the [KayKit Character Pack: Adventurers](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) by Kay Lousberg (CC0)
 - **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP and loot
 
@@ -55,7 +55,7 @@ One continuous map with no loading screens. Zones get harder the further you go 
 | Graveyard Wastes | 95 – 175 | 5 – 9 |
 | Cursed Lands | 175 – 260 | 10 – 15 |
 
-The **Skeleton King** (level 18 boss) waits inside a ring of pillars in the far north of the Cursed Lands. The radar in the top-right corner always points to the town and to the boss lair.
+The **Skeleton King** (level 18 boss) waits inside his walled fortress in the far north of the Cursed Lands. The radar in the top-right corner always points to the town and to the boss lair.
 
 ### Monsters
 
@@ -72,6 +72,7 @@ The **Skeleton King** (level 18 boss) waits inside a ring of pillars in the far 
 - Killing monsters gives XP to every player who damaged them.
 - Levelling up raises max health and damage and fully heals you.
 - Monsters drop gold gems; gems also charge hyper energy.
+- Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold. The King's hoard waits inside his fortress.
 - Spend gold at the Blacksmith in town (`B`) to upgrade your weapon.
 - Dying costs 10% of your gold; you respawn in town.
 
@@ -86,6 +87,7 @@ src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their an
 assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
 assets/medieval/  KayKit buildings, walls, trees, rocks and props, with their CC0 license
 assets/halloween/ KayKit graveyard models, with their CC0 license
+assets/dungeon/   KayKit fortress walls, pillars, chests and coins, with their CC0 license
 assets/adventurers/ KayKit adventurer characters used as townsfolk, with their CC0 license
 src/npc.js        Townsfolk: guards at the gates, blacksmith, sage, trader
 src/world.js      Terrain, town, scenery, lighting and obstacle collision
@@ -97,7 +99,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 ## How it works
 
 - The server simulates the world at 15 ticks per second and sends each player a snapshot of everything nearby.
-- Monsters, projectile hits, damage, XP, gold and upgrades are decided by the server.
+- Monsters, projectile hits, damage, XP, gold, chests and upgrades are decided by the server.
 - Player movement is simulated on the client for responsiveness; the server sanity-checks the speed and snaps cheaters back.
 - Trees, rocks and buildings block the local player only: the server does not know about scenery, so monsters and projectiles pass through it.
 - Melee monsters telegraph their attacks: they stop, raise the weapon and the hit lands 0.4 seconds later, so it can be dodged.
@@ -112,5 +114,5 @@ The server is a single Node.js process, so any host that can run Node and accept
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
 - No accounts, no PvP, no inventory beyond gold and a weapon level.
-- The cat, the terrain and the cursed-land scenery are built from code; skeletons, buildings, trees, rocks and the graveyard are imported models.
+- The cat, the terrain and a few cursed-land details (spikes, crystals) are built from code; everything else is imported models.
 - The cat model is built from code to match the reference artwork, not sculpted or scanned.

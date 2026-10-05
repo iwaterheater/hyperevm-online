@@ -39,3 +39,18 @@ export const SHOP_RANGE = 5.5;
 export const zoneAt = (dist) => ZONES.find((z) => dist <= z.r) || ZONES[ZONES.length - 1];
 
 export const BOSS = { x: 0, z: -228, lvl: 18 };
+export const FORT_R = 26;   // radius of the Skeleton King's fortress wall
+
+// Treasure chests: beside the four roads, richer the further from town, plus the King's hoard in the fortress.
+export const CHESTS = [];
+for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
+  let side = 1;
+  for (let r = 46; r < WORLD_R - 12; r += 24) {
+    side = -side;
+    const x = dx * r + dz * side * 4.6, z = dz * r + dx * side * 4.6;
+    if (Math.hypot(x - BOSS.x, z - BOSS.z) < FORT_R + 10) continue;
+    CHESTS.push({ x, z, gold: r < ZONES[1].r ? 12 : r < ZONES[2].r ? 40 : 90 });
+  }
+}
+CHESTS.push({ x: BOSS.x, z: BOSS.z - FORT_R + 6, gold: 400, big: true });
+export const CHEST_REACH = 1.9;

@@ -2,15 +2,16 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { part, merge, box, cyl, cone, ball } from './geo.js';
-import { WORLD_R, TOWN_R, ZONES, BOSS } from './shared.js';
+import { WORLD_R, TOWN_R, ZONES, BOSS, FORT_R, CHESTS } from './shared.js';
 
 // The visible world: terrain, water, town, per-zone scenery, lighting and zone mood.
 // Scenery is generated from a fixed seed so every client sees the same landscape.
 // Buildings, trees, rocks and props come from the KayKit Medieval Hexagon Pack (CC0, Kay Lousberg);
-// the graveyard comes from KayKit Halloween Bits (CC0); the cursed-land scenery is built from code.
+// the graveyard comes from KayKit Halloween Bits and the Skeleton King's fortress from KayKit Dungeon Remastered (both CC0).
 
 const MODEL_DIR = './assets/medieval/';
 const GRAVEYARD_DIR = './assets/halloween/';
+const DUNGEON_DIR = './assets/dungeon/';
 const MODEL_SCALE = 5;   // the pack is modelled for small hex tiles
 
 const HALF_PI = Math.PI / 2;
@@ -46,7 +47,7 @@ function grainTexture() {
 const MOODS = [
   { sky: 0x9fd3e6, sun: 0xfff2d6, sunI: 2.0, hemiSky: 0xcfe9ff, hemiGround: 0x4a6b3a, hemiI: 0.95 },   // meadows
   { sky: 0x8f887c, sun: 0xffd9a8, sunI: 1.6, hemiSky: 0xd8cbb5, hemiGround: 0x4a4034, hemiI: 0.8 },    // graveyard
-  { sky: 0x1c1016, sun: 0xff8a70, sunI: 1.1, hemiSky: 0x7a5068, hemiGround: 0x1a0c10, hemiI: 0.6 },    // cursed lands
+  { sky: 0x3a2230, sun: 0xffb9a0, sunI: 1.7, hemiSky: 0xb98aa6, hemiGround: 0x3a2028, hemiI: 1.05 },   // cursed lands: dusk, but readable
 ].map((m) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, k.endsWith('I') ? v : new THREE.Color(v)])));
 
 export function createWorld(scene) {
@@ -114,7 +115,7 @@ export function createWorld(scene) {
     },
   };
   // landmarks placed by hand; scattered scenery keeps clear of them
-  const keepOut = [{ x: BOSS.x, z: BOSS.z, r: 19 }];
+  const keepOut = [{ x: BOSS.x, z: BOSS.z, r: FORT_R + 8 }, ...CHESTS.map((c) => ({ x: c.x, z: c.z, r: 2.5 }))];
   const flat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
   const dummy = new THREE.Object3D(), tint = new THREE.Color();
 
@@ -190,21 +191,11 @@ export function createWorld(scene) {
     part(cone(0.55, 2.8, 5), 0x1f191e, { pos: [0, 1.4, 0] }),
     part(cone(0.3, 1.5, 5), 0x2a2028, { pos: [0.45, 0.7, 0.15], rot: [0, 0, -0.35] }),
   ]);
-  const pillar = merge([
-    part(cyl(0.5, 0.6, 3.4, 8), 0x4d464b, { pos: [0, 1.7, 0] }),
-    part(box(1.4, 0.3, 1.4), 0x3d373b, { pos: [0, 0.15, 0] }),
-    part(box(1.2, 0.25, 1.2), 0x3d373b, { pos: [0, 3.5, 0], rot: [0.1, 0.3, 0.12] }),
-  ]);
   instanced(spike, scatter(620, Z2 - 2, WORLD_R - 2, { sMin: 0.7, sMax: 1.9 }), { solid: 0.5 });
-  instanced(pillar, scatter(170, Z2, WORLD_R - 6), { solid: 0.65 });
   instanced(new THREE.OctahedronGeometry(0.5), scatter(260, Z2, WORLD_R - 2, { sMin: 0.5, sMax: 1.4 }).map((it) => ({ ...it, y: 0.5 * it.s, sy: it.s * 2.2 })),
     { cast: false, mat: new THREE.MeshStandardMaterial({ color: 0x1a0508, emissive: 0xff3040, emissiveIntensity: 1.5, flatShading: true }) });
 
-  // boss arena: a ring of tall pillars
-  instanced(pillar, Array.from({ length: 12 }, (_, i) => {
-    const a = i / 12 * Math.PI * 2;
-    return { x: BOSS.x + Math.cos(a) * 14, z: BOSS.z + Math.sin(a) * 14, s: 1.8, ry: a };
-  }), { solid: 0.65 });
+  // the red circle in the middle of the King's fortress
   const lair = new THREE.Mesh(new THREE.TorusGeometry(13, 0.1, 8, 64), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff2244).multiplyScalar(1.8) }));
   lair.rotation.x = HALF_PI;
   lair.position.set(BOSS.x, 0.08, BOSS.z);
@@ -222,6 +213,16 @@ export function createWorld(scene) {
     ['building_tower_A_blue', -7, 62, 1, 3.14], ['building_tower_A_blue', -62, -7, 1, -1.57],
   ];
   for (const [, x, z] of LANDMARKS) keepOut.push({ x, z, r: 8 });
+
+  // Lantern and torch models do not shine by themselves: a soft additive halo around each one sells the light.
+  function addHalos(items, hex) {
+    instanced(new THREE.SphereGeometry(0.55, 12, 8), items, {
+      cast: false,
+      mat: new THREE.MeshBasicMaterial({
+        color: new THREE.Color(hex).multiplyScalar(1.6), transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+    });
+  }
 
   // ---- graveyard wastes: models from KayKit Halloween Bits (already at world scale)
   const CRYPTS = [[40, -128, 0.3], [-46, 122, 3.4], [130, 40, -1.3], [-127, -44, 1.8], [96, 98, -0.8], [-99, -94, 2.4]];
@@ -334,23 +335,77 @@ export function createWorld(scene) {
     for (const [name, items] of Object.entries(batch)) many(name, items);
     for (const it of scatter(60, Z1, Z2)) { (batch.loose ||= []).push(it); glows.push({ x: it.x, y: 0.55, z: it.z, s: 1 }); }
     many('lantern_standing', batch.loose.map((it) => ({ ...it, s: 1 })));
-    // the lantern models do not shine by themselves: a soft additive halo around each one sells the light
-    instanced(new THREE.SphereGeometry(0.55, 12, 8), glows, {
-      cast: false,
-      mat: new THREE.MeshBasicMaterial({
-        color: new THREE.Color(0xffb050).multiplyScalar(1.6), transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
-      }),
-    });
+    addHalos(glows, 0xffb050);
+  }
+
+  // ---- the Skeleton King's fortress and cursed-land ruins: models from KayKit Dungeon Remastered (world scale)
+  async function addFortress() {
+    const names = ['wall', 'wall_broken', 'wall_cracked', 'wall_pillar', 'pillar', 'pillar_decorated', 'banner_red', 'torch_mounted',
+      'rubble_large', 'rubble_half', 'sword_shield', 'sword_shield_broken', 'sword_shield_gold', 'barrel_large', 'crates_stacked',
+      'coin_stack_small', 'coin_stack_medium', 'coin_stack_large'];
+    const { many } = await loadPack(DUNGEON_DIR, names, 1, 'glb');
+    const batch = {}, flames = [];
+    const put = (name, x, z, ry = 0, s = 1, y = 0) => (batch[name] ||= []).push({ x, z, ry, s, y });
+    const solid = (x, z, r) => obstacles.push({ x, z, r });
+
+    // ring wall: intact with banners and torches in the north, ruined towards the gate in the south
+    const S = 1.5, N = Math.round(2 * Math.PI * FORT_R / (4 * S));
+    for (let i = 0; i < N; i++) {
+      const a = i / N * Math.PI * 2, cx = Math.cos(a), cz = Math.sin(a);
+      if (cz > 0.94) continue;   // the gate faces the road from town
+      const x = BOSS.x + cx * FORT_R, z = BOSS.z + cz * FORT_R, ry = Math.atan2(-cx, -cz);   // local +Z looks inwards
+      const ruined = cz > 0.3;
+      const name = ruined ? ['wall_broken', 'rubble_large', 'wall_cracked'][i % 3] : ['wall', 'wall_pillar', 'wall_cracked', 'wall'][i % 4];
+      put(name, x, z, ry, name === 'rubble_large' ? S * 0.5 : S);
+      for (const t of [-2, 0, 2]) solid(x - cz * t * S, z + cx * t * S, 1.15);
+      if (ruined) continue;
+      const ix = x - cx * 0.85, iz = z - cz * 0.85;   // just inside the wall face
+      if (i % 2) {
+        put(i % 4 === 1 ? 'banner_red' : 'sword_shield_gold', i % 4 === 1 ? x : ix, i % 4 === 1 ? z : iz, ry, S, i % 4 === 1 ? 0 : 3.6);
+      } else {
+        put('torch_mounted', ix, iz, ry, 1.7, 3.3);
+        flames.push({ x: ix - cx * 0.75, y: 4.5, z: iz - cz * 0.75, s: 1.5 });
+      }
+    }
+    for (const side of [-1, 1]) {   // gate posts
+      const a = Math.PI / 2 + side * 0.41, x = BOSS.x + Math.cos(a) * FORT_R, z = BOSS.z + Math.sin(a) * FORT_R;
+      put('pillar_decorated', x, z, 0, 1.7);
+      solid(x, z, 1.5);
+      flames.push({ x, y: 7.4, z, s: 2 });
+      put(side < 0 ? 'barrel_large' : 'crates_stacked', x + side * 4, z + 3.5, side, 1);
+      solid(x + side * 4, z + 3.5, 1);
+    }
+    for (let i = 0; i < 8; i++) {   // inner colonnade around the King
+      const a = (i + 0.5) / 8 * Math.PI * 2, x = BOSS.x + Math.cos(a) * 15, z = BOSS.z + Math.sin(a) * 15;
+      put('pillar', x, z, a, 1.5);
+      solid(x, z, 1.1);
+    }
+    const hoard = CHESTS.find((c) => c.big);   // gold piled around the King's chest
+    put('coin_stack_large', hoard.x - 2.6, hoard.z + 0.4, 0.5, 1.2);
+    put('coin_stack_medium', hoard.x + 2.5, hoard.z + 0.2, 2, 1.3);
+    put('coin_stack_small', hoard.x + 1.2, hoard.z + 2.2, 4, 1.3);
+    put('coin_stack_small', hoard.x - 1.5, hoard.z + 2, 1, 1.1);
+    put('sword_shield_broken', hoard.x - 4.5, hoard.z + 1, 0.4, 1.3, 1);
+
+    for (const [name, items] of Object.entries(batch)) many(name, items);
+    addHalos(flames, 0xff7030);
+
+    // ruins scattered over the cursed lands
+    many('pillar', scatter(60, Z2, WORLD_R - 6, { sMin: 0.9, sMax: 1.5 }), 0.9);
+    many('wall_broken', scatter(24, Z2 + 6, WORLD_R - 10, { sMin: 1, sMax: 1.4, road: 6 }), 0.6);
+    many('wall_cracked', scatter(14, Z2 + 6, WORLD_R - 10, { sMin: 1, sMax: 1.4, road: 6 }), 0.6);
+    many('rubble_large', scatter(16, Z2 + 6, WORLD_R - 10, { sMin: 0.5, sMax: 0.8, road: 8 }), 0.5);
+    many('rubble_half', scatter(20, Z1 + 20, WORLD_R - 10, { sMin: 0.6, sMax: 1, road: 6 }), 0.5);
   }
 
   // Loads a pack of glTF models. A pack shares one palette texture, so one material serves all its models.
   // `scale` converts the pack's units to world units.
-  async function loadPack(dir, names, scale) {
+  async function loadPack(dir, names, scale, ext = 'gltf') {
     const loader = new GLTFLoader();
     const geo = {}, radius = {};
     let material = null;
     await Promise.all(names.map(async (name) => {
-      const gltf = await loader.loadAsync(`${dir}${name}.gltf`);
+      const gltf = await loader.loadAsync(`${dir}${name}.${ext}`);
       gltf.scene.updateMatrixWorld(true);
       const parts = [];
       gltf.scene.traverse((o) => {
@@ -453,7 +508,7 @@ export function createWorld(scene) {
     many('mountain_A', scatter(4, Z1 + 12, Z2 - 10, { sMin: 1.2, sMax: 1.6, road: 12 }), 0.8);
     for (const name of ['mountain_A', 'mountain_B', 'mountain_C']) many(name, scatter(5, Z2 + 8, WORLD_R - 14, { sMin: 1.3, sMax: 1.9, road: 12 }), 0.8);
   }
-  const ready = Promise.all([addModels(), addGraveyard()]);
+  const ready = Promise.all([addModels(), addGraveyard(), addFortress()]);
 
   // Pushes a circle (object with x/z) out of trees, rocks and buildings.
   function collide(p, radius = 0.4) {
