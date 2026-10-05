@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { TOWN_R, BLACKSMITH } from './shared.js';
+import { TOWN_R, BLACKSMITH, SAGE } from './shared.js';
 
 // Townsfolk: models from the KayKit "Character Pack: Adventurers" (CC0, Kay Lousberg).
 // They stand in place, play idle animations, turn to face a nearby player and say a line.
@@ -14,7 +14,7 @@ const NOTICE_RANGE = 7;
 const KINDS = {
   guard: { model: 'Knight', gear: ['1H_Sword', 'Badge_Shield'], clip: 'Idle', name: 'Town Guard', line: 'Stay close to the walls, traveller.' },
   blacksmith: { model: 'Barbarian', gear: ['1H_Axe'], clip: 'Idle', name: 'Blacksmith', line: 'Need a sharper blade? Press B.' },
-  sage: { model: 'Mage', gear: ['2H_Staff'], clip: 'Idle', name: 'Sage', line: 'The Skeleton King waits far to the north.' },
+  sage: { model: 'Mage', gear: ['2H_Staff'], clip: 'Idle', name: 'Sage', line: 'Press K — I teach skills and professions.' },
   trader: { model: 'Rogue_Hooded', gear: [], clip: 'Idle', name: 'Trader', line: 'Gold talks. Bring more of it.' },
 };
 const GEAR = /^(1H_|2H_|Knife|Throwable|Mug|Spellbook|.*_Shield)/;
@@ -23,7 +23,7 @@ const GEAR = /^(1H_|2H_|Knife|Throwable|Mug|Spellbook|.*_Shield)/;
 const SPOTS = [
   ['blacksmith', BLACKSMITH.x, BLACKSMITH.z, Math.atan2(-BLACKSMITH.x, -BLACKSMITH.z)],
   ['trader', 4.8, 11.5, Math.atan2(-4.8, -11.5)],
-  ['sage', 4.2, -4.6, Math.atan2(-4.2, 4.6)],
+  ['sage', SAGE.x, SAGE.z, Math.atan2(-SAGE.x, -SAGE.z)],
 ];
 for (let i = 0; i < 4; i++) {
   const a = i * Math.PI / 2, r = TOWN_R - 1.8;

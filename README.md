@@ -1,7 +1,7 @@
 # HyperCat Online
 
-A small open-world browser MMORPG starring a chibi cat in a green hoodie.
-Players share one seamless world, hunt skeletons together, level up, collect gold and upgrade their weapon.
+A small open-world browser MMORPG starring a chibi cat in a hoodie, modelled on classic target-based MMORPGs.
+Players share one seamless world, pick a class, hunt skeletons together, level up, learn skills and choose a profession.
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0)
@@ -37,14 +37,11 @@ PORT=3000 npm start
 | Left click on a monster | Select it as the target; a frame at the top shows its name, level and health |
 | `Tab` | Select the next nearest monster |
 | `Esc` | Clear the target |
-| `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps swinging its sword at it (auto-attack). Swings cycle through three animations |
-| `1` (hold) | **Bolt** — a homing projectile at the target (range 22); 0.65 s cast, 8 mana |
-| `2` | **Starfall** — a falling star that blasts an area at the cursor (range 16, radius 4.5); 0.9 s cast, 6 s cooldown, 22 mana |
-| | The cat stands still while casting a skill; dashing cancels the cast |
+| `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack) |
+| `1` – `8` | Skills, in the order they were learned; they cost mana and most have a cast time or a cooldown. The cat stands still while casting |
+| `K` | Skill book: everything the class can learn. Buying skills and choosing a profession only works next to the Sage in town |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
-| `Shift` | Dash — brief invulnerability, damages enemies you pass through |
-| `Q` / `E` | Hyper wave (needs full hyper energy) |
 | `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
 | `Enter` | Open chat / send message |
 | `M` | Mute sound |
@@ -72,15 +69,36 @@ The **Skeleton King** (level 18 boss) waits inside his walled fortress in the fa
 | Skeleton Warrior | Slow, tough, hits hard with an axe, drops extra gold |
 | Skeleton King | Boss; fires rings of orbs, respawns after 90 seconds |
 
+### Classes
+
+A character starts as a **Fighter** or a **Mystic** (chosen in the menu) and picks a profession from the Sage at level 20:
+
+| Start | Profession | Role |
+| --- | --- | --- |
+| Fighter | Knight | Tank: shield, high defence, pulls monsters onto himself |
+| Fighter | Rogue | Melee damage: fast twin daggers, critical hits, a dash |
+| Fighter | Archer | Ranged damage with a bow |
+| Mystic | Wizard | Magic damage: fire, area spells, sleep |
+| Mystic | Cleric | Support: heals and blesses everyone nearby, raises the fallen |
+
+Health, mana, attack, defence, attack speed and critical chance follow from class and level; there are no stat points to assign. Each class has its own hoodie colour and gear.
+
+### Skills
+
+- Every kill gives experience and **SP** (skill points).
+- Skills are bought from the Sage with SP once the character's level is high enough, and can be upgraded through several ranks.
+- Active skills go onto keys `1`–`8`; passive skills raise stats permanently.
+- Monsters can be stunned, put to sleep, slowed and made to bleed; the Skeleton King ignores stuns and sleep.
+
 ### Progression
 
-- Killing monsters gives XP to every player who damaged them.
-- Levelling up raises max health, max mana and damage and fully restores both.
+- Killing monsters gives XP and SP to every player who damaged them. A level needs `100 × level²` experience.
+- Levelling up raises health and mana and fully restores both.
 - Mana is spent on skills and comes back slowly in the field, quickly while sitting, and fastest in town.
-- Monsters drop gold gems; gems also charge hyper energy.
+- Monsters drop gold coins.
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold. The King's hoard waits inside his fortress.
-- Spend gold at the Blacksmith in town (`B`) to upgrade your weapon.
-- Dying costs 10% of your gold; you respawn in town.
+- Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises all damage.
+- Dying costs 4% of the current level's experience (never a level); you respawn in town.
 
 ## Project structure
 
@@ -111,7 +129,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Melee monsters telegraph their attacks: they stop, raise the weapon and the hit lands 0.4 seconds later, so it can be dodged.
 - Combat is target-based, as in classic MMORPGs: the server checks that the selected monster is alive and within reach before a swing or a bolt lands.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
-- Progress (level, XP, gold, weapon) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
+- Progress (class, level, XP, SP, skills, gold, weapon) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 
 ## Playing with friends over the internet
 
@@ -120,6 +138,7 @@ The server is a single Node.js process, so any host that can run Node and accept
 ## Limitations
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
-- No accounts, no PvP, no inventory beyond gold and a weapon level.
+- No accounts, no PvP, no parties, no inventory beyond gold and a weapon level.
+- Clerics can only heal and bless players standing near them; there is no targeting of other players yet.
 - The cat, the terrain and a few cursed-land details (spikes, crystals) are built from code; everything else is imported models.
 - The cat model is built from code to match the reference artwork, not sculpted or scanned.

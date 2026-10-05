@@ -26,9 +26,6 @@
   #hpFill, #tgFill { background: linear-gradient(90deg, #ff6b8e, #ffb3c4); }
   #mpFill { background: linear-gradient(90deg, #4f8dff, #a9c8ff); }
   #xpFill { background: linear-gradient(90deg, #b58cff, #e0ccff); }
-  #enFill { background: linear-gradient(90deg, var(--teal-dim), var(--teal)); }
-  #enFill.full { animation: pulse .6s infinite alternate; }
-  #dashFill { background: #cfd8dc; }
   @keyframes pulse { to { filter: brightness(1.6); } }
   .row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
   .row b { font-size: 15px; }
@@ -51,16 +48,45 @@
     border-radius: 6px; background: rgba(0, 0, 0, .55); border: 1px solid rgba(127, 232, 214, .6); overflow: hidden; }
   #castFill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--teal-dim), #d9fff7); }
   #skills { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
-  .skill { position: relative; width: 74px; height: 74px; padding-top: 9px; text-align: center; font-size: 12px; overflow: hidden;
+  .skill { position: relative; width: 78px; height: 78px; padding: 9px 2px 0; line-height: 1.1; text-align: center; font-size: 12px; overflow: hidden;
     background: rgba(6, 24, 21, .7); border: 2px solid rgba(127, 232, 214, .3); border-radius: 12px; }
   .skill.active { border-color: #fff; box-shadow: 0 0 16px rgba(127, 232, 214, .8); }
   .skill .icon { display: block; width: 22px; height: 22px; margin: 5px auto 4px; border-radius: 50%; }
-  #sk0 .icon { width: 6px; border-radius: 2px; background: linear-gradient(#fff, #cfd8e0 70%, #e7b93c 70%); transform: rotate(35deg); }
-  #sk1 .icon { background: radial-gradient(#fff, var(--teal)); box-shadow: 0 0 10px var(--teal); }
-  #sk2 .icon { background: radial-gradient(#fff, #ffa040); box-shadow: 0 0 10px #ffa040; }
+  .skill .icon { background: radial-gradient(#fff, var(--tint, var(--teal))); box-shadow: 0 0 10px var(--tint, var(--teal)); }
+  .skill .mp { position: absolute; top: 3px; right: 5px; font-size: 10px; color: #a9c8ff; }
+  .skill.dim { opacity: .5; }
   .skill kbd { position: absolute; top: 3px; left: 4px; margin: 0; padding: 0 5px; font-size: 11px; }
   .skill .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
   .skill .time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; }
+  #buffs { position: absolute; top: 188px; left: 16px; display: flex; gap: 6px; font-size: 12px; }
+  #buffs span { padding: 3px 8px; border-radius: 999px; background: rgba(6, 24, 21, .7); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold); }
+
+  /* skills window */
+  #book { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, 94vw); max-height: 78vh; display: none;
+    flex-direction: column; padding: 16px 18px; pointer-events: auto; overflow: hidden; }
+  #book.on { display: flex; }
+  #book h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
+  #book .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
+  #bookList { overflow-y: auto; padding-right: 6px; }
+  .sk { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(127, 232, 214, .15); }
+  .sk .info { flex: 1; min-width: 0; }
+  .sk .name { font-weight: 800; }
+  .sk .name small { font-weight: 400; opacity: .7; margin-left: 6px; }
+  .sk .text { font-size: 12px; opacity: .8; }
+  .sk.locked { opacity: .5; }
+  .sk button, .prof button, .classes button { padding: 7px 14px; font-size: 13px; box-shadow: none; white-space: nowrap; }
+  .sk button:disabled, .prof button:disabled { background: rgba(255, 255, 255, .15); color: rgba(255, 255, 255, .5); cursor: default; transform: none; }
+  .prof { padding: 10px 12px; margin-bottom: 10px; border-radius: 10px; background: rgba(255, 215, 106, .1); border: 1px solid rgba(255, 215, 106, .4); }
+  .prof div { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 12px; }
+  .prof div span { flex: 1; opacity: .85; }
+
+  /* class picker in the menu */
+  .classes { display: flex; gap: 10px; justify-content: center; margin-bottom: 12px; }
+  .classes button { width: 230px; padding: 10px 14px; text-align: left; white-space: normal; line-height: 1.25; color: #e8fffa; background: rgba(6, 24, 21, .85);
+    border: 2px solid rgba(127, 232, 214, .3); border-radius: 14px; }
+  .classes button.on { border-color: var(--teal); box-shadow: 0 0 18px rgba(127, 232, 214, .45); }
+  .classes b { display: block; font-size: 17px; color: var(--teal); }
+  .classes small { font-size: 12px; font-weight: 400; opacity: .85; }
   #hint { position: absolute; bottom: 14px; left: 16px; right: 16px; text-align: center; font-size: 12px; opacity: .85;
     text-shadow: 0 1px 3px #000; }
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
@@ -111,13 +137,10 @@
     <div class="bar"><i id="mpFill"></i></div>
     <div class="label"><span>Experience</span><span id="xpText"></span></div>
     <div class="bar"><i id="xpFill"></i></div>
-    <div class="label"><span>Hyper energy</span><span id="enHint"></span></div>
-    <div class="bar"><i id="enFill"></i></div>
-    <div class="label"><span>Dash</span></div>
-    <div class="bar"><i id="dashFill"></i></div>
   </div>
   <div class="panel" id="side">
     <div class="row"><span>Gold</span><b id="gold">0</b></div>
+    <div class="row"><span>Skill points</span><b id="sp">0</b></div>
     <div class="row"><span>Weapon</span><b id="weapon">Lv 1</b></div>
     <div class="row"><span>Online</span><b id="online">1</b></div>
     <canvas id="minimap" width="288" height="288"></canvas>
@@ -131,13 +154,15 @@
   <div id="notice"></div>
   <div id="chat"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…"></div>
   <div id="cast"><i id="castFill"></i></div>
-  <div id="skills">
-    <div class="skill" id="sk0"><kbd>F</kbd><i class="icon"></i>Attack</div>
-    <div class="skill" id="sk1"><kbd>1</kbd><i class="icon"></i>Bolt</div>
-    <div class="skill" id="sk2"><kbd>2</kbd><i class="icon"></i>Starfall<i class="cd" id="sk2cd"></i><span class="time" id="sk2time"></span></div>
+  <div id="buffs"></div>
+  <div id="skills"></div>
+  <div class="panel" id="book">
+    <h2 id="bookTitle">Skills</h2>
+    <div class="sub" id="bookSub"></div>
+    <div id="bookList"></div>
   </div>
   <div id="shop"></div>
-  <div id="hint">WASD — move · click / Tab — target · F or click target again — attack · 1 — Bolt · 2 — Starfall · X — sit · RMB drag — camera · wheel — zoom · Space — jump · Shift — dash · Q — hyper wave · Enter — chat · B — Blacksmith</div>
+  <div id="hint">WASD — move · click / Tab — target · F — attack · 1–8 — skills · K — skill book · X — sit · RMB drag — camera · wheel — zoom · Space — jump · Enter — chat · B — Blacksmith</div>
 </div>
 <div id="flash"></div>
 
@@ -148,20 +173,20 @@
     <div><kbd>WASD</kbd>move</div>
     <div><kbd>Click</kbd>target</div>
     <div><kbd>F</kbd>attack</div>
-    <div><kbd>1</kbd>Bolt</div>
-    <div><kbd>2</kbd>Starfall</div>
+    <div><kbd>1–8</kbd>skills</div>
+    <div><kbd>K</kbd>skill book</div>
     <div><kbd>X</kbd>sit</div>
     <div><kbd>RMB</kbd>camera</div>
-    <div><kbd>Shift</kbd>dash</div>
     <div><kbd>Enter</kbd>chat</div>
   </div>
+  <div class="classes" id="classes"></div>
   <input id="nameInput" maxlength="16" placeholder="Cat name" autocomplete="off">
   <button id="playBtn">Enter the world</button>
 </div>
 
 <div class="overlay center hidden" id="dead">
   <h1>YOU <span>DIED</span></h1>
-  <p>Respawning in town… 10% of your gold is lost</p>
+  <p id="deadText">Respawning in town…</p>
 </div>
 
 <div class="overlay center hidden" id="lost">

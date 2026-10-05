@@ -8,12 +8,16 @@ import { createCat } from './cat.js';
 import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
-import { CAST_TIME, BOLT_RANGE, BOLT_MP, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SHOP_RANGE, CHESTS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
+import {
+  WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SAGE, near, CHESTS, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
+  professionsOf, SKILLS, skillsFor, hotbar, xpNext, upgradeCost, zoneAt,
+} from './shared.js';
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
 const ZONE_COLORS = [TEAL, 0x6fbf55, 0xb59a6a, 0xff5a70];   // town, meadows, graveyard, cursed lands
-const OTHER_HOODIES = [0x3b4a7a, 0x7a3b5a, 0x7a5a2b, 0x4a3b7a, 0x2b6a7a, 0x7a2b2b, 0x4d4d57];
+const REACH = 2.4;    // melee reach, for the size of the slash effect
+const SHOW = 10;      // monster health and damage are shown multiplied by this, for rounder numbers
 const glow = (hex, k = 2.5) => new THREE.Color(hex).multiplyScalar(k);
 const css = (hex) => `#${hex.toString(16).padStart(6, '0')}`;
 const $ = (id) => document.getElementById(id);
@@ -137,6 +141,15 @@ const meshPool = (geo, mat, scale) => makePool(() => {
 });
 const bulletMat = new THREE.MeshBasicMaterial({ color: glow(TEAL, 3) });
 const fireMat = new THREE.MeshBasicMaterial({ color: glow(FIRE, 3) });
+const frostMat = new THREE.MeshBasicMaterial({ color: glow(0xa9d8ff, 3) });
+const arrowMat = new THREE.MeshBasicMaterial({ color: glow(0xffe9a6, 2) });
+const healMat = new THREE.MeshBasicMaterial({ color: glow(0x8ee68e, 2.5) });
+const FX = { arcane: bulletMat, frost: frostMat, fire: fireMat, arrow: arrowMat };
+// what the charging orb between the paws looks like for a skill
+const orbMat = (id) => {
+  const k = SKILLS[id];
+  return !k ? bulletMat : k.kind === 'heal' ? healMat : k.kind === 'ground' ? fireMat : FX[k.fx] || bulletMat;
+};
 const bulletPool = meshPool(sphereGeo, bulletMat, 0.32);
 const orbPool = meshPool(sphereGeo, new THREE.MeshBasicMaterial({ color: glow(0xff3b6b, 3) }), 0.32);
 // dropped gold: a glowing placeholder until the coin model has loaded, then a spinning coin
@@ -229,8 +242,8 @@ function spawnRing(x, z, maxR, hex) {
 
 // ---------------------------------------------------------------- avatars (cats)
 
-function makeAvatar(hoodie) {
-  const cat = createCat({ hoodie });
+function makeAvatar(cls = 'fighter') {
+  const cat = createCat(CLASSES[cls]);
   const root = new THREE.Group();   // never rotates, so labels and bars stay screen-aligned
   root.add(cat.group);
   root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
@@ -240,7 +253,7 @@ function makeAvatar(hoodie) {
   cat.group.add(orb);
   scene.add(root);
   return {
-    root, cat, orb, swingT: -1, swingKind: 0, castT: -1, castDur: CAST_TIME, castSkill: 1, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
+    root, cat, cls, orb, swingT: -1, swingKind: 0, castT: -1, castDur: 1, castSkill: '', bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
     speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0,
   };
@@ -253,6 +266,12 @@ function setLabel(a, text, color) {
   a.label = textSprite(text, color);
   a.label.position.y = 3.15;
   a.root.add(a.label);
+}
+
+function setClass(a, cls) {
+  if (a.cls === cls || !CLASSES[cls]) return;
+  a.cls = cls;
+  a.cat.setLook(CLASSES[cls]);
 }
 
 function removeAvatar(a) {
@@ -282,7 +301,7 @@ function makeMobView(ti, lvl) {
   root.add(skeleton.group);
   const top = SKELETON_HEIGHT * skeleton.group.scale.y + (type === 'shooter' ? 0.4 : 0);
 
-  const text = type === 'boss' ? `Skeleton King · Lv ${lvl}` : `Lv ${lvl}`;
+  const text = type === 'boss' ? `Skeleton King · Lv ${lvl}` : `Lv ${lvl}`;   // the full name is shown in the target frame
   if (!lvlLabels.has(text)) lvlLabels.set(text, textSprite(text, type === 'boss' ? '#ff8095' : '#f0e6d8', type === 'boss' ? 0.8 : 0.4));
   const proto = lvlLabels.get(text);
   const label = new THREE.Sprite(proto.material);   // material shared between mobs of the same level
@@ -294,7 +313,7 @@ function makeMobView(ti, lvl) {
   scene.add(root);
   return {
     root, skeleton, label, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
-    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flash: 0, age: 0, yaw: 0,
+    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flags: 0, flash: 0, age: 0, yaw: 0,
   };
 }
 
@@ -308,9 +327,9 @@ let bullets = [], orbs = [], meteors = [];
 
 const me = makeAvatar();
 me.z = 6;   // menu pose: on the plaza, in front of the fountain
-const stats = { hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, level: 1, gold: 0, weapon: 1, energy: 0, dead: false };
+const stats = { hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, sp: 0, level: 1, gold: 0, weapon: 1, cls: 'fighter', skills: {}, buffs: [], dead: false };
 const local = {
-  vy: 0, jumps: 0, invuln: 0, fireCd: 0, meteorCd: 0, swordCd: 0, combo: 0, dashT: 0, dashCd: 0, sendT: 0,
+  vy: 0, jumps: 0, invuln: 0, fireCd: 0, swordCd: 0, combo: 0, dashT: 0, sendT: 0, cds: {},
   dashDir: new THREE.Vector2(0, 1), aim: new THREE.Vector2(0, 1), zone: '',
 };
 
@@ -322,8 +341,8 @@ scene.add(targetRing);
 
 // the arc a sword swing leaves in the air
 const slashes = [];
-const slashGeo = new THREE.RingGeometry(1.2, SWORD.range + 0.3, 24, 1, -1.1, 2.2);
-const chopGeo = new THREE.PlaneGeometry(SWORD.range, 0.4).translate(SWORD.range / 2 + 0.6, 0, 0);
+const slashGeo = new THREE.RingGeometry(1.2, REACH + 0.3, 24, 1, -1.1, 2.2);
+const chopGeo = new THREE.PlaneGeometry(REACH, 0.4).translate(REACH / 2 + 0.6, 0, 0);
 // kind 0 / 1: horizontal arc revealed in the direction of the sweep; kind 2: a straight streak ahead
 function spawnSlash(x, z, dx, dz, kind) {
   const mesh = new THREE.Mesh(kind === 2 ? chopGeo : slashGeo, new THREE.MeshBasicMaterial({ color: glow(0xffffff, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
@@ -333,10 +352,20 @@ function spawnSlash(x, z, dx, dz, kind) {
   slashes.push({ mesh, t: 0, kind, yaw: mesh.rotation.z });
 }
 
-// preview of where Starfall will land while it is being cast
+// numbers that float up over a monster when this player damages it, or over the cat when it is healed
+const floaters = [];
+function floatText(x, y, z, text, color, big) {
+  const sprite = textSprite(text, color, big ? 0.9 : 0.62);
+  sprite.position.set(x + (Math.random() - 0.5) * 0.8, y, z);
+  sprite.material.depthTest = false;
+  sprite.renderOrder = 5;
+  scene.add(sprite);
+  floaters.push({ sprite, t: 0 });
+}
+
+// preview of where an area skill will land while it is being cast
 const aoeMarker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
 aoeMarker.rotation.x = -Math.PI / 2;
-aoeMarker.scale.setScalar(METEOR.radius);
 aoeMarker.visible = false;
 scene.add(aoeMarker);
 
@@ -394,7 +423,7 @@ async function connect() {
   }
   $('playBtn').textContent = 'Connecting…';
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
-  ws.onopen = () => send({ t: 'join', name, token: getToken() });
+  ws.onopen = () => send({ t: 'join', name, cls: pickedClass, token: getToken() });
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => {
     state = 'lost';
@@ -440,17 +469,15 @@ function onSnapshot(s) {
   online = s.n;
   const wasDead = stats.dead;
   Object.assign(stats, s.me, { dead: !!s.me.dead });
+  setClass(me, stats.cls);
   if (stats.dead !== wasDead) $('dead').classList.toggle('hidden', !stats.dead);
 
   syncViews(others, s.p,
-    ([id, x, y, z, yaw]) => {
-      const a = makeAvatar(OTHER_HOODIES[id % OTHER_HOODIES.length]);
-      Object.assign(a, { x, y, z, yaw });
-      return a;
-    },
-    (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit]) => {
+    ([, x, y, z, yaw, , , , , , , cls]) => Object.assign(makeAvatar(CLASS_KEYS[cls]), { x, y, z, yaw }),
+    (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit, cls]) => {
       Object.assign(a, { tx: x, ty: y, tz: z, tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit });
-      setLabel(a, `${names.get(id) || 'Cat'} · Lv ${level}`);
+      setClass(a, CLASS_KEYS[cls]);
+      setLabel(a, `${names.get(id) || 'Cat'} · ${CLASSES[a.cls].name} ${level}`);
     },
     removeAvatar);
 
@@ -458,7 +485,7 @@ function onSnapshot(s) {
   for (const ev of s.e) if (ev.k === 'kill' && mobViews.has(ev.id)) mobViews.get(ev.id).killed = true;
   syncViews(mobViews, s.m,
     ([, ti, lvl, x, z]) => Object.assign(makeMobView(ti, lvl), { x, z }),
-    (v, [, , , x, z, hp, maxHp]) => Object.assign(v, { tx: x, tz: z, hp, maxHp }),
+    (v, [, , , x, z, hp, maxHp, flags]) => Object.assign(v, { tx: x, tz: z, hp, maxHp, flags }),
     (v) => {
       if (!v.killed) { removeMobView(v); return; }
       v.skeleton.die();
@@ -480,10 +507,13 @@ function onSnapshot(s) {
 }
 
 // a bolt that homes in on a monster; purely visual, the server decides the damage
-function spawnBolt(x, z, id) {
+function spawnBolt(x, z, id, fx) {
   const b = bulletPool.get();
   b.mesh.position.set(x, 1.1, z);
+  b.mesh.material = FX[fx] || bulletMat;
+  b.mesh.scale.setScalar(fx === 'arrow' ? 0.16 : 0.32);
   b.id = id;
+  b.speed = fx === 'arrow' ? 42 : 34;
   bullets.push(b);
 }
 
@@ -496,10 +526,9 @@ function spawnProjectile(list, pool, x, z, dx, dz, speed, life) {
 
 function onEvent(ev) {
   switch (ev.k) {
-    case 'shot':
-      if (ev.o === myId) break;
-      spawnBolt(ev.x, ev.z, ev.id);
-      if (others.has(ev.o)) others.get(ev.o).shootPose = 0.25;
+    case 'shot':   // an archer's arrow from an auto-attack
+      spawnBolt(ev.x, ev.z, ev.id, ev.fx);
+      if (others.has(ev.o)) others.get(ev.o).shootPose = 0.3;
       break;
     case 'cast':
       if (ev.o !== myId && others.has(ev.o)) Object.assign(others.get(ev.o), { castT: 0, castDur: ev.d, castSkill: ev.s });
@@ -507,18 +536,39 @@ function onEvent(ev) {
     case 'swing':
       if (ev.o === myId || !others.has(ev.o)) break;
       Object.assign(others.get(ev.o), { swingT: 0, swingKind: ev.c });
-      spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
+      if (!CLASSES[others.get(ev.o).cls].ranged) spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
       break;
-    case 'meteor': {
-      const marker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
-      marker.rotation.x = -Math.PI / 2;
-      marker.position.set(ev.x, 0.08, ev.z);
-      marker.scale.setScalar(METEOR.radius);
-      const star = new THREE.Mesh(sphereGeo, fireMat);
-      star.scale.setScalar(0.7);
-      scene.add(marker, star);
-      meteors.push({ marker, star, t: 0, d: ev.d, x: ev.x, z: ev.z });
-      sfx(900, ev.d, 'sawtooth', 0.04, -700);
+    case 'skill': {   // the server accepted a skill: show what it does
+      const k = SKILLS[ev.s], a = ev.o === myId ? me : others.get(ev.o), tv = mobViews.get(ev.tid);
+      if (!k || !a) break;
+      if (k.kind === 'strike') {
+        if (ev.o !== myId) Object.assign(a, { swingT: 0, swingKind: 2 });
+        if (tv) burst(tv.x, tv.top * 0.6, tv.z, 0xffffff, 10, 7);
+        sfx(240, 0.14, 'sawtooth', 0.05, 300);
+      } else if (k.kind === 'shot' || k.kind === 'bolt') {
+        spawnBolt(a.x, a.z, ev.tid, k.fx);
+        a.shootPose = 0.25;
+        sfx(660, 0.12, 'square', 0.04, -400);
+      } else if (k.kind === 'sleep') {
+        if (tv) burst(tv.x, tv.top, tv.z, 0xc9a6ff, 22, 4);
+      } else if (k.kind === 'ground') {
+        const marker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+        marker.rotation.x = -Math.PI / 2;
+        marker.position.set(ev.x, 0.08, ev.z);
+        marker.scale.setScalar(k.radius);
+        const star = new THREE.Mesh(sphereGeo, k.phys ? arrowMat : fireMat);
+        star.scale.setScalar(k.phys ? 0.4 : 0.7);
+        scene.add(marker, star);
+        meteors.push({ marker, star, t: 0, d: k.delay, x: ev.x, z: ev.z });
+        sfx(900, k.delay, 'sawtooth', 0.04, -700);
+      } else if (k.kind === 'heal' || k.kind === 'buff' || k.kind === 'taunt' || k.kind === 'revive') {
+        const color = { heal: 0x8ee68e, buff: 0xffd76a, taunt: 0xff5a5a, revive: 0xffffff }[k.kind];
+        spawnRing(a.x, a.z, k.radius || 2.5, color);
+        burst(a.x, 1.3, a.z, color, 26, 6);
+        sfx(k.kind === 'taunt' ? 150 : 520, 0.35, 'triangle', 0.07, 300);
+      } else if (k.kind === 'dash' && ev.o !== myId) {
+        burst(a.x, 1, a.z, TEAL, 14, 6);
+      }
       break;
     }
     case 'boom':
@@ -533,6 +583,7 @@ function onEvent(ev) {
     case 'hit': {
       const v = mobViews.get(ev.id);
       if (v) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
+      if (ev.o === myId) floatText(ev.x, (v ? v.top : 2) + 0.5, ev.z, String(Math.max(1, Math.round(ev.d * SHOW))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
       sfx(520, 0.05, 'square', 0.025);
       break;
     }
@@ -542,14 +593,10 @@ function onEvent(ev) {
     case 'kill': {
       const r = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].r : 0.7;
       burst(ev.x, r * 1.5, ev.z, ev.ti >= 0 ? BONE : 0xffffff, 16 + r * 14, 8);
+      if (ev.o === myId && ev.d) floatText(ev.x, r * 3 + 1.2, ev.z, String(Math.max(1, Math.round(ev.d * SHOW))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
       sfx(180, 0.18, 'sawtooth', 0.05, -120);
       break;
     }
-    case 'ring':
-      spawnRing(ev.x, ev.z, ev.r, TEAL);
-      burst(ev.x, 1, ev.z, TEAL, 40, 14);
-      sfx(90, 0.6, 'sawtooth', 0.1, 700);
-      break;
     case 'lvlfx':
       spawnRing(ev.x, ev.z, 4, 0xffd76a);
       burst(ev.x, 1.5, ev.z, 0xffd76a, 30, 9);
@@ -561,6 +608,20 @@ function onEvent(ev) {
     case 'up':
       banner(`Weapon upgraded · Lv ${ev.weapon}`);
       sfx(660, 0.3, 'triangle', 0.08, 400);
+      break;
+    case 'learned':
+      banner(`${SKILLS[ev.s].name} · rank ${ev.rank}`);
+      sfx(660, 0.3, 'triangle', 0.08, 400);
+      break;
+    case 'prof':
+      banner(`You are now a ${CLASSES[ev.cls].name}!`);
+      sfx(523, 0.6, 'triangle', 0.09, 520);
+      break;
+    case 'healed':
+      floatText(me.x, 3.3, me.z, `+${ev.n}`, '#8ee68e');
+      break;
+    case 'died':
+      $('deadText').textContent = `You lost ${ev.xp} experience. Respawning in town…`;
       break;
     case 'open': {
       const c = CHESTS[ev.i];
@@ -593,6 +654,7 @@ function onEvent(ev) {
 // ---------------------------------------------------------------- input
 
 const keys = new Set();
+const fresh = new Set();   // keys pressed since the last frame, so warnings show once per press
 const mouse = new THREE.Vector2(0, -0.3);
 const typing = () => document.activeElement === $('chatInput') || document.activeElement === $('nameInput');
 
@@ -673,16 +735,16 @@ addEventListener('keydown', (e) => {
   if (e.code === 'Tab') e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
+  fresh.add(e.code);
   if (e.code === 'Space') { e.preventDefault(); jump(); }
-  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') dash();
   if (e.code === 'Tab') {   // next monster, nearest first
     const list = nearbyMobs(40);
     if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
   }
-  if (e.code === 'Escape') setTarget(0, false);
+  if (e.code === 'Escape') { if (bookOpen) toggleBook(); else setTarget(0, false); }
   if (e.code === 'KeyF') attackKey();
   if (e.code === 'KeyX' && !stats.dead && me.castT < 0) { me.sitting = !me.sitting; if (me.sitting) attacking = false; }
-  if (e.code === 'KeyQ' || e.code === 'KeyE') send({ t: 'u' });
+  if (e.code === 'KeyK') toggleBook();
   if (e.code === 'KeyB') send({ t: 'b' });
   if (e.code === 'KeyM') muted = !muted;
 });
@@ -720,6 +782,24 @@ addEventListener('contextmenu', (e) => e.preventDefault());
 $('playBtn').addEventListener('click', connect);
 $('reloadBtn').addEventListener('click', () => location.reload());
 try { $('nameInput').value = localStorage.getItem('hypercat-name') || ''; } catch { /* ignore */ }
+
+// class picker in the menu; it only matters for characters that have no class yet
+let pickedClass = START_CLASSES[0];
+try { pickedClass = START_CLASSES.includes(localStorage.getItem('hypercat-class')) ? localStorage.getItem('hypercat-class') : pickedClass; } catch { /* ignore */ }
+function pickClass(id) {
+  pickedClass = id;
+  try { localStorage.setItem('hypercat-class', id); } catch { /* ignore */ }
+  for (const b of $('classes').children) b.classList.toggle('on', b.dataset.cls === id);
+  if (state === 'menu') setClass(me, id);   // the cat in the menu shows off the class
+}
+for (const id of START_CLASSES) {
+  const b = document.createElement('button');
+  b.dataset.cls = id;
+  b.append(Object.assign(document.createElement('b'), { textContent: CLASSES[id].name }), Object.assign(document.createElement('small'), { textContent: CLASSES[id].text }));
+  b.addEventListener('click', () => { pickClass(id); b.blur(); });
+  $('classes').append(b);
+}
+pickClass(pickedClass);
 loadSkeletons().catch(() => {});   // start downloading models while the player is still in the menu
 
 function jump() {
@@ -732,16 +812,12 @@ function jump() {
 }
 
 const moveDir = new THREE.Vector2();
-function dash() {
-  if (local.dashCd > 0 || stats.dead) return;
+// the movement part of a dash skill; the server grants the invulnerability
+function startDash() {
   // dash where the cat is going, or straight ahead when standing still
   if (moveDir.lengthSq() > 0) local.dashDir.copy(moveDir).normalize();
   else local.dashDir.set(Math.sin(me.yaw), Math.cos(me.yaw));
   local.dashT = 0.18;
-  me.castT = -1;   // dashing interrupts a cast
-  me.sitting = false;
-  local.dashCd = 1.2;
-  send({ t: 'd' });
   sfx(700, 0.15, 'sawtooth', 0.05, -500);
 }
 
@@ -752,9 +828,33 @@ const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const aimPoint = new THREE.Vector3();
 const camTarget = new THREE.Vector3(0, 0.45, 0), camGoal = new THREE.Vector3(), lookGoal = new THREE.Vector3();
 
+const NEEDS_TARGET = ['strike', 'shot', 'bolt', 'sleep'];
+
+// where an area skill lands: the cursor, pulled in to the skill's range
+function groundPoint(range) {
+  let x = aimPoint.x - me.x, z = aimPoint.z - me.z;
+  const d = Math.hypot(x, z);
+  if (d > range) { x *= range / d; z *= range / d; }
+  return [me.x + x, me.z + z];
+}
+
+// Sends a skill to the server and plays the caster's own part of it; everything else follows from the server's reply.
+function useSkill(id, tdx, tdz) {
+  const k = SKILLS[id];
+  local.cds[id] = time + Math.max(k.cd, 0.3);
+  const msg = { t: 'sk', s: id, tid: targetId };
+  if (k.kind === 'ground') [msg.x, msg.z] = groundPoint(k.range);
+  if (k.kind === 'strike') {
+    Object.assign(me, { swingT: 0, swingKind: 2 });
+    spawnSlash(me.x, me.z, tdx, tdz, 2);
+  }
+  if (k.kind === 'dash') startDash();
+  if (k.kind === 'strike' || k.kind === 'shot' || k.kind === 'bolt') attacking = true;   // an attack skill also starts the auto-attack
+  me.sitting = false;
+  send(msg);
+}
+
 function updateLocal(dt) {
-  local.dashCd -= dt;
-  local.meteorCd -= dt;
   local.swordCd -= dt;
   local.fireCd -= dt;
   local.invuln -= dt;
@@ -763,10 +863,11 @@ function updateLocal(dt) {
 
   let tv = mobViews.get(targetId);
   if (targetId && (!tv || tv.killed)) { setTarget(0, false); tv = null; }   // the target died or walked out of view
-  if (stats.dead) { me.speed = 0; me.castT = -1; me.sitting = false; attacking = false; return; }
+  if (stats.dead) { me.speed = 0; me.castT = -1; me.sitting = false; attacking = false; fresh.clear(); return; }
+  const cls = CLASSES[stats.cls];
 
   raycaster.setFromCamera(mouse, camera);
-  raycaster.ray.intersectPlane(groundPlane, aimPoint);   // where Starfall will land
+  raycaster.ray.intersectPlane(groundPlane, aimPoint);   // where area skills will land
 
   // WASD moves relative to the camera
   const k = (a, b) => (keys.has(a) || keys.has(b) ? 1 : 0);
@@ -782,7 +883,7 @@ function updateLocal(dt) {
     tdx = tv.x - me.x; tdz = tv.z - me.z;
     tDist = Math.hypot(tdx, tdz) || 0.001;
     tdx /= tDist; tdz /= tDist;
-    inReach = tDist < SWORD.range + tv.def.r;
+    inReach = tDist < cls.reach + tv.def.r;
   }
   if (tDist > 50 && tv) { setTarget(0, false); tv = null; }   // too far away to stay locked on
   // auto-attack: with no keys held the cat runs up to its target by itself
@@ -810,67 +911,71 @@ function updateLocal(dt) {
   me.y += local.vy * dt;
   if (me.y <= 0) { me.y = 0; local.vy = 0; local.jumps = 0; }
 
-  // ... and swings whenever the sword is ready and the target is within reach
+  // ... and hits whenever its weapon is ready and the target is within reach
   if (attacking && tv && inReach && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
-    local.swordCd = SWORD.cd;
-    me.swingT = 0;
-    me.swingKind = local.combo;            // combo: left-to-right, right-to-left, overhead chop
-    local.combo = (local.combo + 1) % 3;
-    spawnSlash(me.x, me.z, tdx, tdz, me.swingKind);
+    local.swordCd = cls.atkCd;
+    if (cls.ranged) {
+      me.shootPose = 0.3;   // the arrow itself appears when the server confirms the shot
+    } else {
+      me.swingT = 0;
+      me.swingKind = local.combo;          // combo: left-to-right, right-to-left, overhead chop
+      local.combo = (local.combo + 1) % 3;
+      spawnSlash(me.x, me.z, tdx, tdz, me.swingKind);
+    }
     send({ t: 'a', id: targetId, c: me.swingKind });
-    sfx(300, 0.12, 'sawtooth', 0.04, 500);
+    sfx(cls.ranged ? 500 : 300, 0.12, 'sawtooth', 0.04, 500);
   }
 
-  // skills: 1 = Bolt at the target, 2 = Starfall at the cursor; both cost mana and root the cat while channelling
+  // skills on keys 1-8; Shift is a shortcut for a dash skill
+  const bar = hotbar(stats.cls, stats.skills);
   if (me.castT < 0 && local.fireCd <= 0 && local.dashT <= 0) {
-    let skill = 0;
-    if (keys.has('Digit2')) {
-      if (local.meteorCd > 0) notice('Starfall is not ready yet');
-      else if (stats.mp < METEOR.mp) notice('Not enough mana');
-      else skill = 2;
-    } else if (keys.has('Digit1')) {
-      if (!tv) notice('Select a target first');
-      else if (tDist > BOLT_RANGE) notice('The target is too far away');
-      else if (stats.mp < BOLT_MP) notice('Not enough mana');
-      else skill = 1;
+    let pick = null, code = '';
+    for (let i = 0; i < bar.length && !pick; i++) if (keys.has(`Digit${i + 1}`)) { pick = bar[i]; code = `Digit${i + 1}`; }
+    if (!pick && bar.includes('shadow_step')) {
+      for (const c of ['ShiftLeft', 'ShiftRight']) if (keys.has(c)) { pick = 'shadow_step'; code = c; }
     }
-    if (skill) {
-      Object.assign(me, { castT: 0, castSkill: skill, castDur: skill === 2 ? METEOR.cast : CAST_TIME, sitting: false });
-      if (skill === 1) attacking = true;   // an attack skill also starts the auto-attack
-      send({ t: 'k', s: skill });
-      sfx(skill === 2 ? 160 : 220, me.castDur, 'sine', 0.04, 500);
+    if (pick) {
+      const s = SKILLS[pick], targeted = NEEDS_TARGET.includes(s.kind);
+      const warn = (text) => { if (fresh.has(code)) notice(text); };
+      if ((local.cds[pick] || 0) > time) warn(`${s.name} is not ready yet`);
+      else if (stats.mp < s.mp) warn('Not enough mana');
+      else if (targeted && !tv) warn('Select a target first');
+      else if (s.kind === 'strike' && !inReach) attacking = true;   // run up to the target first; the skill fires on arrival
+      else if (targeted && s.range && tDist > s.range) warn('The target is too far away');
+      else if (s.cast) {
+        Object.assign(me, { castT: 0, castSkill: pick, castDur: s.cast, sitting: false });
+        send({ t: 'k', s: pick });
+        sfx(220, s.cast, 'sine', 0.04, 500);
+      } else {
+        useSkill(pick, tdx, tdz);
+        local.fireCd = 0.3;
+      }
     }
   } else if (me.castT >= 0) {
+    const s = SKILLS[me.castSkill];
     me.castT += dt;
-    // Starfall lands on the cursor, limited to its range
-    let sx = aimPoint.x - me.x, sz = aimPoint.z - me.z;
-    const sd = Math.hypot(sx, sz);
-    if (sd > METEOR.range) { sx *= METEOR.range / sd; sz *= METEOR.range / sd; }
-    if (me.castSkill === 2) {
+    if (s.kind === 'ground') {
+      const [gx, gz] = groundPoint(s.range);
       aoeMarker.visible = true;
-      aoeMarker.position.set(me.x + sx, 0.08, me.z + sz);
-    } else if (!tv) {
-      me.castT = -1;   // the target is gone: the bolt fizzles
+      aoeMarker.position.set(gx, 0.08, gz);
+      aoeMarker.scale.setScalar(s.radius);
+    } else if (NEEDS_TARGET.includes(s.kind) && !tv) {
+      me.castT = -1;   // the target is gone: the spell fizzles
     }
     if (me.castT >= me.castDur) {
       me.castT = -1;
       local.fireCd = 0.08;
       me.shootPose = 0.25;
-      if (me.castSkill === 2) {
-        local.meteorCd = METEOR.cd;
-        send({ t: 'q', x: me.x + sx, z: me.z + sz });
-      } else {
-        spawnBolt(me.x + tdx * 0.8, me.z + tdz * 0.8, targetId);
-        send({ t: 'f', id: targetId });
-        sfx(660, 0.12, 'square', 0.04, -400);
-      }
+      useSkill(me.castSkill, tdx, tdz);
     }
   }
+  fresh.clear();
 
-  // The cat faces its target while fighting it, the landing spot while casting Starfall, and otherwise where it is going.
+  // The cat faces its target while fighting it, the landing spot while casting an area skill, and otherwise where it is going.
+  const casting = me.castT >= 0 ? SKILLS[me.castSkill].kind : '';
   let face = null;
-  if (tv && (me.swingT >= 0 || me.shootPose > 0 || (me.castT >= 0 && me.castSkill === 1) || (attacking && inReach && !manual))) face = Math.atan2(tdx, tdz);
-  else if (me.castT >= 0) face = Math.atan2(aimPoint.x - me.x, aimPoint.z - me.z);
+  if (tv && (me.swingT >= 0 || me.shootPose > 0 || NEEDS_TARGET.includes(casting) || (attacking && inReach && !manual))) face = Math.atan2(tdx, tdz);
+  else if (casting === 'ground') face = Math.atan2(aimPoint.x - me.x, aimPoint.z - me.z);
   else if (local.dashT > 0) face = Math.atan2(local.dashDir.x, local.dashDir.y);
   else if (moving) face = Math.atan2(moveDir.x, moveDir.y);
   if (face !== null) me.yaw = lerpAngle(me.yaw, face, Math.min(1, dt * 14));
@@ -902,7 +1007,7 @@ function updateAvatar(a, dt, isMe) {
   if (a.swingT >= 0 && (a.swingT += dt / 0.4) >= 1) a.swingT = -1;
   const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
   a.orb.visible = a.castT >= 0;
-  a.orb.material = a.castSkill === 2 ? fireMat : bulletMat;
+  a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
   a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, swing: a.swingT, swingKind: a.swingKind });
 }
@@ -925,7 +1030,8 @@ function updateViews(dt) {
     v.skeleton.group.rotation.y = v.yaw - cam.yaw;
     // monsters far outside the camera's view are neither drawn nor animated
     v.root.visible = (v.x - me.x) ** 2 + (v.z - me.z) ** 2 < 55 * 55;
-    if (v.root.visible) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
+    // a stunned or sleeping monster freezes mid-pose
+    if (v.root.visible && !(v.flags & 3)) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
     v.flash = Math.max(0, v.flash - dt * 6);
     v.skeleton.flash(v.flash);
     v.bar.set(v.hp / v.maxHp, v.hp < v.maxHp);
@@ -956,9 +1062,9 @@ function updateViews(dt) {
     const v = mobViews.get(b.id), m = b.mesh.position;
     let done = !v;
     if (v) {
-      const dx = v.x - m.x, dz = v.z - m.z, d = Math.hypot(dx, dz) || 0.001, step = 34 * dt;
+      const dx = v.x - m.x, dz = v.z - m.z, d = Math.hypot(dx, dz) || 0.001, step = b.speed * dt;
       m.y += (v.top * 0.5 - m.y) * Math.min(1, dt * 8);
-      if (d <= step + v.def.r * 0.6) { done = true; burst(v.x, v.top * 0.5, v.z, TEAL, 6, 5); }
+      if (d <= step + v.def.r * 0.6) { done = true; burst(v.x, v.top * 0.5, v.z, b.mesh.material.color.getHex(), 6, 5); }
       else { m.x += dx / d * step; m.z += dz / d * step; }
     }
     if (done) bulletPool.release(b);
@@ -980,6 +1086,14 @@ function updateViews(dt) {
     if (dead) { burst(m.x, 1, m.z, 0xff3b6b, 4, 3); orbPool.release(o); }
     return !dead;
   });
+
+  for (let j = floaters.length - 1; j >= 0; j--) {
+    const f = floaters[j];
+    f.t += dt;
+    f.sprite.position.y += dt * 1.7;
+    f.sprite.material.opacity = Math.min(1, (1 - f.t) * 2.5);
+    if (f.t >= 1) { disposeSprite(f.sprite); floaters.splice(j, 1); }
+  }
 
   for (let j = slashes.length - 1; j >= 0; j--) {
     const s = slashes[j];
@@ -1011,29 +1125,112 @@ function updateViews(dt) {
   }
 }
 
+// ---------------------------------------------------------------- skill bar & skill book
+
+const TINT = { strike: '#ffb3b3', shot: '#ffe9a6', bolt: '#7fe8d6', ground: '#ffa040', heal: '#8ee68e', buff: '#ffd76a', taunt: '#ff6b6b', sleep: '#c9a6ff', dash: '#cfd8dc', revive: '#ffffff' };
+const FX_TINT = { frost: '#a9d8ff', fire: '#ffa040', arrow: '#ffe9a6' };
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+
+// The bar is rebuilt only when the set of learned active skills changes.
+let barKey = null, barSlots = [], attackSlot = null;
+function renderBar(bar) {
+  const key = bar.join(',');
+  if (key === barKey) return;
+  barKey = key;
+  const root = $('skills');
+  root.replaceChildren();
+  attackSlot = el('div', 'skill');
+  attackSlot.append(el('kbd', '', 'F'), el('i', 'icon'), 'Attack');
+  attackSlot.querySelector('.icon').style.setProperty('--tint', '#cfd8e0');
+  root.append(attackSlot);
+  barSlots = bar.map((id, i) => {
+    const k = SKILLS[id], slot = el('div', 'skill');
+    const icon = el('i', 'icon'), cd = el('i', 'cd'), left = el('span', 'time');
+    icon.style.setProperty('--tint', FX_TINT[k.fx] || TINT[k.kind]);
+    slot.append(el('kbd', '', String(i + 1)), el('span', 'mp', String(k.mp)), icon, k.name, cd, left);
+    root.append(slot);
+    return { id, k, slot, cd, left };
+  });
+}
+
+let bookOpen = false, bookKey = null;
+function toggleBook() {
+  bookOpen = !bookOpen;
+  bookKey = null;
+  $('book').classList.toggle('on', bookOpen);
+}
+
+// The skill book lists everything the class can learn. Buying is only possible next to the Sage.
+function renderBook(atSage) {
+  const key = [stats.cls, stats.level, stats.sp, atSage, JSON.stringify(stats.skills)].join('|');
+  if (key === bookKey) return;
+  bookKey = key;
+  const cls = CLASSES[stats.cls];
+  $('bookTitle').textContent = `${cls.name} skills`;
+  $('bookSub').textContent = `Skill points: ${stats.sp} · ${atSage ? 'The Sage will teach you what you can afford.' : 'Visit the Sage by the fountain in town to learn skills.'}`;
+  const list = $('bookList');
+  list.replaceChildren();
+  const button = (label, enabled, onClick) => {
+    const b = el('button', '', label);
+    b.disabled = !enabled;
+    b.addEventListener('click', () => { onClick(); b.blur(); });
+    return b;
+  };
+
+  if (!cls.base) {   // a starting class: show what it can become
+    const box = el('div', 'prof');
+    const ready = stats.level >= PROFESSION_LEVEL;
+    box.append(el('b', '', ready ? 'Choose your profession' : `Professions open at level ${PROFESSION_LEVEL}`));
+    for (const id of professionsOf(stats.cls)) {
+      const row = el('div');
+      row.append(el('b', '', CLASSES[id].name), el('span', '', CLASSES[id].text));
+      if (ready) row.append(button('Become', atSage, () => send({ t: 'prof', cls: id })));
+      box.append(row);
+    }
+    list.append(box);
+  }
+
+  for (const id of skillsFor(stats.cls)) {
+    const k = SKILLS[id], rank = stats.skills[id] | 0, max = k.sp.length, tooLow = stats.level < k.lvl;
+    const row = el('div', `sk${tooLow ? ' locked' : ''}`), info = el('div', 'info'), name = el('div', 'name', k.name);
+    name.append(el('small', '', `${k.kind === 'passive' ? 'passive · ' : ''}rank ${rank}/${max}${tooLow ? ` · level ${k.lvl}` : ''}`));
+    const facts = [k.mp && `${k.mp} mana`, k.cast && `${k.cast}s cast`, k.cd && `${k.cd}s cooldown`].filter(Boolean).join(' · ');
+    info.append(name, el('div', 'text', facts ? `${k.text} ${facts}.` : k.text));
+    row.append(info, rank >= max
+      ? button('Mastered', false, () => {})
+      : button(`${rank ? 'Upgrade' : 'Learn'} · ${k.sp[rank]} SP`, atSage && !tooLow && stats.sp >= k.sp[rank], () => send({ t: 'learn', s: id })));
+    list.append(row);
+  }
+}
+
+const BUFF_NAMES = { patk: 'Attack up', pdef: 'Defence up', atk: 'Might' };
+
 function updateHud() {
   const need = xpNext(stats.level);
-  $('who').textContent = `${names.get(myId) || 'Cat'} · Lv ${stats.level}`;
+  $('who').textContent = `${names.get(myId) || 'Cat'} · ${CLASSES[stats.cls].name} ${stats.level}`;
   $('hpFill').style.width = `${stats.hp / stats.maxHp * 100}%`;
   $('hpText').textContent = `${stats.hp} / ${stats.maxHp}`;
   $('mpFill').style.width = `${stats.mp / stats.maxMp * 100}%`;
   $('mpText').textContent = `${stats.mp} / ${stats.maxMp}`;
   $('xpFill').style.width = `${stats.xp / need * 100}%`;
-  $('xpText').textContent = `${stats.xp} / ${need}`;
-  $('enFill').style.width = `${stats.energy}%`;
-  $('enFill').classList.toggle('full', stats.energy >= 100);
-  $('enHint').textContent = stats.energy >= 100 ? 'press Q!' : '';
-  $('dashFill').style.width = `${Math.max(0, Math.min(1, 1 - local.dashCd / 1.2)) * 100}%`;
+  $('xpText').textContent = `${(stats.xp / need * 100).toFixed(1)}%`;
   $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
   $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
-  $('sk0').classList.toggle('active', attacking);
-  $('sk1').classList.toggle('active', me.castT >= 0 && me.castSkill === 1);
-  $('sk2').classList.toggle('active', me.castT >= 0 && me.castSkill === 2);
-  $('sk2cd').style.height = `${Math.max(0, local.meteorCd) / METEOR.cd * 100}%`;
-  $('sk2time').textContent = local.meteorCd > 0 ? Math.ceil(local.meteorCd) : '';
   $('gold').textContent = stats.gold;
+  $('sp').textContent = stats.sp;
   $('weapon').textContent = `Lv ${stats.weapon}`;
   $('online').textContent = online;
+  $('buffs').replaceChildren(...stats.buffs.map(([stat, left]) => el('span', '', `${BUFF_NAMES[stat] || stat} ${left}s`)));
+
+  renderBar(hotbar(stats.cls, stats.skills));
+  attackSlot.classList.toggle('active', attacking);
+  for (const { id, k, slot, cd, left } of barSlots) {
+    const wait = (local.cds[id] || 0) - time;
+    cd.style.height = `${Math.max(0, Math.min(1, wait / Math.max(k.cd, 0.3))) * 100}%`;
+    left.textContent = wait > 0.5 ? Math.ceil(wait) : '';
+    slot.classList.toggle('active', me.castT >= 0 && me.castSkill === id);
+    slot.classList.toggle('dim', stats.mp < k.mp);
+  }
 
   // target frame: name and level tinted by how dangerous the monster is for this player
   const tv = mobViews.get(targetId);
@@ -1043,18 +1240,18 @@ function updateHud() {
     $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
     $('tgName').style.color = diff >= 5 ? '#ff5a6a' : diff >= 3 ? '#ffa24d' : diff >= -2 ? '#fff3b0' : diff >= -5 ? '#8ee68e' : '#aab4b8';
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = `${tv.hp} / ${tv.maxHp}`;
-    $('tgState').textContent = attacking ? 'Attacking' : 'Selected';
+    $('tgHp').textContent = `${Math.ceil(tv.hp * SHOW)} / ${tv.maxHp * SHOW}`;
+    $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
   }
 
-  const atSmith = Math.hypot(me.x - BLACKSMITH.x, me.z - BLACKSMITH.z) < SHOP_RANGE;
+  const atSage = near(me, SAGE);
+  if (bookOpen) renderBook(atSage);
   const cost = upgradeCost(stats.weapon);
-  $('shop').style.display = atSmith ? 'block' : 'none';
-  if (atSmith) {
-    $('shop').textContent = stats.gold >= cost
-      ? `B — upgrade weapon for ${cost} gold`
-      : `Weapon upgrade: ${cost} gold (you have ${stats.gold})`;
-  }
+  const tip = bookOpen ? '' : atSage ? 'K — learn skills from the Sage'
+    : !near(me, BLACKSMITH) ? ''
+    : stats.gold >= cost ? `B — upgrade weapon for ${cost} gold` : `Weapon upgrade: ${cost} gold (you have ${stats.gold})`;
+  $('shop').style.display = tip ? 'block' : 'none';
+  $('shop').textContent = tip;
 }
 
 // Radar: the surroundings of the player; far landmarks stick to the rim.

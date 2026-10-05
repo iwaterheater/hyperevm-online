@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, BOLT_RANGE, BOLT_MP, maxMpFor, METEOR, SWORD, BLACKSMITH, SHOP_RANGE, CHESTS, CHEST_REACH, FORT_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
+  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, ZONES, BOSS, FORT_R, CHESTS, CHEST_REACH, BLACKSMITH, SAGE, near as nearNpc,
+  MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf,
+  xpNext, spFor, DEATH_XP_LOSS, dmgMult, upgradeCost,
 } from './src/shared.js';
 
 const PORT = process.env.PORT || 8765;
@@ -45,7 +47,7 @@ try { saved = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8')); } catch { /* first
 
 function persist(p) {
   if (!p.persist) return;
-  saved[p.token] = { name: p.name, level: p.level, xp: p.xp, gold: p.gold, weapon: p.weapon };
+  saved[p.token] = { name: p.name, cls: p.cls, level: p.level, xp: p.xp, sp: p.sp, skills: p.skills, gold: p.gold, weapon: p.weapon };
 }
 function flush() {
   for (const p of players.values()) persist(p);
@@ -59,12 +61,13 @@ let nextId = 1, now = 0;
 const players = new Map();
 const mobs = [];
 const mobById = new Map();
-let bullets = [], orbs = [], gems = [], meteors = [];
+let bullets = [], orbs = [], gems = [], blasts = [];
 const chests = CHESTS.map((c, i) => ({ ...c, i, openUntil: 0 }));
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const r2 = (v) => Math.round(v * 100) / 100;
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const CLEAN = { kx: 0, kz: 0, target: 0, swing: null, stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null };
 
 function makeMob(type, lvl, sx, sz) {
   const def = MOB_TYPES[type];
@@ -72,8 +75,8 @@ function makeMob(type, lvl, sx, sz) {
   const mob = {
     id: nextId++, type, ti: MOB_KEYS.indexOf(type), lvl, def, r: def.r, sx, sz, x: sx, z: sz,
     hp: maxHp, maxHp, dmg: Math.round(def.dmg * (1 + 0.15 * (lvl - 1))), xp: def.xp * lvl,
-    kx: 0, kz: 0, target: 0, fireT: rand(1, 3), hitAt: 0, wx: sx, wz: sz, wanderAt: 0,
-    dead: false, respawnAt: 0, dmgBy: new Set(), dashHit: '', swing: null, strafe: Math.random() < 0.5 ? 1 : -1,
+    fireT: rand(1, 3), hitAt: 0, wx: sx, wz: sz, wanderAt: 0,
+    dead: false, respawnAt: 0, dmgBy: new Set(), dashHit: '', strafe: Math.random() < 0.5 ? 1 : -1, ...CLEAN,
   };
   mobs.push(mob);
   mobById.set(mob.id, mob);
@@ -120,32 +123,63 @@ function segDist2(px, pz, ax, az, bx, bz) {
   return cx * cx + cz * cz;
 }
 
-// ---------------------------------------------------------------- combat
+// ---------------------------------------------------------------- characters
+
+// Recomputes the stats that follow from class, level and passive skills.
+function refresh(p) {
+  p.st = statsOf(p.cls, p.level, p.skills);
+  p.maxHp = p.st.maxHp;
+  p.maxMp = p.st.maxMp;
+  p.hp = Math.min(p.hp, p.maxHp);
+  p.mp = Math.min(p.mp, p.maxMp);
+}
+
+// Skills whose first rank costs nothing come with the class.
+function grantFree(p) {
+  for (const id of skillsFor(p.cls)) {
+    const s = SKILLS[id];
+    if (s.sp[0] === 0 && p.level >= s.lvl && !p.skills[id]) p.skills[id] = 1;
+  }
+}
+
+const buff = (p, stat) => { const b = p.buffs[stat]; return b && now < b.until ? b.mult : 1; };
+const scale = (p) => dmgMult(p.level, p.weapon) * buff(p, 'atk');
+function physical(p, power) {
+  const crit = Math.random() < p.st.crit;
+  return { dmg: power * p.st.patk * buff(p, 'patk') * scale(p) * (crit ? 2 : 1), crit };
+}
+const magical = (p, power) => ({ dmg: power * p.st.matk * scale(p), crit: false });
 
 function addXp(p, xp) {
   p.xp += xp;
+  p.sp += spFor(xp);
   while (p.xp >= xpNext(p.level)) {
     p.xp -= xpNext(p.level);
     p.level++;
-    p.maxHp = maxHpFor(p.level);
+    grantFree(p);
+    refresh(p);
     p.hp = p.maxHp;
-    p.maxMp = maxMpFor(p.level);
     p.mp = p.maxMp;
     p.events.push({ k: 'lvl', level: p.level });
     emit({ k: 'lvlfx', x: r2(p.x), z: r2(p.z) }, p.x, p.z);
   }
 }
 
-function damageMob(m, dmg, dx, dz, knock, p) {
-  m.hp -= dmg;
+// ---------------------------------------------------------------- combat
+
+// `hit` is { dmg, crit }; the attacker sees the number float up over the monster.
+function damageMob(m, hit, dx, dz, knock, p) {
+  m.hp -= hit.dmg;
+  m.sleepUntil = 0;   // any damage wakes a sleeping monster
   m.dmgBy.add(p.id);
   if (!m.target) m.target = p.id;
   m.kx += dx * knock / m.r; m.kz += dz * knock / m.r;
-  if (m.hp > 0) { emit({ k: 'hit', id: m.id, x: r2(m.x), z: r2(m.z) }, m.x, m.z); return; }
+  const ev = { id: m.id, x: r2(m.x), z: r2(m.z), o: p.id, d: r2(hit.dmg), c: hit.crit ? 1 : 0 };
+  if (m.hp > 0) { emit({ k: 'hit', ...ev }, m.x, m.z); return; }
 
   m.dead = true;
   m.respawnAt = now + (m.type === 'boss' ? 90 : 14);
-  emit({ k: 'kill', id: m.id, x: r2(m.x), z: r2(m.z), ti: m.ti }, m.x, m.z);
+  emit({ k: 'kill', ti: m.ti, ...ev }, m.x, m.z);
   const drops = m.type === 'boss' ? 12 : m.type === 'tank' ? 3 : 1;
   for (let i = 0; i < drops; i++) {
     gems.push({
@@ -155,24 +189,38 @@ function damageMob(m, dmg, dx, dz, knock, p) {
   }
   for (const id of m.dmgBy) {
     const q = players.get(id);
-    if (q && !q.dead) { addXp(q, m.xp); q.energy = Math.min(100, q.energy + 4); }
+    if (q && !q.dead) addXp(q, m.xp);
   }
   if (m.type === 'boss') broadcast({ t: 'c', sys: 1, m: `The Skeleton King has fallen! Final blow: ${p.name}` });
   m.dmgBy.clear();
   m.target = 0;
 }
 
+// Stun, sleep, slow and bleeding carried by a skill. The King shrugs off stuns and sleep.
+function applyEffects(m, fx, p) {
+  if (m.dead) return;
+  const immune = m.type === 'boss';
+  if (fx.stun && !immune) m.stunUntil = Math.max(m.stunUntil, now + fx.stun);
+  if (fx.sleep && !immune) m.sleepUntil = now + fx.sleep;
+  if (fx.slow) { m.slowUntil = now + fx.slowDur; m.slowMult = fx.slow; }
+  if (fx.dot) m.dot = { dps: fx.dot, until: now + fx.dotDur, next: now + 1, owner: p.id };
+}
+
 function hurtPlayer(p, dmg) {
   if (p.dead || now < p.dashUntil || now < p.invulnUntil) return;
-  p.hp -= dmg;
+  p.hp -= dmg / (p.st.pdef * buff(p, 'pdef'));
   p.hurtAt = now;
+  p.sit = false;
   p.invulnUntil = now + 0.5;
   p.events.push({ k: 'hurt' });
   if (p.hp <= 0) {
     p.hp = 0;
     p.dead = true;
-    p.deadUntil = now + 3.5;
-    p.gold = Math.floor(p.gold * 0.9);
+    p.deadUntil = now + 6;
+    const lost = Math.min(p.xp, Math.round(xpNext(p.level) * DEATH_XP_LOSS));   // death costs experience, never a level
+    p.xp -= lost;
+    p.buffs = {};
+    p.events.push({ k: 'died', xp: lost });
     emit({ k: 'kill', id: 0, x: r2(p.x), z: r2(p.z), ti: -1 }, p.x, p.z);
     broadcast({ t: 'c', sys: 1, m: `${p.name} was slain` });
   }
@@ -192,7 +240,25 @@ function respawnPlayer(p) {
 
 function updateMob(m, dt) {
   if (m.dead) {
-    if (now >= m.respawnAt) Object.assign(m, { dead: false, x: m.sx, z: m.sz, hp: m.maxHp, kx: 0, kz: 0, swing: null });
+    if (now >= m.respawnAt) Object.assign(m, { dead: false, x: m.sx, z: m.sz, hp: m.maxHp }, CLEAN);
+    return;
+  }
+
+  if (m.dot && now >= m.dot.next) {   // bleeding ticks once a second
+    const owner = players.get(m.dot.owner);
+    if (!owner || now > m.dot.until) m.dot = null;
+    else {
+      m.dot.next += 1;
+      damageMob(m, { dmg: m.dot.dps, crit: false }, 0, 0, 0, owner);
+      if (m.dead) return;
+    }
+  }
+
+  const damp = Math.exp(-6 * dt);
+  if (now < m.stunUntil || now < m.sleepUntil) {   // out of action: no thinking, no moving, no attacking
+    m.swing = null;
+    m.x += m.kx * dt; m.z += m.kz * dt;
+    m.kx *= damp; m.kz *= damp;
     return;
   }
 
@@ -210,7 +276,7 @@ function updateMob(m, dt) {
     if (t) m.target = t.id;
   }
 
-  let mx = 0, mz = 0, speed = m.def.speed;
+  let mx = 0, mz = 0, speed = m.def.speed * (now < m.slowUntil ? m.slowMult : 1);
   if (t) {
     let dx = t.x - m.x, dz = t.z - m.z;
     const dist = Math.hypot(dx, dz) || 0.001;
@@ -258,7 +324,6 @@ function updateMob(m, dt) {
 
   m.x += (mx * speed + m.kx) * dt;
   m.z += (mz * speed + m.kz) * dt;
-  const damp = Math.exp(-6 * dt);
   m.kx *= damp; m.kz *= damp;
   clampWorld(m, m.r);
   const d = Math.hypot(m.x, m.z), min = TOWN_R + m.r + 0.5;   // the town is a safe zone
@@ -272,7 +337,7 @@ function updateMob(m, dt) {
       const key = `${p.id}:${p.dashSeq}`;
       if (m.dashHit !== key) {
         m.dashHit = key;
-        damageMob(m, 3 * dmgMult(p.level, p.weapon), -dx / dist, -dz / dist, 14, p);
+        damageMob(m, physical(p, 3), -dx / dist, -dz / dist, 14, p);
         if (m.dead) return;
       }
     } else if (now >= m.hitAt && !m.swing) {
@@ -306,35 +371,40 @@ function tick() {
     if (p.dead) { if (now >= p.deadUntil) respawnPlayer(p); continue; }
     // regeneration: fast in town, slow in the field, and much faster while sitting down to rest
     const inTown = Math.hypot(p.x, p.z) < TOWN_R, resting = p.sit && now - p.hurtAt > 2;
-    if (inTown) p.hp = Math.min(p.maxHp, p.hp + 25 * dt);
+    if (inTown) p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.2 * dt);
     else if (resting) p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.05 * dt);
-    else if (now - p.hurtAt > 6) p.hp = Math.min(p.maxHp, p.hp + 2 * dt);
+    else if (now - p.hurtAt > 6) p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.012 * dt);
     p.mp = Math.min(p.maxMp, p.mp + p.maxMp * (inTown ? 0.08 : resting ? 0.06 : 0.015) * dt);
   }
 
   for (const m of mobs) updateMob(m, dt);
   separateMobs();
 
-  // bolts home in on the monster they were cast at
+  // arrows and bolts home in on the monster they were loosed at
   bullets = bullets.filter((b) => {
     const m = mobById.get(b.target), p = players.get(b.owner);
     b.life -= dt;
     if (!m || m.dead || !p || b.life <= 0) return false;
-    const dx = m.x - b.x, dz = m.z - b.z, d = Math.hypot(dx, dz) || 0.001, step = 34 * dt;
-    if (d <= step + m.r) { damageMob(m, b.dmg, dx / d, dz / d, 4, p); return false; }
+    const dx = m.x - b.x, dz = m.z - b.z, d = Math.hypot(dx, dz) || 0.001, step = b.speed * dt;
+    if (d <= step + m.r) {
+      damageMob(m, b.hit, dx / d, dz / d, 4, p);
+      applyEffects(m, b, p);
+      return false;
+    }
     b.x += dx / d * step; b.z += dz / d * step;
     return true;
   });
 
-  meteors = meteors.filter((mt) => {
-    if (now < mt.at) return true;
-    emit({ k: 'boom', x: r2(mt.x), z: r2(mt.z), r: METEOR.radius }, mt.x, mt.z);
-    const p = players.get(mt.owner);
+  // area skills land a moment after they were cast
+  blasts = blasts.filter((b) => {
+    if (now < b.at) return true;
+    emit({ k: 'boom', x: r2(b.x), z: r2(b.z), r: b.radius }, b.x, b.z);
+    const p = players.get(b.owner);
     if (p) {
       for (const m of mobs) {
         if (m.dead) continue;
-        const dx = m.x - mt.x, dz = m.z - mt.z, d = Math.hypot(dx, dz) || 1;
-        if (d < METEOR.radius + m.r) damageMob(m, METEOR.dmg * dmgMult(p.level, p.weapon), dx / d, dz / d, 10, p);
+        const dx = m.x - b.x, dz = m.z - b.z, d = Math.hypot(dx, dz) || 1;
+        if (d < b.radius + m.r) damageMob(m, b.phys ? physical(p, b.power) : magical(p, b.power), dx / d, dz / d, 10, p);
       }
     }
     return false;
@@ -359,7 +429,6 @@ function tick() {
     for (const p of players.values()) {
       if (!p.dead && Math.hypot(p.x - g.x, p.z - g.z) < 1.6) {
         p.gold += g.gold;
-        p.energy = Math.min(100, p.energy + 8);
         p.events.push({ k: 'gem', gold: g.gold });
         return false;
       }
@@ -387,8 +456,9 @@ function tick() {
       t: 's',
       n: players.size,
       me: {
-        hp: Math.ceil(p.hp), maxHp: p.maxHp, mp: Math.floor(p.mp), maxMp: p.maxMp, xp: p.xp, level: p.level, gold: p.gold,
-        weapon: p.weapon, energy: p.energy, dead: p.dead ? 1 : 0,
+        hp: Math.ceil(p.hp), maxHp: p.maxHp, mp: Math.floor(p.mp), maxMp: p.maxMp, xp: p.xp, sp: p.sp, level: p.level, gold: p.gold,
+        weapon: p.weapon, cls: p.cls, skills: p.skills, dead: p.dead ? 1 : 0,
+        buffs: Object.entries(p.buffs).filter(([, b]) => now < b.until).map(([stat, b]) => [stat, Math.ceil(b.until - now)]),
       },
       p: [], m: [], g: [],
       c: chests.filter((c) => now < c.openUntil && near(c)).map((c) => c.i),   // chests that currently stand open
@@ -396,10 +466,14 @@ function tick() {
     };
     for (const q of players.values()) {
       if (q !== p && near(q)) {
-        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0]);
+        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls)]);
       }
     }
-    for (const m of mobs) if (!m.dead && near(m)) snap.m.push([m.id, m.ti, m.lvl, r2(m.x), r2(m.z), Math.ceil(m.hp), m.maxHp]);
+    for (const m of mobs) {
+      if (m.dead || !near(m)) continue;
+      const flags = (now < m.stunUntil ? 1 : 0) | (now < m.sleepUntil ? 2 : 0) | (now < m.slowUntil ? 4 : 0);
+      snap.m.push([m.id, m.ti, m.lvl, r2(m.x), r2(m.z), r2(Math.max(0, m.hp)), m.maxHp, flags]);
+    }
     for (const g of gems) if (near(g)) snap.g.push([g.id, r2(g.x), r2(g.z)]);
     send(p.ws, snap);
     p.events = [];
@@ -409,6 +483,71 @@ function tick() {
 // ---------------------------------------------------------------- networking
 
 const wss = new WebSocketServer({ server, maxPayload: 2048 });
+
+// What each kind of skill does once its cost and cooldown have been checked. Returns false to refuse the cast.
+const SKILL_EFFECTS = {
+  strike(p, s, R, m) {
+    if (!m || m.dead) return false;
+    const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
+    if (d > CLASSES[p.cls].reach + m.r + 1.2) return false;
+    damageMob(m, physical(p, s.power[R]), dx / d, dz / d, 7, p);
+    applyEffects(m, { stun: s.stun?.[R], dot: s.dot && s.dot[R] * p.st.patk * scale(p), dotDur: s.dotDur }, p);
+  },
+  shot(p, s, R, m) { return SKILL_EFFECTS.bolt(p, s, R, m); },
+  bolt(p, s, R, m) {
+    if (!m || m.dead || Math.hypot(m.x - p.x, m.z - p.z) > s.range + 3) return false;   // a little slack for lag
+    bullets.push({
+      x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, speed: s.kind === 'shot' ? 42 : 34,
+      hit: s.kind === 'shot' ? physical(p, s.power[R]) : magical(p, s.power[R]),
+      stun: s.stun?.[R], slow: s.slow?.[R], slowDur: s.slowDur,
+    });
+  },
+  sleep(p, s, R, m) {
+    if (!m || m.dead || Math.hypot(m.x - p.x, m.z - p.z) > s.range + 3) return false;
+    applyEffects(m, { sleep: s.dur[R] }, p);
+    if (!m.target) m.target = p.id;
+  },
+  ground(p, s, R, m, msg) {
+    let dx = num(msg.x) - p.x, dz = num(msg.z) - p.z;
+    const d = Math.hypot(dx, dz);
+    if (d > s.range) { dx *= s.range / d; dz *= s.range / d; }
+    const x = p.x + dx, z = p.z + dz;
+    blasts.push({ at: now + s.delay, x, z, owner: p.id, radius: s.radius, power: s.power[R], phys: !!s.phys });
+    msg.x = x; msg.z = z;   // the clamped point is what everyone sees
+  },
+  heal(p, s, R) {
+    for (const q of s.radius ? players.values() : [p]) {
+      if (q.dead || Math.hypot(q.x - p.x, q.z - p.z) > (s.radius || 0)) continue;
+      const amount = Math.round(s.power[R] * (0.5 + 0.5 * p.st.matk) * (1 + 0.06 * (p.level - 1)));
+      q.hp = Math.min(q.maxHp, q.hp + amount);
+      q.events.push({ k: 'healed', n: amount });
+    }
+  },
+  buff(p, s, R) {
+    for (const q of s.radius ? players.values() : [p]) {
+      if (q.dead || Math.hypot(q.x - p.x, q.z - p.z) > (s.radius || 0)) continue;
+      q.buffs[s.stat] = { mult: s.mult[R], until: now + s.dur };
+    }
+  },
+  taunt(p, s) {
+    for (const m of mobs) {
+      if (!m.dead && m.type !== 'boss' && Math.hypot(m.x - p.x, m.z - p.z) < s.radius + m.r) m.target = p.id;
+    }
+  },
+  dash(p) {
+    p.dashUntil = now + 0.25;
+    p.dashSeq++;
+  },
+  revive(p, s) {
+    for (const q of players.values()) {
+      if (!q.dead || Math.hypot(q.x - p.x, q.z - p.z) > s.radius) continue;
+      q.dead = false;
+      q.hp = q.maxHp * 0.5;
+      q.invulnUntil = now + 2;
+      q.events.push({ k: 'revived' });
+    }
+  },
+};
 
 const handlers = {
   m(p, msg) {   // movement (client-side, sanity-checked here)
@@ -428,63 +567,62 @@ const handlers = {
     p.lastMoveAt = now;
     clampWorld(p, 1);
   },
-  f(p, msg) {   // skill 1: Bolt at the selected monster
-    const m = mobById.get(msg.id);
-    if (p.dead || now < p.fireAt || !m || m.dead || p.mp < BOLT_MP) return;
-    if (Math.hypot(m.x - p.x, m.z - p.z) > BOLT_RANGE + 3) return;   // a little slack for lag
-    p.fireAt = now + CAST_TIME * 0.85;   // a bolt cannot come faster than a cast takes
-    p.mp -= BOLT_MP;
-    bullets.push({ x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, dmg: BOLT_DMG * dmgMult(p.level, p.weapon) });
-    emit({ k: 'shot', o: p.id, id: m.id, x: r2(p.x), z: r2(p.z) }, p.x, p.z);
-  },
-  a(p, msg) {   // basic attack: one sword swing at the selected monster
-    const m = mobById.get(msg.id);
+  a(p, msg) {   // auto-attack: one hit at the selected monster with whatever the class wields
+    const m = mobById.get(msg.id), c = CLASSES[p.cls];
     if (p.dead || now < p.swingAt || !m || m.dead) return;
     const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
-    if (d > SWORD.range + m.r + 1) return;   // out of reach (with a little slack for lag)
-    p.swingAt = now + SWORD.cd * 0.85;
+    if (d > c.reach + m.r + 1.2) return;   // out of reach (with a little slack for lag)
+    p.swingAt = now + c.atkCd * 0.85;
     const kind = [0, 1, 2].includes(msg.c) ? msg.c : 2;   // which of the three swing animations to show
     emit({ k: 'swing', o: p.id, dx: r2(dx / d), dz: r2(dz / d), c: kind }, p.x, p.z);
-    damageMob(m, SWORD.dmg * dmgMult(p.level, p.weapon), dx / d, dz / d, 5, p);
+    if (c.ranged) {
+      bullets.push({ x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, speed: 42, hit: physical(p, c.hit) });
+      emit({ k: 'shot', o: p.id, id: m.id, x: r2(p.x), z: r2(p.z), fx: 'arrow' }, p.x, p.z);
+    } else {
+      damageMob(m, physical(p, c.hit), dx / d, dz / d, 5, p);
+    }
   },
   k(p, msg) {   // started casting: only tells nearby players to play the animation
-    if (p.dead || now < p.castAt) return;
-    p.castAt = now + CAST_TIME * 0.85;
-    const s = msg.s === 2 ? 2 : 1;
-    emit({ k: 'cast', o: p.id, s, d: s === 2 ? METEOR.cast : CAST_TIME }, p.x, p.z);
+    const s = SKILLS[msg.s];
+    if (p.dead || now < p.castAt || !s || !p.skills[msg.s]) return;
+    p.castAt = now + 0.3;
+    emit({ k: 'cast', o: p.id, s: msg.s, d: s.cast || 0 }, p.x, p.z);
   },
-  q(p, msg) {   // skill 2: Starfall at a ground point
-    if (p.dead || now < p.meteorAt || p.mp < METEOR.mp) return;
-    p.meteorAt = now + METEOR.cd * 0.9;
-    p.mp -= METEOR.mp;
-    let dx = num(msg.x) - p.x, dz = num(msg.z) - p.z;
-    const d = Math.hypot(dx, dz);
-    if (d > METEOR.range) { dx *= METEOR.range / d; dz *= METEOR.range / d; }
-    const x = p.x + dx, z = p.z + dz;
-    meteors.push({ at: now + METEOR.delay, x, z, owner: p.id });
-    emit({ k: 'meteor', x: r2(x), z: r2(z), d: METEOR.delay }, x, z);
+  sk(p, msg) {   // use a skill
+    const id = String(msg.s), s = SKILLS[id], rank = p.skills[id] | 0;
+    if (p.dead || !s || !rank || s.kind === 'passive' || !classLine(p.cls).includes(s.cls)) return;
+    if (now < (p.cds[id] || 0) || p.mp < s.mp) return;
+    const m = mobById.get(msg.tid);
+    if (SKILL_EFFECTS[s.kind](p, s, rank - 1, m, msg) === false) return;
+    p.mp -= s.mp;
+    p.sit = false;
+    p.cds[id] = now + Math.max(s.cd, (s.cast || 0) * 0.85, 0.3) - 0.1;
+    emit({ k: 'skill', o: p.id, s: id, tid: m ? m.id : 0, x: r2(num(msg.x)), z: r2(num(msg.z)) }, p.x, p.z);
   },
-  d(p) {        // dash
-    if (p.dead || now < p.dashCdAt) return;
-    p.dashCdAt = now + 1.1;
-    p.dashUntil = now + 0.25;
-    p.dashSeq++;
+  learn(p, msg) {   // buy the next rank of a skill from the Sage
+    const id = String(msg.s), s = SKILLS[id], rank = p.skills[id] | 0;
+    if (p.dead || !s || !nearNpc(p, SAGE) || !classLine(p.cls).includes(s.cls)) return;
+    if (p.level < s.lvl || rank >= s.sp.length || p.sp < s.sp[rank]) return;
+    p.sp -= s.sp[rank];
+    p.skills[id] = rank + 1;
+    refresh(p);
+    p.events.push({ k: 'learned', s: id, rank: rank + 1 });
   },
-  u(p) {        // hyper-wave
-    if (p.dead || p.energy < 100) return;
-    p.energy = 0;
-    const R = 13;
-    emit({ k: 'ring', x: r2(p.x), z: r2(p.z), r: R }, p.x, p.z);
-    for (const m of mobs) {
-      if (m.dead) continue;
-      const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 1;
-      if (d < R + m.r) damageMob(m, 12 * dmgMult(p.level, p.weapon), dx / d, dz / d, 22, p);
-    }
-    orbs = orbs.filter((o) => Math.hypot(o.x - p.x, o.z - p.z) > R);
+  prof(p, msg) {   // choose a profession at the Sage
+    const target = String(msg.cls);
+    if (p.dead || !CLASSES[target] || CLASSES[target].base !== p.cls || p.level < PROFESSION_LEVEL || !nearNpc(p, SAGE)) return;
+    p.cls = target;
+    grantFree(p);
+    refresh(p);
+    p.hp = p.maxHp;
+    p.mp = p.maxMp;
+    p.events.push({ k: 'prof', cls: target });
+    emit({ k: 'lvlfx', x: r2(p.x), z: r2(p.z) }, p.x, p.z);
+    broadcast({ t: 'c', sys: 1, m: `${p.name} is now a ${CLASSES[target].name}` });
   },
   b(p) {        // buy a weapon upgrade from the blacksmith
     const cost = upgradeCost(p.weapon);
-    if (p.dead || Math.hypot(p.x - BLACKSMITH.x, p.z - BLACKSMITH.z) > SHOP_RANGE || p.gold < cost) return;
+    if (p.dead || !nearNpc(p, BLACKSMITH) || p.gold < cost) return;
     p.gold -= cost;
     p.weapon++;
     p.events.push({ k: 'up', weapon: p.weapon });
@@ -512,15 +650,20 @@ wss.on('connection', (ws) => {
       const data = (!dup && saved[token]) || {};
       const name = String(msg.name || '').replace(/\s+/g, ' ').trim().slice(0, 16) || 'Cat';
       const level = data.level || 1;
+      // the class picked in the menu only counts for characters that do not have one yet
+      const cls = CLASSES[data.cls] ? data.cls : START_CLASSES.includes(msg.cls) ? msg.cls : START_CLASSES[0];
       const a = rand(0, Math.PI * 2), r = rand(0, TOWN_R - 5);
       p = {
-        id: nextId++, ws, token, persist: !dup, name,
+        id: nextId++, ws, token, persist: !dup, name, cls,
         x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r, yaw: 0, speed: 0,
-        level, xp: data.xp || 0, gold: data.gold || 0, weapon: data.weapon || 1, energy: 0,
-        hp: maxHpFor(level), maxHp: maxHpFor(level), mp: maxMpFor(level), maxMp: maxMpFor(level), sit: false, dead: false, deadUntil: 0,
-        fireAt: 0, castAt: 0, meteorAt: 0, swingAt: 0, dashUntil: 0, dashCdAt: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
+        level, xp: Math.min(data.xp || 0, xpNext(level) - 1), sp: data.sp || 0, skills: { ...(data.skills || {}) },
+        gold: data.gold || 0, weapon: data.weapon || 1,
+        hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
+        castAt: 0, swingAt: 0, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
         lastMoveAt: now, events: [],
       };
+      grantFree(p);
+      refresh(p);   // also brings health and mana down to their maximum
       players.set(p.id, p);
       send(ws, { t: 'w', id: p.id, x: r2(p.x), z: r2(p.z) });
       sendRoster();

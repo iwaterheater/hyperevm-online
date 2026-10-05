@@ -80,6 +80,7 @@ function getShared() {
       white: new THREE.MeshBasicMaterial({ color: 0xffffff }),
       teal: new THREE.MeshBasicMaterial({ color: COLORS.teal }),
       steel: toon(0xcfd8e0),
+      wood: toon(0x7a5230),
       gold: toon(0xe7b93c),
       outline: new THREE.MeshBasicMaterial({ color: COLORS.outline, side: THREE.BackSide }),
     },
@@ -94,11 +95,15 @@ function getShared() {
     blade: new THREE.BoxGeometry(0.08, 0.03, 0.85),
     guard: new THREE.BoxGeometry(0.26, 0.06, 0.07),
     hilt: new THREE.CylinderGeometry(0.032, 0.032, 0.2, 8),
+    shield: new THREE.CylinderGeometry(0.36, 0.36, 0.06, 18),
+    staff: new THREE.CylinderGeometry(0.03, 0.035, 1.6, 8),
+    bow: new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, -0.62, 0), new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0.62, 0)), 12, 0.028, 6),
+    bowString: new THREE.CylinderGeometry(0.008, 0.008, 1.24, 4),
   };
   return shared;
 }
 
-export function createCat({ hoodie = COLORS.hoodie } = {}) {
+export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
   const S = getShared();
   const { sphere, sphereLo } = S;
   const mats = {
@@ -185,10 +190,47 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     part(arm, sphereLo, mats.fur, [0, -0.44, 0], 0.135, 1.1);
     arms.push(arm);
   }
-  // sword in the right paw, pointing forward along the arm's +Z
-  part(arms[1], S.hilt, mats.gold, [0, -0.44, 0.04]).rotation.x = Math.PI / 2;
-  part(arms[1], S.guard, mats.gold, [0, -0.44, 0.16]);
-  part(arms[1], S.blade, mats.steel, [0, -0.44, 0.62]);
+  // ---- gear: what the cat holds depends on its class. Everything points forward along the arm's +Z.
+  // arms[1] is the weapon paw, arms[0] the off paw.
+  const gear = [];
+  const hold = (arm) => { const g = new THREE.Group(); g.position.set(0, -0.44, 0); arm.add(g); gear.push(g); return g; };
+  function blade(arm, length) {
+    const g = hold(arm);
+    part(g, S.hilt, mats.gold, [0, 0, 0.04]).rotation.x = Math.PI / 2;
+    part(g, S.guard, mats.gold, [0, 0, 0.16], [length < 0.6 ? 0.6 : 1, 1, 1]);
+    part(g, S.blade, mats.steel, [0, 0, 0.2 + length / 2], [1, 1, length / 0.85]);
+  }
+  const GEAR = {
+    sword() { blade(arms[1], 0.85); },
+    shield() {
+      blade(arms[1], 0.85);
+      const g = hold(arms[0]);
+      part(g, S.shield, mats.steel, [0, 0.12, 0.16]).rotation.x = Math.PI / 2;
+      part(g, sphereLo, mats.gold, [0, 0.12, 0.2], 0.1);
+    },
+    daggers() { blade(arms[1], 0.42); blade(arms[0], 0.42); },
+    bow() {
+      const g = hold(arms[0]);
+      part(g, S.bow, mats.wood, [0, 0, 0.1]);
+      part(g, S.bowString, mats.white, [0, 0, 0.1]);
+    },
+    staff() {
+      const g = hold(arms[1]);
+      part(g, S.staff, mats.wood, [0, 0.24, 0.12]);
+      part(g, sphereLo, mats.teal, [0, 1.06, 0.12], 0.11);
+    },
+  };
+
+  // Recolours the hoodie and swaps the gear, e.g. when the character changes class.
+  function setLook({ hoodie: color = COLORS.hoodie, weapon = 'sword' } = {}) {
+    mats.hoodie.color.set(color);
+    mats.hoodieDark.color.set(color).multiplyScalar(0.68);
+    for (const g of gear) g.removeFromParent();
+    gear.length = 0;
+    (GEAR[weapon] || GEAR.sword)();
+    for (const g of gear) g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  }
+  setLook({ hoodie, weapon });
 
   // ---- legs ----
   const legGeo = S.leg;
@@ -292,5 +334,5 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     eyes[0].scale.y = eyes[1].scale.y = open;
   }
 
-  return { group, update };
+  return { group, update, setLook };
 }
