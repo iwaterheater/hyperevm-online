@@ -44,6 +44,7 @@ addEventListener('resize', () => {
 });
 
 const world = createWorld(scene);
+world.ready.catch((err) => console.error('Scenery models failed to load', err));
 
 // ---------------------------------------------------------------- labels & bars
 

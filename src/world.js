@@ -1,9 +1,16 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { part, merge, box, cyl, cone, ball } from './geo.js';
 import { WORLD_R, TOWN_R, ZONES, BOSS } from './shared.js';
 
 // The visible world: terrain, water, town, per-zone scenery, lighting and zone mood.
 // Scenery is generated from a fixed seed so every client sees the same landscape.
+// Buildings, trees, rocks and props come from the KayKit Medieval Hexagon Pack (CC0, Kay Lousberg);
+// the graveyard and cursed-land scenery is built from code.
+
+const MODEL_DIR = './assets/medieval/';
+const MODEL_SCALE = 5;   // the pack is modelled for small hex tiles
 
 const HALF_PI = Math.PI / 2;
 const Z1 = ZONES[1].r, Z2 = ZONES[2].r;
@@ -97,7 +104,16 @@ export function createWorld(scene) {
   scene.add(sea);
 
   // ---- scenery helpers
-  const obstacles = [];
+  const CELL = 8, grid = new Map();
+  const obstacles = {
+    push(o) {
+      const key = `${Math.floor(o.x / CELL)},${Math.floor(o.z / CELL)}`;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(o);
+    },
+  };
+  // landmarks placed by hand; scattered scenery keeps clear of them
+  const keepOut = [{ x: BOSS.x, z: BOSS.z, r: 19 }];
   const flat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
   const dummy = new THREE.Object3D(), tint = new THREE.Color();
 
@@ -107,7 +123,7 @@ export function createWorld(scene) {
       const a = rnd() * Math.PI * 2, r = Math.sqrt(rMin * rMin + rnd() * (rMax * rMax - rMin * rMin));
       const it = { x: Math.cos(a) * r, z: Math.sin(a) * r, s: sMin + rnd() * (sMax - sMin), ry: rnd() * Math.PI * 2 };
       if (Math.min(Math.abs(it.x), Math.abs(it.z)) < road) continue;
-      if (Math.hypot(it.x - BOSS.x, it.z - BOSS.z) < 19) continue;
+      if (keepOut.some((k) => Math.hypot(it.x - k.x, it.z - k.z) < k.r)) continue;
       out.push(it);
     }
     return out;
@@ -140,32 +156,12 @@ export function createWorld(scene) {
     add(cyl(0.4, 0.55, 1.5, 10), 0x8b8983, [0, 1.0, 0]);
     obstacles.push({ x: 0, z: 0, r: 2.6 });
 
-    const house = (roof) => merge([
-      part(box(3.2, 2.2, 3), 0xe6dcc3, { pos: [0, 1.1, 0] }),
-      part(cone(2.75, 1.7, 4), roof, { pos: [0, 3.05, 0], rot: [0, Math.PI / 4, 0] }),
-      part(box(0.75, 1.3, 0.1), 0x6b4a2e, { pos: [0, 0.65, 1.52] }),
-      part(box(0.55, 0.55, 0.1), 0xffe9a6, { pos: [-1.0, 1.35, 1.52] }),
-      part(box(0.55, 0.55, 0.1), 0xffe9a6, { pos: [1.0, 1.35, 1.52] }),
-      part(box(0.4, 0.9, 0.4), 0x8b6f5a, { pos: [0.9, 3.2, -0.5] }),
-    ]);
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < 8; i++) {
-      const a = (i + 0.5) / 8 * Math.PI * 2, x = Math.cos(a) * 11.5, z = Math.sin(a) * 11.5;
-      const h = house(i % 2 ? 0xb5533c : 0x3c8f86);
-      h.applyMatrix4(m.makeRotationY(Math.atan2(-x, -z)).setPosition(x, 0, z));   // doors face the plaza
-      parts.push(h);
-      obstacles.push({ x, z, r: 2.3 });
-    }
-    // lamp posts and the low posts that mark the safe zone
+    // lamp posts
     const bulbs = [];
     for (let i = 0; i < 8; i++) {
       const a = i / 8 * Math.PI * 2 + 0.2, x = Math.cos(a) * 6.5, z = Math.sin(a) * 6.5;
       add(cyl(0.06, 0.09, 2.7, 6), 0x2f2b2a, [x, 1.35, z]);
       bulbs.push(part(ball(0.2), 0xffffff, { pos: [x, 2.8, z] }));
-    }
-    for (let i = 0; i < 56; i++) {
-      const a = i / 56 * Math.PI * 2, x = Math.cos(a) * TOWN_R, z = Math.sin(a) * TOWN_R;
-      if (Math.min(Math.abs(x), Math.abs(z)) > 2.6) add(box(0.45, 0.9, 0.45), 0x8f8a7e, [x, 0.45, z], [0, -a, 0]);
     }
     const town = new THREE.Mesh(merge(parts), flat);
     town.castShadow = town.receiveShadow = true;
@@ -179,30 +175,14 @@ export function createWorld(scene) {
   scene.add(crystal);
 
   // ---- meadows
-  const pine = merge([
-    part(cyl(0.18, 0.26, 1.4, 6), 0x6b4a2e, { pos: [0, 0.7, 0] }),
-    part(cone(1.25, 1.8, 7), 0x3f7d3a, { pos: [0, 2.1, 0] }),
-    part(cone(0.98, 1.5, 7), 0x4c9444, { pos: [0, 3.0, 0] }),
-    part(cone(0.62, 1.2, 7), 0x5aa64e, { pos: [0, 3.85, 0] }),
-  ]);
-  const oak = merge([
-    part(cyl(0.2, 0.3, 1.8, 6), 0x70502f, { pos: [0, 0.9, 0] }),
-    part(new THREE.IcosahedronGeometry(1.35, 1), 0x4f9a45, { pos: [0, 2.7, 0] }),
-    part(new THREE.IcosahedronGeometry(0.9, 0), 0x5fae52, { pos: [0.7, 3.2, 0.3] }),
-    part(new THREE.IcosahedronGeometry(0.8, 0), 0x448a3c, { pos: [-0.7, 2.4, -0.4] }),
-  ]);
-  const rock = part(new THREE.DodecahedronGeometry(1, 0), 0x8a8d8f, { pos: [0, 0.45, 0], scale: [1, 0.7, 0.85] });
   const tuft = merge([0, 2.1, 4.2].map((a) => part(cone(0.07, 0.42, 3), 0x7cc65c, { pos: [Math.cos(a) * 0.09, 0.2, Math.sin(a) * 0.09], rot: [Math.cos(a) * 0.25, 0, Math.sin(a) * 0.25] })));
   const FLOWERS = [0xffffff, 0xffe066, 0xff8fb3, 0xb18cff];
 
-  instanced(pine, scatter(330, TOWN_R + 4, Z1 + 4), { solid: 0.4 });
-  instanced(oak, scatter(190, TOWN_R + 4, Z1 - 4, { sMin: 0.9, sMax: 1.5 }), { solid: 0.45 });
-  instanced(new THREE.IcosahedronGeometry(0.6, 0), scatter(260, TOWN_R + 2, Z1).map((it) => ({ ...it, y: 0.3 * it.s, sy: it.s * 0.75, color: 0x3d7a36 })),
+  instanced(new THREE.IcosahedronGeometry(0.6, 0), scatter(260, TOWN_R + 6, Z1).map((it) => ({ ...it, y: 0.3 * it.s, sy: it.s * 0.75, color: 0x3d7a36 })),
     { mat: new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.9 }) });
-  instanced(rock, scatter(150, TOWN_R + 2, Z1, { sMin: 0.5, sMax: 1.4 }), { solid: 0.85 });
-  instanced(tuft, scatter(4200, TOWN_R, Z1 + 6, { sMin: 0.7, sMax: 1.5, road: 2.6 }), { cast: false });
+  instanced(tuft, scatter(4200, TOWN_R + 4, Z1 + 6, { sMin: 0.7, sMax: 1.5, road: 2.6 }), { cast: false });
   instanced(part(new THREE.IcosahedronGeometry(0.1, 0), 0xffffff, { pos: [0, 0.28, 0] }),
-    scatter(1100, TOWN_R, Z1, { road: 2.6 }).map((it, i) => ({ ...it, color: FLOWERS[i % 4] })), { cast: false });
+    scatter(1100, TOWN_R + 4, Z1, { road: 2.6 }).map((it, i) => ({ ...it, color: FLOWERS[i % 4] })), { cast: false });
 
   // ---- graveyard wastes
   const deadTree = merge([
@@ -259,12 +239,121 @@ export function createWorld(scene) {
   scene.add(lair);
 
   // ---- collision grid
-  const CELL = 8, grid = new Map();
-  for (const o of obstacles) {
-    const key = `${Math.floor(o.x / CELL)},${Math.floor(o.z / CELL)}`;
-    if (!grid.has(key)) grid.set(key, []);
-    grid.get(key).push(o);
+
+  // ---- models from the KayKit Medieval Hexagon Pack
+  const WALL_R = TOWN_R + 1.6, WALL_SEGMENTS = 28;
+  const LANDMARKS = [
+    ['building_windmill_blue', 36, -32, 1.2, 0.6], ['building_grain', 46, -34, 1, 0], ['building_grain', 37, -43, 1, 1.57],
+    ['building_well_blue', -9, -34, 0.8, 0], ['building_stage_A', 11, 35, 1.2, 3.14],
+    ['tent', 35, 9, 1.4, -1.2], ['tent', 37, -8, 1.4, -1.9], ['tent', -35, 10, 1.4, 1.3],
+    ['building_tower_A_blue', 7, -62, 1, 0], ['building_tower_A_blue', 62, 7, 1, 1.57],
+    ['building_tower_A_blue', -7, 62, 1, 3.14], ['building_tower_A_blue', -62, -7, 1, -1.57],
+  ];
+  for (const [, x, z] of LANDMARKS) keepOut.push({ x, z, r: 8 });
+
+  async function addModels() {
+    const names = [
+      'building_home_A_blue', 'building_home_B_blue', 'building_home_A_red', 'building_home_B_red', 'building_home_A_green', 'building_home_B_green',
+      'building_tavern_blue', 'building_market_blue', 'building_blacksmith_blue', 'building_church_blue', 'building_well_blue',
+      'building_windmill_blue', 'building_tower_A_blue', 'building_destroyed', 'building_grain', 'building_stage_A',
+      'fence_stone_straight', 'fence_wood_straight', 'wall_straight', 'wall_straight_gate',
+      'tree_single_A', 'tree_single_B', 'tree_single_A_cut', 'tree_single_B_cut',
+      'trees_A_large', 'trees_A_medium', 'trees_A_small', 'trees_B_large', 'trees_B_medium', 'trees_B_small',
+      'rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E',
+      'hill_single_A', 'hill_single_B', 'hill_single_C',
+      'mountain_A', 'mountain_B', 'mountain_C', 'mountain_A_grass', 'mountain_B_grass', 'mountain_C_grass',
+      'barrel', 'crate_A_big', 'crate_B_small', 'crate_open', 'sack', 'tent', 'weaponrack', 'wheelbarrow', 'flag_blue', 'target',
+      'bucket_water', 'resource_lumber', 'resource_stone',
+    ];
+    const loader = new GLTFLoader();
+    const geo = {}, radius = {};
+    let material = null;   // every model shares one palette texture, so one material serves them all
+    await Promise.all(names.map(async (name) => {
+      const gltf = await loader.loadAsync(`${MODEL_DIR}${name}.gltf`);
+      gltf.scene.updateMatrixWorld(true);
+      const parts = [];
+      gltf.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        material ||= o.material;
+        parts.push(o.geometry.clone().applyMatrix4(o.matrixWorld));
+      });
+      const g = (parts.length > 1 && mergeGeometries(parts)) || parts[0];
+      g.computeBoundingBox();
+      const b = g.boundingBox;
+      geo[name] = g;
+      radius[name] = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2;   // footprint radius at scale 1
+    }));
+
+    // one object; `solid` is the share of its footprint that blocks movement
+    function place(name, x, z, { s = 1, ry = 0, solid = 0 } = {}) {
+      const mesh = new THREE.Mesh(geo[name], material);
+      mesh.position.set(x, 0, z);
+      mesh.rotation.y = ry;
+      mesh.scale.setScalar(s * MODEL_SCALE);
+      mesh.castShadow = mesh.receiveShadow = true;
+      scene.add(mesh);
+      if (solid) obstacles.push({ x, z, r: radius[name] * s * MODEL_SCALE * solid });
+      return mesh;
+    }
+    const many = (name, items, solid = 0, cast = true) => instanced(geo[name], items.map((it) => ({ ...it, s: it.s * MODEL_SCALE })), {
+      mat: material, cast, solid: solid * radius[name],
+    });
+
+    // town: buildings around the plaza, doors towards the fountain
+    // low buildings on the south side (nearer the camera), tall ones on the north, so the plaza stays visible
+    const TOWN = ['building_home_A_red', 'building_market_blue', 'building_blacksmith_blue', 'building_home_A_blue',
+      'building_home_B_green', 'building_church_blue', 'building_tavern_blue', 'building_home_B_red'];
+    const PROPS = ['barrel', 'crate_A_big', 'sack', 'crate_open', 'bucket_water', 'weaponrack', 'wheelbarrow', 'resource_lumber',
+      'crate_B_small', 'target', 'resource_stone', 'barrel', 'flag_blue', 'crate_A_big', 'barrel', 'sack'];
+    TOWN.forEach((name, i) => {
+      const a = (i + 0.5) / 8 * Math.PI * 2, x = Math.cos(a) * 17.5, z = Math.sin(a) * 17.5;
+      place(name, x, z, { s: 1.25, ry: Math.atan2(-x, -z), solid: 0.8 });
+      for (const [k, side] of [[0, -1], [1, 1]]) {   // clutter beside each building
+        const pa = a + side * 0.36, pr = 13.5 + k * 2;
+        place(PROPS[i * 2 + k], Math.cos(pa) * pr, Math.sin(pa) * pr, { ry: a * 3 + k });
+      }
+    });
+
+    // town wall with a gate on each road
+    const segLen = 2 * Math.PI * WALL_R / WALL_SEGMENTS, ws = segLen / 2 / MODEL_SCALE;   // wall models are 2 units long
+    for (let i = 0; i < WALL_SEGMENTS; i++) {
+      const a = i / WALL_SEGMENTS * Math.PI * 2, x = Math.cos(a) * WALL_R, z = Math.sin(a) * WALL_R, gate = i % 7 === 0;
+      place(gate ? 'wall_straight_gate' : 'wall_straight', x, z, { s: ws, ry: Math.PI / 2 - a });
+      const tx = -Math.sin(a), tz = Math.cos(a);
+      if (gate) {   // only the gate posts block the way
+        for (const t of [-0.38, 0.38]) obstacles.push({ x: x + tx * t * segLen, z: z + tz * t * segLen, r: 0.9 });
+        continue;
+      }
+      for (const t of [-0.34, 0, 0.34]) obstacles.push({ x: x + tx * t * segLen, z: z + tz * t * segLen, r: 1.25 });
+    }
+
+    for (const [name, x, z, s, ry] of LANDMARKS) place(name, x, z, { s, ry, solid: name === 'building_grain' || name === 'building_stage_A' ? 0 : 0.75 });
+    for (const [x, z] of [[33, 5], [34.5, 3], [36, 0], [-33, 6], [13, 33], [15, 35]]) place(PROPS[Math.abs(x + z) % 8 | 0], x, z, { ry: x });
+
+    // meadows: single trees, groves, stumps, rocks, hills
+    many('tree_single_A', scatter(320, TOWN_R + 6, Z1 + 4, { sMin: 0.85, sMax: 1.35 }), 0.3);
+    many('tree_single_B', scatter(240, TOWN_R + 6, Z1 - 2, { sMin: 0.85, sMax: 1.35 }), 0.3);
+    for (const name of ['trees_A_large', 'trees_A_medium', 'trees_A_small', 'trees_B_large', 'trees_B_medium', 'trees_B_small']) {
+      many(name, scatter(9, TOWN_R + 14, Z1 - 6, { sMin: 0.9, sMax: 1.2, road: 9 }), 0.7);
+    }
+    many('tree_single_A_cut', scatter(70, TOWN_R + 6, Z2, { sMin: 0.9, sMax: 1.3 }));
+    many('tree_single_B_cut', scatter(70, TOWN_R + 6, Z2, { sMin: 0.9, sMax: 1.3 }));
+    for (const name of ['hill_single_A', 'hill_single_B', 'hill_single_C']) many(name, scatter(9, TOWN_R + 18, Z1, { sMin: 1.1, sMax: 1.8, road: 8 }), 0.75);
+    for (const name of ['mountain_A_grass', 'mountain_B_grass', 'mountain_C_grass']) many(name, scatter(2, 55, Z1 - 8, { sMin: 1.2, sMax: 1.5, road: 12 }), 0.8);
+
+    // rocks everywhere, ruins and bare mountains further out
+    for (const name of ['rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E']) {
+      many(name, scatter(45, TOWN_R + 6, Z1, { sMin: 1.2, sMax: 2.4 }), 0.8);
+      many(name, scatter(70, Z1, WORLD_R - 3, { sMin: 1.4, sMax: 3 }), 0.8);
+    }
+    many('building_destroyed', scatter(14, Z1 + 4, Z2 - 4, { sMin: 0.8, sMax: 1.1, road: 7 }), 0.75);
+    many('building_destroyed', scatter(12, Z2 + 4, WORLD_R - 12, { sMin: 0.9, sMax: 1.3, road: 7 }), 0.75);
+    many('fence_stone_straight', scatter(60, Z1, Z2, { sMin: 0.9, sMax: 1.1 }), 0.5);
+    many('fence_wood_straight', scatter(40, TOWN_R + 8, Z1, { sMin: 0.9, sMax: 1.1 }), 0.5);
+    many('mountain_A', scatter(4, Z1 + 12, Z2 - 10, { sMin: 1.2, sMax: 1.6, road: 12 }), 0.8);
+    for (const name of ['mountain_A', 'mountain_B', 'mountain_C']) many(name, scatter(5, Z2 + 8, WORLD_R - 14, { sMin: 1.3, sMax: 1.9, road: 12 }), 0.8);
   }
+  const ready = addModels();
 
   // Pushes a circle (object with x/z) out of trees, rocks and buildings.
   function collide(p, radius = 0.4) {
@@ -309,5 +398,5 @@ export function createWorld(scene) {
     crystal.position.y = 2.7 + Math.sin(time * 1.5) * 0.2;
   }
 
-  return { update, collide };
+  return { update, collide, ready };
 }
