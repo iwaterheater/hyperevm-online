@@ -1,150 +1,114 @@
 import * as THREE from 'three';
-import { part, merge, box, cyl, cone, ball } from './geo.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { ATTACK_WINDUP } from './shared.js';
 
-// Procedural skeleton monsters. Every variant shares the same bones and differs in gear:
-// chaser = swordsman, runner = hunched bone runner, shooter = mage, tank = brute, boss = Skeleton King.
+// Skeleton monsters built from the KayKit "Character Pack: Skeletons" models (CC0, Kay Lousberg).
+// Every model ships the same rig and animation set; variants differ in model, size, gear and clips.
 
 export const BONE = 0xe9e3d2;
-const DARK = 0x1e1a18, STEEL = 0x9aa3ad, WOOD = 0x6b4a2e, GOLD = 0xe7b93c, CLOTH = 0x4a2f6b, RED = 0x8f1f2b;
-const HALF_PI = Math.PI / 2;
-export const SKELETON_HEIGHT = 2.1;   // at scale 1
-const BASE_R = 0.5;                   // collision radius that corresponds to scale 1
-const MAX_SCALE = 3.6;
+export const SKELETON_HEIGHT = 2.2;   // at scale 1
 
-function buildGeometry(type) {
-  const leg = merge([
-    part(cyl(0.05, 0.042, 0.4), BONE, { pos: [0, -0.2, 0] }),
-    part(ball(0.06), BONE, { pos: [0, -0.42, 0] }),
-    part(cyl(0.042, 0.036, 0.38), BONE, { pos: [0, -0.62, 0] }),
-    part(box(0.11, 0.06, 0.24), BONE, { pos: [0, -0.82, 0.06] }),
-  ]);
+const DIR = './assets/skeletons/';
+const MODELS = ['Skeleton_Minion', 'Skeleton_Rogue', 'Skeleton_Mage', 'Skeleton_Warrior'];
+const GEAR = ['Skeleton_Blade', 'Skeleton_Axe', 'Skeleton_Staff', 'Skeleton_Shield_Large_A'];
 
-  const torso = [
-    part(box(0.36, 0.13, 0.18), BONE, { pos: [0, 0.02, 0] }),
-    part(cyl(0.04, 0.04, 0.7), BONE, { pos: [0, 0.42, 0] }),
-    part(cyl(0.04, 0.04, 0.6), BONE, { pos: [0, 0.74, 0], rot: [0, 0, HALF_PI] }),
-  ];
-  for (const [r, y] of [[0.16, 0.36], [0.2, 0.5], [0.19, 0.63]]) {
-    torso.push(part(new THREE.TorusGeometry(r, 0.026, 6, 14), BONE, { pos: [0, y, 0.02], rot: [HALF_PI, 0, 0], scale: [1, 0.75, 1] }));
+// `hitAt` is the moment inside the attack clip when the blow lands; it is synced to the server's wind-up.
+const VARIANTS = {
+  chaser:  { model: 'Skeleton_Minion',  scale: 1.25, right: 'Skeleton_Blade', walk: 'Walking_D_Skeletons', stride: 1.6, attack: '1H_Melee_Attack_Chop', hitAt: 0.5 },
+  runner:  { model: 'Skeleton_Rogue',   scale: 1.0,  right: 'Skeleton_Blade', left: 'Skeleton_Blade', walk: 'Running_A', stride: 4.5, attack: 'Dualwield_Melee_Attack_Chop', hitAt: 0.55 },
+  shooter: { model: 'Skeleton_Mage',    scale: 1.25, right: 'Skeleton_Staff', walk: 'Walking_A', stride: 1.8, attack: 'Spellcast_Shoot', hitAt: 0.25 },
+  tank:    { model: 'Skeleton_Warrior', scale: 2.0,  right: 'Skeleton_Axe', left: 'Skeleton_Shield_Large_A', walk: 'Walking_D_Skeletons', stride: 1.6, attack: '1H_Melee_Attack_Chop', hitAt: 0.5 },
+  boss:    { model: 'Skeleton_Warrior', scale: 3.4,  right: 'Skeleton_Blade', left: 'Skeleton_Shield_Large_A', walk: 'Walking_C', stride: 1.4, attack: '1H_Melee_Attack_Slice_Horizontal', hitAt: 0.5 },
+};
+
+const assets = {};
+let ready = null;
+
+// Loads every model once; resolves when skeletons can be created.
+export function loadSkeletons() {
+  if (!ready) {
+    const loader = new GLTFLoader();
+    const load = (name, ext) => loader.loadAsync(`${DIR}${name}.${ext}`).then((gltf) => {
+      gltf.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+      assets[name] = gltf;
+    });
+    ready = Promise.all([...MODELS.map((n) => load(n, 'glb')), ...GEAR.map((n) => load(n, 'gltf'))]);
   }
-  for (const s of [-1, 1]) torso.push(part(ball(0.07), type === 'boss' ? GOLD : BONE, { pos: [s * 0.3, 0.74, 0], scale: type === 'boss' ? 1.9 : 1 }));
-  if (type === 'boss') torso.push(part(box(0.78, 1.05, 0.04), RED, { pos: [0, 0.28, -0.2], rot: [0.12, 0, 0] }));
-
-  const head = [
-    part(ball(0.2, 14, 10), BONE, { pos: [0, 0.2, 0], scale: [1, 1.05, 1.08] }),
-    part(box(0.2, 0.08, 0.15), BONE, { pos: [0, 0.02, 0.05] }),
-  ];
-  for (const s of [-1, 1]) head.push(part(ball(0.058), DARK, { pos: [s * 0.078, 0.22, 0.165] }));
-  if (type === 'shooter') {
-    head.push(part(cone(0.3, 0.55, 10), CLOTH, { pos: [0, 0.64, 0] }), part(cyl(0.38, 0.38, 0.03, 14), CLOTH, { pos: [0, 0.37, 0] }));
-  } else if (type === 'tank') {
-    head.push(part(new THREE.SphereGeometry(0.225, 12, 6, 0, Math.PI * 2, 0, HALF_PI), STEEL, { pos: [0, 0.22, 0], scale: [1, 1.05, 1.08] }));
-    for (const s of [-1, 1]) head.push(part(cone(0.05, 0.28, 6), BONE, { pos: [s * 0.25, 0.36, 0], rot: [0, 0, -s * 0.7] }));
-  } else if (type === 'boss') {
-    head.push(part(cyl(0.2, 0.17, 0.1, 12), GOLD, { pos: [0, 0.38, 0] }));
-    for (let i = 0; i < 6; i++) {
-      const a = i / 6 * Math.PI * 2;
-      head.push(part(cone(0.04, 0.14, 4), GOLD, { pos: [Math.cos(a) * 0.17, 0.49, Math.sin(a) * 0.17] }));
-    }
-  }
-
-  const arm = () => [
-    part(cyl(0.04, 0.035, 0.34), BONE, { pos: [0, -0.17, 0] }),
-    part(ball(0.05), BONE, { pos: [0, -0.35, 0] }),
-    part(cyl(0.035, 0.03, 0.3), BONE, { pos: [0, -0.5, 0] }),
-    part(ball(0.055), BONE, { pos: [0, -0.68, 0] }),
-  ];
-  // gear is modelled pointing along +Z from the hand; the raised arm turns that up and forward
-  const armR = arm(), armL = arm();
-  let armGlow = null;
-  if (type === 'chaser') {
-    armR.push(part(box(0.18, 0.04, 0.05), WOOD, { pos: [0, -0.68, 0.09] }), part(box(0.045, 0.02, 0.7), STEEL, { pos: [0, -0.68, 0.46] }));
-  } else if (type === 'shooter') {
-    armR.push(part(cyl(0.025, 0.025, 1.3), WOOD, { pos: [0, -0.68, 0.3], rot: [HALF_PI, 0, 0] }));
-    armGlow = part(ball(0.09), 0xffffff, { pos: [0, -0.68, 1.0] });
-  } else if (type === 'tank') {
-    armR.push(part(cyl(0.09, 0.05, 0.8), WOOD, { pos: [0, -0.68, 0.4], rot: [HALF_PI, 0, 0] }), part(ball(0.17, 6, 5), STEEL, { pos: [0, -0.68, 0.85] }));
-    armL.push(part(cyl(0.34, 0.34, 0.05, 12), WOOD, { pos: [0, -0.55, 0.1], rot: [HALF_PI, 0, 0] }), part(ball(0.09), STEEL, { pos: [0, -0.55, 0.14] }));
-  } else if (type === 'boss') {
-    armR.push(part(box(0.3, 0.05, 0.06), GOLD, { pos: [0, -0.68, 0.12] }), part(box(0.09, 0.03, 1.1), STEEL, { pos: [0, -0.68, 0.7] }));
-  }
-
-  const eyes = merge([-1, 1].map((s) => part(ball(0.032), 0xffffff, { pos: [s * 0.078, 0.22, 0.2] })));
-  return { leg, torso: merge(torso), head: merge(head), armR: merge(armR), armL: merge(armL), eyes, armGlow };
+  return ready;
 }
 
-const geoCache = new Map(), glowCache = new Map();
-const boneMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
+const glowMats = new Map();
+// GLTFLoader strips dots from node names ("handslot.r" becomes "handslotr")
+const findSlot = (model, side) => model.getObjectByName(`handslot${side}`) || model.getObjectByName(`handslot.${side}`);
 
 export function createSkeleton(type, def) {
-  if (!geoCache.has(type)) geoCache.set(type, buildGeometry(type));
-  if (!glowCache.has(type)) glowCache.set(type, new THREE.MeshBasicMaterial({ color: new THREE.Color(def.color).multiplyScalar(2.6) }));
-  const geo = geoCache.get(type), glow = glowCache.get(type);
-  const mat = boneMat.clone();   // per-monster so it can flash when hit
+  const v = VARIANTS[type], src = assets[v.model];
+  const model = SkeletonUtils.clone(src.scene);
+
+  if (!glowMats.has(type)) glowMats.set(type, new THREE.MeshBasicMaterial({ color: new THREE.Color(def.color).multiplyScalar(2.6) }));
+  let mat = null;   // per-monster copy of the body material, so it can flash when hit
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.material.name === 'Glow') { o.material = glowMats.get(type); return; }
+    mat ||= o.material.clone();
+    o.material = mat;
+  });
+
+  for (const [side, gear] of [['r', v.right], ['l', v.left]]) {
+    const slot = gear && findSlot(model, side);
+    if (slot) slot.add(assets[gear].scene.clone(true));
+  }
 
   const group = new THREE.Group();   // origin at the feet, facing +Z
-  group.scale.setScalar(Math.min(MAX_SCALE, def.r / BASE_R));
-  const inner = new THREE.Group();
-  group.add(inner);
-  const add = (parent, g, x, y, m = mat) => {
-    const mesh = new THREE.Mesh(g, m);
-    mesh.position.set(x, y, 0);
-    mesh.castShadow = m === mat;
-    parent.add(mesh);
-    return mesh;
+  group.scale.setScalar(v.scale);
+  group.add(model);
+
+  const mixer = new THREE.AnimationMixer(model);
+  const action = (name, once) => {
+    const a = mixer.clipAction(THREE.AnimationClip.findByName(src.animations, name));
+    if (once) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
+    return a;
   };
+  const idle = action('Idle'), walk = action(v.walk);
+  const attack = action(v.attack, true), hit = action('Hit_A', true), death = action('Death_A', true);
+  walk.timeScale = Math.max(0.6, Math.min(1.7, def.speed / (v.scale * v.stride)));   // keep the feet from sliding
+  attack.timeScale = v.hitAt / ATTACK_WINDUP;
+  idle.play();
+  walk.play();
+  mixer.update(Math.random() * 2);   // desynchronise the crowd
 
-  const torso = add(inner, geo.torso, 0, 0.85);
-  const head = add(torso, geo.head, 0, 0.8);
-  add(head, geo.eyes, 0, 0, glow);
-  const armL = add(torso, geo.armL, -0.3, 0.74);
-  const armR = add(torso, geo.armR, 0.3, 0.74);
-  if (geo.armGlow) add(armR, geo.armGlow, 0, 0, glow);
-  const legL = add(inner, geo.leg, -0.14, 0.85);
-  const legR = add(inner, geo.leg, 0.14, 0.85);
+  let move = 0, shot = null, shotT = 0, dead = false;
 
-  const hunched = type === 'runner';
-  const armed = type !== 'runner';
-  const seed = Math.random() * 10;
-  let phase = seed, move = 0, attackT = -1;
-  const ATTACK_TIME = ATTACK_WINDUP + 0.35, lerp = (a, b, t) => a + (b - a) * Math.max(0, Math.min(1, t));
+  function play(a) {
+    if (dead) return;
+    if (shot) shot.stop();
+    shot = a;
+    shotT = 0;
+    a.reset().setEffectiveWeight(0).play();
+  }
 
   function update(dt, time, moving) {
     move += ((moving ? 1 : 0) - move) * Math.min(1, dt * 8);
-    phase += dt * (hunched ? 16 : 9) * move;
-    const swing = Math.sin(phase) * 0.75 * move;
-    legL.rotation.x = swing;
-    legR.rotation.x = -swing;
-    armL.rotation.x = (hunched ? -1.0 : type === 'tank' ? -0.9 : 0) - swing * 0.6;
-    armR.rotation.x = (armed ? -1.05 : -1.0) + swing * (armed ? 0.2 : 0.6) + Math.sin(time * 2 + seed) * 0.05;
-    inner.position.y = Math.abs(Math.sin(phase)) * 0.05 * move;
-    torso.rotation.x = (hunched ? 0.45 : 0.06) + move * 0.08;
-    torso.rotation.z = Math.sin(time * 1.5 + seed) * 0.04;
-    head.rotation.x = hunched ? -0.4 : 0;
-    head.rotation.y = Math.sin(time * 1.1 + seed) * 0.3 * (1 - move);
-
-    // attack: raise the weapon during the wind-up, chop down when the hit lands, then recover
-    if (attackT >= 0) {
-      attackT += dt;
-      const base = armR.rotation.x, RAISED = -2.9, STRUCK = -0.25;
-      let arm, lunge;
-      if (attackT < ATTACK_WINDUP) {
-        const t = attackT / ATTACK_WINDUP;
-        arm = lerp(base, RAISED, t * 1.6);
-        lunge = -0.2 * t;
-      } else {
-        const t = (attackT - ATTACK_WINDUP) / (ATTACK_TIME - ATTACK_WINDUP);
-        arm = t < 0.3 ? lerp(RAISED, STRUCK, t / 0.3) : lerp(STRUCK, base, (t - 0.3) / 0.7);
-        lunge = t < 0.3 ? lerp(-0.2, 0.5, t / 0.3) : lerp(0.5, 0, (t - 0.3) / 0.7);
-      }
-      armR.rotation.x = arm;
-      if (hunched) armL.rotation.x = arm;   // the unarmed runner claws with both hands
-      torso.rotation.x += lunge;
-      head.rotation.y = 0;
-      if (attackT >= ATTACK_TIME) attackT = -1;
+    let w = 0;   // how much the one-shot clip (attack / hit / death) overrides locomotion
+    if (shot) {
+      shotT += dt;
+      const dur = shot.getClip().duration / shot.timeScale;
+      w = dead ? Math.min(1, shotT / 0.08) : Math.max(0, Math.min(1, shotT / 0.08, (dur - shotT) / 0.18));
+      shot.setEffectiveWeight(w);
+      if (!dead && shotT >= dur) { shot.stop(); shot = null; w = 0; }
     }
+    idle.setEffectiveWeight((1 - move) * (1 - w));
+    walk.setEffectiveWeight(move * (1 - w));
+    mixer.update(dt);
   }
 
-  return { group, mat, update, attack: () => { attackT = 0; }, flash: (v) => mat.emissive.setScalar(v * 0.8) };
+  return {
+    group, mat, update,
+    attack: () => play(attack),
+    hit: () => { if (shot !== attack) play(hit); },   // a flinch never cancels a swing
+    die: () => { play(death); dead = true; },
+    flash: (k) => mat.emissive.setScalar(k * 0.5),
+    dispose: () => { mixer.stopAllAction(); mixer.uncacheRoot(model); mat.dispose(); },
+  };
 }

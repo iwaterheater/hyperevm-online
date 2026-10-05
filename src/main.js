@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createCat } from './cat.js';
-import { createSkeleton, SKELETON_HEIGHT, BONE } from './skeleton.js';
+import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
 import { CAST_TIME, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
 
@@ -230,12 +230,18 @@ function lerpAngle(a, b, k) {
 
 const lvlLabels = new Map();
 
+const corpses = [];
+function removeMobView(v) {
+  scene.remove(v.root);
+  v.skeleton.dispose();
+}
+
 function makeMobView(ti, lvl) {
   const type = MOB_KEYS[ti], def = MOB_TYPES[type];
   const root = new THREE.Group();   // never rotates, so the label and bar stay screen-aligned
   const skeleton = createSkeleton(type, def);
   root.add(skeleton.group);
-  const top = SKELETON_HEIGHT * skeleton.group.scale.y + (type === 'shooter' ? 0.5 : 0);
+  const top = SKELETON_HEIGHT * skeleton.group.scale.y + (type === 'shooter' ? 0.4 : 0);
 
   const text = type === 'boss' ? `Skeleton King · Lv ${lvl}` : `Lv ${lvl}`;
   if (!lvlLabels.has(text)) lvlLabels.set(text, textSprite(text, type === 'boss' ? '#ff8095' : '#f0e6d8', type === 'boss' ? 0.8 : 0.4));
@@ -248,7 +254,7 @@ function makeMobView(ti, lvl) {
   root.scale.setScalar(0.01);
   scene.add(root);
   return {
-    root, skeleton, mat: skeleton.mat, def, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
+    root, skeleton, label, def, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
     x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flash: 0, age: 0, yaw: 0,
   };
 }
@@ -331,12 +337,21 @@ function getToken() {
   } catch { return ''; }
 }
 
-function connect() {
+async function connect() {
   if (state !== 'menu') return;
   if (!actx) { try { actx = new AudioContext(); } catch { /* no audio */ } }
   state = 'connecting';
   const name = $('nameInput').value.trim() || 'Cat';
   try { localStorage.setItem('hypercat-name', name); } catch { /* ignore */ }
+  $('playBtn').textContent = 'Loading models…';
+  try {
+    await loadSkeletons();
+  } catch (err) {
+    console.error(err);
+    state = 'menu';
+    $('playBtn').textContent = 'Models failed to load — retry';
+    return;
+  }
   $('playBtn').textContent = 'Connecting…';
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
   ws.onopen = () => send({ t: 'join', name, token: getToken() });
@@ -400,10 +415,19 @@ function onSnapshot(s) {
     },
     removeAvatar);
 
+  // a killed monster stays behind for its death animation instead of vanishing with the snapshot
+  for (const ev of s.e) if (ev.k === 'kill' && mobViews.has(ev.id)) mobViews.get(ev.id).killed = true;
   syncViews(mobViews, s.m,
     ([, ti, lvl, x, z]) => Object.assign(makeMobView(ti, lvl), { x, z }),
     (v, [, , , x, z, hp, maxHp]) => Object.assign(v, { tx: x, tz: z, hp, maxHp }),
-    (v) => { scene.remove(v.root); v.mat.dispose(); });
+    (v) => {
+      if (!v.killed) { removeMobView(v); return; }
+      v.skeleton.die();
+      v.skeleton.flash(0);
+      v.bar.set(0, false);
+      v.label.visible = false;
+      corpses.push({ v, t: 0 });
+    });
 
   syncViews(gemViews, s.g,
     ([, x, z]) => { const g = gemPool.get(); g.mesh.position.set(x, 0.55, z); return g; },
@@ -458,7 +482,7 @@ function onEvent(ev) {
       break;
     case 'hit': {
       const v = mobViews.get(ev.id);
-      if (v) { v.flash = 1; burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
+      if (v) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
       sfx(520, 0.05, 'square', 0.025);
       break;
     }
@@ -554,6 +578,7 @@ addEventListener('contextmenu', (e) => e.preventDefault());
 $('playBtn').addEventListener('click', connect);
 $('reloadBtn').addEventListener('click', () => location.reload());
 try { $('nameInput').value = localStorage.getItem('hypercat-name') || ''; } catch { /* ignore */ }
+loadSkeletons().catch(() => {});   // start downloading models while the player is still in the menu
 
 function jump() {
   if (local.jumps >= 2 || stats.dead) return;
@@ -715,10 +740,21 @@ function updateViews(dt) {
     v.root.position.set(v.x, 0, v.z);
     v.root.scale.setScalar(Math.min(1, v.age / 0.4));
     v.skeleton.group.rotation.y = v.yaw;
-    v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
+    // monsters far outside the camera's view are neither drawn nor animated
+    v.root.visible = (v.x - me.x) ** 2 + (v.z - me.z) ** 2 < 55 * 55;
+    if (v.root.visible) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
     v.flash = Math.max(0, v.flash - dt * 6);
     v.skeleton.flash(v.flash);
     v.bar.set(v.hp / v.maxHp, v.hp < v.maxHp);
+  }
+
+  // corpses play the death animation, then sink into the ground
+  for (let j = corpses.length - 1; j >= 0; j--) {
+    const c = corpses[j];
+    c.t += dt;
+    c.v.skeleton.update(dt, time, false);
+    if (c.t > 1.8) c.v.root.position.y = -(c.t - 1.8) * 1.5 * c.v.skeleton.group.scale.y;
+    if (c.t > 3) { removeMobView(c.v); corpses.splice(j, 1); }
   }
 
   let i = 0;

@@ -4,6 +4,7 @@ A small open-world browser MMORPG starring a chibi cat in a green hoodie.
 Players share one seamless world, hunt skeletons together, level up, collect gold and upgrade their weapon.
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
+- **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0)
 - **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP and loot
 
 ## Quick start
@@ -58,10 +59,10 @@ The **Skeleton King** (level 18 boss) waits inside a ring of pillars in the far 
 
 | Type | Behaviour |
 | --- | --- |
-| Skeleton Swordsman | Runs at you |
-| Bone Runner | Small, hunched, fast, fragile |
-| Skeleton Mage | Keeps its distance and fires orbs |
-| Skeleton Brute | Slow, tough, hits hard, drops extra gold |
+| Skeleton Minion | Shambles at you with a blade |
+| Skeleton Rogue | Small, fast, fragile, dual-wields blades |
+| Skeleton Mage | Keeps its distance and fires orbs from its staff |
+| Skeleton Warrior | Slow, tough, hits hard with an axe, drops extra gold |
 | Skeleton King | Boss; fires rings of orbs, respawns after 90 seconds |
 
 ### Progression
@@ -79,7 +80,8 @@ index.html        Page, HUD and styles
 server.js         HTTP static server + WebSocket game server
 src/main.js       Client: rendering, input, networking, HUD
 src/cat.js        Procedural 3D cat model and its animations
-src/skeleton.js   Procedural skeleton monsters (five variants)
+src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations
+assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
 src/world.js      Terrain, town, scenery, lighting and obstacle collision
 src/geo.js        Helpers for building vertex-coloured low-poly geometry
 src/shared.js     Constants and formulas used by both client and server
@@ -104,5 +106,5 @@ The server is a single Node.js process, so any host that can run Node and accept
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
 - No accounts, no PvP, no inventory beyond gold and a weapon level.
-- All models (cat, skeletons, scenery) are built from code; there are no imported 3D assets or textures.
+- The cat and the scenery are built from code; only the skeletons use imported models.
 - The cat model is built from code to match the reference artwork, not sculpted or scanned.

@@ -14,20 +14,26 @@ const VIEW_R = 65;
 
 // ---------------------------------------------------------------- static files
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css' };
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css',
+  '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.bin': 'application/octet-stream', '.png': 'image/png',
+};
+const PUBLIC = ['/src/', '/assets/'];
 
 const server = http.createServer((req, res) => {
   let url;
   try { url = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { url = ''; }
   if (url === '/') url = '/index.html';
   const file = path.join(ROOT, url);
-  if ((url !== '/index.html' && !url.startsWith('/src/')) || !file.startsWith(ROOT + path.sep)) {
+  if ((url !== '/index.html' && !PUBLIC.some((dir) => url.startsWith(dir))) || !file.startsWith(ROOT + path.sep)) {
     res.writeHead(404).end('Not found');
     return;
   }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404).end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    // code is always re-fetched; models are large and never change, so browsers may keep them
+    const cache = url.startsWith('/assets/') ? 'public, max-age=86400' : 'no-cache';
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': cache });
     res.end(data);
   });
 });
@@ -202,6 +208,7 @@ function updateMob(m, dt) {
     const dist = Math.hypot(dx, dz) || 0.001;
     dx /= dist; dz /= dist;
     mx = dx; mz = dz;
+    if (m.type !== 'shooter' && dist < m.r + 0.9) { mx = 0; mz = 0; }   // melee monsters stop at arm's length instead of walking into the player
     if (m.type === 'shooter' || m.type === 'boss') {
       if (m.type === 'shooter') {
         if (dist < 9) { mx = -dx; mz = -dz; } else if (dist < 14) { mx = -dz * m.strafe; mz = dx * m.strafe; }
@@ -236,7 +243,7 @@ function updateMob(m, dt) {
     speed = 0;
     if (now >= m.swing.at) {
       const p = players.get(m.swing.pid);
-      if (p && Math.hypot(p.x - m.x, p.z - m.z) < m.r + 1.1 && p.y < m.r * 2 + 0.2) hurtPlayer(p, m.dmg);
+      if (p && Math.hypot(p.x - m.x, p.z - m.z) < m.r + 1.5 && p.y < m.r * 2 + 0.2) hurtPlayer(p, m.dmg);
       m.swing = null;
     }
   }
@@ -252,7 +259,7 @@ function updateMob(m, dt) {
   for (const p of players.values()) {
     if (p.dead) continue;
     const dx = p.x - m.x, dz = p.z - m.z, dist = Math.hypot(dx, dz) || 0.001;
-    if (dist > m.r + 0.7 || p.y > m.r * 2 + 0.2) continue;
+    if (dist > m.r + 1.1 || p.y > m.r * 2 + 0.2) continue;
     if (now < p.dashUntil) {
       const key = `${p.id}:${p.dashSeq}`;
       if (m.dashHit !== key) {
