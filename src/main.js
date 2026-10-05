@@ -743,7 +743,13 @@ function updateLocal(dt) {
     }
   }
 
-  me.yaw = lerpAngle(me.yaw, Math.atan2(local.aim.x, local.aim.y), Math.min(1, dt * 16));
+  // The cat faces where it is going. While attacking or casting it faces the cursor, since that is where the hit lands;
+  // standing still, it keeps looking the way it last faced.
+  let face = null;
+  if (me.swingT >= 0 || me.castT >= 0 || me.shootPose > 0) face = Math.atan2(local.aim.x, local.aim.y);
+  else if (local.dashT > 0) face = Math.atan2(local.dashDir.x, local.dashDir.y);
+  else if (moveDir.lengthSq() > 0) face = Math.atan2(moveDir.x, moveDir.y);
+  if (face !== null) me.yaw = lerpAngle(me.yaw, face, Math.min(1, dt * 14));
 
   local.sendT -= dt;
   if (local.sendT <= 0) {
