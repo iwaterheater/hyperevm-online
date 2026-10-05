@@ -217,15 +217,16 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
     joint = next;
   }
 
-  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0;
+  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0;
 
-  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
+  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, sitting = false, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
     t += dt;
     const k = Math.min(1, dt * 12);
     move += (Math.min(1, speed / 9) - move) * k;
     air += ((airborne ? 1 : 0) - air) * k;
     shoot += ((shooting ? 1 : 0) - shoot) * Math.min(1, dt * 20);
     cast += ((casting ? 1 : 0) - cast) * Math.min(1, dt * 14);
+    sit += ((sitting ? 1 : 0) - sit) * Math.min(1, dt * 7);
     runPhase += dt * (6 + speed * 1.1);
 
     const swing = Math.sin(runPhase) * 0.95 * move * (1 - air);
@@ -269,6 +270,13 @@ export function createCat({ hoodie = COLORS.hoodie } = {}) {
       }
     }
     inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0) - cast * 0.1;
+    // resting: drop to the ground with the legs stretched out in front and the paws on the knees
+    if (sit > 0.01) {
+      inner.position.y -= 0.36 * sit;
+      inner.rotation.x -= 0.12 * sit;
+      for (const leg of legs) leg.rotation.x += (-1.45 - leg.rotation.x) * sit;
+      for (const arm of arms) arm.rotation.x += (-0.5 - arm.rotation.x) * sit;
+    }
     head.rotation.z = Math.sin(t * 1.3) * 0.04;
     head.rotation.x = -move * 0.1 + Math.sin(t * 1.7) * 0.02;
 

@@ -5,23 +5,26 @@ export const TOWN_R = 24;
 export const TICK = 1 / 15;
 export const CAST_TIME = 0.65;      // seconds a player stands still channelling before a bolt is released
 export const BOLT_DMG = 3;          // base damage of one bolt, before level and weapon multipliers
-// Basic attack: a sword swing that hits every monster in a cone in front of the cat.
-export const SWORD = { cd: 0.45, range: 2.4, minDot: 0.3, dmg: 2 };
+export const BOLT_RANGE = 22;       // how far away the target of a bolt may be
+export const BOLT_MP = 8;
+// Basic attack: the cat auto-attacks its selected target with the sword while within reach.
+export const SWORD = { cd: 0.45, range: 2.4, dmg: 2 };
 // Skill 2, Starfall: a ground-targeted area blast that lands shortly after the cast completes.
-export const METEOR = { cast: 0.9, cd: 6, range: 16, radius: 4.5, dmg: 10, delay: 0.45 };
+export const METEOR = { cast: 0.9, cd: 6, range: 16, radius: 4.5, dmg: 10, delay: 0.45, mp: 22 };
 export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its swing and the hit landing
 
 export const MOB_TYPES = {
-  chaser:  { r: 0.7,  hp: 3,   speed: 3.0, dmg: 10, xp: 10,  color: 0xff3b8d },
-  runner:  { r: 0.45, hp: 1.5, speed: 5.2, dmg: 6,  xp: 8,   color: 0xff9a3b },
-  shooter: { r: 0.6,  hp: 3,   speed: 2.4, dmg: 8,  xp: 16,  color: 0xffe14d },
-  tank:    { r: 1.3,  hp: 14,  speed: 1.8, dmg: 20, xp: 45,  color: 0xb04dff },
-  boss:    { r: 2.8,  hp: 160, speed: 2.2, dmg: 14, xp: 600, color: 0xff2244 },
+  chaser:  { name: 'Skeleton Minion',  r: 0.7,  hp: 3,   speed: 3.0, dmg: 10, xp: 10,  color: 0xff3b8d },
+  runner:  { name: 'Skeleton Rogue',   r: 0.45, hp: 1.5, speed: 5.2, dmg: 6,  xp: 8,   color: 0xff9a3b },
+  shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 3,   speed: 2.4, dmg: 8,  xp: 16,  color: 0xffe14d },
+  tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 14,  speed: 1.8, dmg: 20, xp: 45,  color: 0xb04dff },
+  boss:    { name: 'Skeleton King',    r: 2.8,  hp: 160, speed: 2.2, dmg: 14, xp: 600, color: 0xff2244 },
 };
 export const MOB_KEYS = Object.keys(MOB_TYPES);
 
 export const xpNext = (level) => Math.round(50 * Math.pow(level, 1.5));
 export const maxHpFor = (level) => 100 + 20 * (level - 1);
+export const maxMpFor = (level) => 60 + 12 * (level - 1);
 export const dmgMult = (level, weapon) => (1 + 0.4 * (weapon - 1)) * (1 + 0.08 * (level - 1));
 export const upgradeCost = (weapon) => 40 * weapon;
 

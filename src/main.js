@@ -8,7 +8,7 @@ import { createCat } from './cat.js';
 import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
-import { CAST_TIME, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SHOP_RANGE, CHESTS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
+import { CAST_TIME, BOLT_RANGE, BOLT_MP, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SHOP_RANGE, CHESTS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
@@ -242,7 +242,7 @@ function makeAvatar(hoodie) {
   return {
     root, cat, orb, swingT: -1, swingKind: 0, castT: -1, castDur: CAST_TIME, castSkill: 1, bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
-    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, shootPose: 0,
+    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0,
   };
 }
 
@@ -293,7 +293,7 @@ function makeMobView(ti, lvl) {
   root.scale.setScalar(0.01);
   scene.add(root);
   return {
-    root, skeleton, label, def, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
+    root, skeleton, label, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
     x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flash: 0, age: 0, yaw: 0,
   };
 }
@@ -308,16 +308,17 @@ let bullets = [], orbs = [], meteors = [];
 
 const me = makeAvatar();
 me.z = 6;   // menu pose: on the plaza, in front of the fountain
-const stats = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, weapon: 1, energy: 0, dead: false };
+const stats = { hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, level: 1, gold: 0, weapon: 1, energy: 0, dead: false };
 const local = {
   vy: 0, jumps: 0, invuln: 0, fireCd: 0, meteorCd: 0, swordCd: 0, combo: 0, dashT: 0, dashCd: 0, sendT: 0,
   dashDir: new THREE.Vector2(0, 1), aim: new THREE.Vector2(0, 1), zone: '',
 };
 
-const reticle = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.4, 32), new THREE.MeshBasicMaterial({ color: glow(TEAL, 2), transparent: true, opacity: 0.8 }));
-reticle.rotation.x = -Math.PI / 2;
-reticle.visible = false;
-scene.add(reticle);
+// ring on the ground under the selected monster: yellow when selected, red while attacking it
+const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+targetRing.rotation.x = -Math.PI / 2;
+targetRing.visible = false;
+scene.add(targetRing);
 
 // the arc a sword swing leaves in the air
 const slashes = [];
@@ -411,7 +412,6 @@ function onMessage(msg) {
     state = 'playing';
     $('menu').classList.add('hidden');
     $('hud').classList.add('on');
-    reticle.visible = true;
     document.activeElement?.blur();
     sfx(440, 0.25, 'triangle', 0.08, 440);
   } else if (msg.t === 'r') {
@@ -448,8 +448,8 @@ function onSnapshot(s) {
       Object.assign(a, { x, y, z, yaw });
       return a;
     },
-    (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead]) => {
-      Object.assign(a, { tx: x, ty: y, tz: z, tyaw: yaw, speed, hp, maxHp, level, dead: !!dead });
+    (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit]) => {
+      Object.assign(a, { tx: x, ty: y, tz: z, tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit });
       setLabel(a, `${names.get(id) || 'Cat'} · Lv ${level}`);
     },
     removeAvatar);
@@ -479,6 +479,14 @@ function onSnapshot(s) {
   for (const ev of s.e) onEvent(ev);
 }
 
+// a bolt that homes in on a monster; purely visual, the server decides the damage
+function spawnBolt(x, z, id) {
+  const b = bulletPool.get();
+  b.mesh.position.set(x, 1.1, z);
+  b.id = id;
+  bullets.push(b);
+}
+
 function spawnProjectile(list, pool, x, z, dx, dz, speed, life) {
   const b = pool.get();
   b.mesh.position.set(x, 1, z);
@@ -490,7 +498,7 @@ function onEvent(ev) {
   switch (ev.k) {
     case 'shot':
       if (ev.o === myId) break;
-      spawnProjectile(bullets, bulletPool, ev.x, ev.z, ev.dx, ev.dz, 34, 1.1);
+      spawnBolt(ev.x, ev.z, ev.id);
       if (others.has(ev.o)) others.get(ev.o).shootPose = 0.25;
       break;
     case 'cast':
@@ -567,6 +575,8 @@ function onEvent(ev) {
       sfx(1200, 0.08, 'sine', 0.05, 600);
       break;
     case 'hurt':
+      if (!targetId) setTarget(nearbyMobs(6)[0] || 0, false);   // being hit selects the attacker
+      me.sitting = false;
       local.invuln = 0.5;
       shake = 0.6;
       $('flash').style.opacity = 1;
@@ -584,8 +594,59 @@ function onEvent(ev) {
 
 const keys = new Set();
 const mouse = new THREE.Vector2(0, -0.3);
-let firing = false;
 const typing = () => document.activeElement === $('chatInput') || document.activeElement === $('nameInput');
+
+// orbit camera: drag with the right mouse button to turn it, wheel to zoom
+const cam = { yaw: 0, pitch: 0.9, dist: 16.5, drag: null };
+// combat: the selected monster, and whether the cat is auto-attacking it
+let targetId = 0, attacking = false;
+
+let noticeTimer = 0;
+function notice(text) {
+  $('notice').textContent = text;
+  $('notice').classList.add('on');
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => $('notice').classList.remove('on'), 1300);
+}
+
+// the monster under the cursor, if any
+const pickV = new THREE.Vector3();
+function pickMob(clientX, clientY) {
+  let best = 0, bestD = Infinity;
+  for (const [id, v] of mobViews) {
+    if (!v.root.visible || v.killed) continue;
+    pickV.set(v.x, v.top * 0.5, v.z);
+    const pixelsPerUnit = innerHeight / (0.89 * camera.position.distanceTo(pickV));   // 0.89 = 2 * tan(fov / 2)
+    pickV.project(camera);
+    if (pickV.z > 1) continue;
+    const d = Math.hypot((pickV.x + 1) / 2 * innerWidth - clientX, (1 - pickV.y) / 2 * innerHeight - clientY);
+    if (d < Math.max(26, v.top * 0.6 * pixelsPerUnit) && d < bestD) { bestD = d; best = id; }
+  }
+  return best;
+}
+
+function setTarget(id, attack) {
+  targetId = id;
+  attacking = !!id && attack;
+  if (attacking) me.sitting = false;
+}
+
+// monsters within reach of Tab, nearest first
+function nearbyMobs(range) {
+  const list = [];
+  for (const [id, v] of mobViews) {
+    const d = Math.hypot(v.x - me.x, v.z - me.z);
+    if (d < range && !v.killed) list.push([d, id]);
+  }
+  return list.sort((a, b) => a[0] - b[0]).map((e) => e[1]);
+}
+
+function attackKey() {
+  if (!targetId) setTarget(nearbyMobs(26)[0] || 0, true);
+  else attacking = !attacking;
+  if (!targetId) notice('No monsters nearby');
+  else if (attacking) me.sitting = false;
+}
 
 addEventListener('keydown', (e) => {
   if (e.code === 'Enter') {
@@ -601,7 +662,6 @@ addEventListener('keydown', (e) => {
       input.style.display = 'block';
       input.focus();
       keys.clear();
-      firing = false;
     }
     return;
   }
@@ -609,22 +669,53 @@ addEventListener('keydown', (e) => {
     if (e.code === 'Escape') { $('chatInput').style.display = 'none'; $('chatInput').blur(); }
     return;
   }
-  if (e.repeat || state !== 'playing') return;
+  if (state !== 'playing') return;
+  if (e.code === 'Tab') e.preventDefault();
+  if (e.repeat) return;
   keys.add(e.code);
   if (e.code === 'Space') { e.preventDefault(); jump(); }
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') dash();
+  if (e.code === 'Tab') {   // next monster, nearest first
+    const list = nearbyMobs(40);
+    if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
+  }
+  if (e.code === 'Escape') setTarget(0, false);
+  if (e.code === 'KeyF') attackKey();
+  if (e.code === 'KeyX' && !stats.dead && me.castT < 0) { me.sitting = !me.sitting; if (me.sitting) attacking = false; }
   if (e.code === 'KeyQ' || e.code === 'KeyE') send({ t: 'u' });
   if (e.code === 'KeyB') send({ t: 'b' });
   if (e.code === 'KeyM') muted = !muted;
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
-addEventListener('blur', () => { keys.clear(); firing = false; });
-addEventListener('mousemove', (e) => mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1));
-renderer.domElement.addEventListener('mousedown', (e) => {
-  if (e.button === 0) firing = true;
-  if (e.button === 2) send({ t: 'u' });
+addEventListener('blur', () => { keys.clear(); cam.drag = null; });
+addEventListener('mousemove', (e) => {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  if (!cam.drag) return;
+  cam.yaw -= e.movementX * 0.006;
+  cam.pitch = Math.max(0.3, Math.min(1.45, cam.pitch + e.movementY * 0.004));
+  cam.drag.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
 });
-addEventListener('mouseup', (e) => { if (e.button === 0) firing = false; });
+renderer.domElement.addEventListener('mousedown', (e) => {
+  if (state !== 'playing') return;
+  if (e.button === 2) { cam.drag = { moved: 0, x: e.clientX, y: e.clientY }; return; }
+  if (e.button !== 0) return;
+  // left click: select a monster; clicking the selected one again starts the attack
+  const id = pickMob(e.clientX, e.clientY);
+  if (id) setTarget(id, id === targetId);
+});
+addEventListener('mouseup', (e) => {
+  if (e.button !== 2 || !cam.drag) return;
+  // a right click without dragging attacks the monster under the cursor
+  if (cam.drag.moved < 6 && state === 'playing') {
+    const id = pickMob(cam.drag.x, cam.drag.y);
+    if (id) setTarget(id, true);
+  }
+  cam.drag = null;
+});
+renderer.domElement.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  cam.dist = Math.max(7, Math.min(30, cam.dist * Math.exp(e.deltaY * 0.0012)));
+}, { passive: false });
 addEventListener('contextmenu', (e) => e.preventDefault());
 $('playBtn').addEventListener('click', connect);
 $('reloadBtn').addEventListener('click', () => location.reload());
@@ -633,6 +724,7 @@ loadSkeletons().catch(() => {});   // start downloading models while the player 
 
 function jump() {
   if (local.jumps >= 2 || stats.dead) return;
+  me.sitting = false;
   local.vy = local.jumps === 0 ? 11 : 9.5;
   local.jumps++;
   burst(me.x, me.y + 0.1, me.z, 0xffffff, 5, 3);
@@ -642,9 +734,12 @@ function jump() {
 const moveDir = new THREE.Vector2();
 function dash() {
   if (local.dashCd > 0 || stats.dead) return;
-  local.dashDir.copy(moveDir.lengthSq() > 0 ? moveDir : local.aim).normalize();
+  // dash where the cat is going, or straight ahead when standing still
+  if (moveDir.lengthSq() > 0) local.dashDir.copy(moveDir).normalize();
+  else local.dashDir.set(Math.sin(me.yaw), Math.cos(me.yaw));
   local.dashT = 0.18;
   me.castT = -1;   // dashing interrupts a cast
+  me.sitting = false;
   local.dashCd = 1.2;
   send({ t: 'd' });
   sfx(700, 0.15, 'sawtooth', 0.05, -500);
@@ -660,21 +755,39 @@ const camTarget = new THREE.Vector3(0, 0.45, 0), camGoal = new THREE.Vector3(), 
 function updateLocal(dt) {
   local.dashCd -= dt;
   local.meteorCd -= dt;
+  local.swordCd -= dt;
+  local.fireCd -= dt;
   local.invuln -= dt;
   aoeMarker.visible = false;
   me.shootPose -= dt;
-  if (stats.dead) { me.speed = 0; me.castT = -1; return; }
+
+  let tv = mobViews.get(targetId);
+  if (targetId && (!tv || tv.killed)) { setTarget(0, false); tv = null; }   // the target died or walked out of view
+  if (stats.dead) { me.speed = 0; me.castT = -1; me.sitting = false; attacking = false; return; }
 
   raycaster.setFromCamera(mouse, camera);
-  if (raycaster.ray.intersectPlane(groundPlane, aimPoint)) {
-    const ax = aimPoint.x - me.x, az = aimPoint.z - me.z;
-    if (ax * ax + az * az > 0.04) local.aim.set(ax, az).normalize();
-    reticle.position.set(aimPoint.x, 0.06, aimPoint.z);
-  }
+  raycaster.ray.intersectPlane(groundPlane, aimPoint);   // where Starfall will land
 
+  // WASD moves relative to the camera
   const k = (a, b) => (keys.has(a) || keys.has(b) ? 1 : 0);
-  moveDir.set(k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft'), k('KeyS', 'ArrowDown') - k('KeyW', 'ArrowUp'));
-  if (moveDir.lengthSq() > 0) moveDir.normalize();
+  const ix = k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft'), iz = k('KeyS', 'ArrowDown') - k('KeyW', 'ArrowUp');
+  const sin = Math.sin(cam.yaw), cos = Math.cos(cam.yaw);
+  moveDir.set(ix * cos + iz * sin, -ix * sin + iz * cos);
+  const manual = moveDir.lengthSq() > 0;
+  if (manual) { moveDir.normalize(); me.sitting = false; }
+
+  // direction and distance to the target
+  let tdx = 0, tdz = 0, tDist = Infinity, inReach = false;
+  if (tv) {
+    tdx = tv.x - me.x; tdz = tv.z - me.z;
+    tDist = Math.hypot(tdx, tdz) || 0.001;
+    tdx /= tDist; tdz /= tDist;
+    inReach = tDist < SWORD.range + tv.def.r;
+  }
+  if (tDist > 50 && tv) { setTarget(0, false); tv = null; }   // too far away to stay locked on
+  // auto-attack: with no keys held the cat runs up to its target by itself
+  if (attacking && tv && !manual && !inReach && me.castT < 0) moveDir.set(tdx, tdz);
+  const moving = moveDir.lengthSq() > 0;
 
   if (local.dashT > 0) {
     local.dashT -= dt;
@@ -682,12 +795,12 @@ function updateLocal(dt) {
     me.z += local.dashDir.y * 32 * dt;
     me.speed = 9;
     burst(me.x, me.y + 0.8, me.z, TEAL, 2, 2);
-  } else if (me.castT >= 0) {
-    me.speed = 0;   // rooted while casting
+  } else if (me.castT >= 0 || me.sitting) {
+    me.speed = 0;   // rooted while casting or resting
   } else {
     me.x += moveDir.x * 9 * dt;
     me.z += moveDir.y * 9 * dt;
-    me.speed = moveDir.lengthSq() > 0 ? 9 : 0;
+    me.speed = moving ? 9 : 0;
   }
   const d = Math.hypot(me.x, me.z), max = WORLD_R - 1;
   if (d > max) { me.x *= max / d; me.z *= max / d; }
@@ -697,36 +810,47 @@ function updateLocal(dt) {
   me.y += local.vy * dt;
   if (me.y <= 0) { me.y = 0; local.vy = 0; local.jumps = 0; }
 
-  local.fireCd -= dt;
-  // basic attack: sword swing on the left mouse button; the cat can keep moving
-  local.swordCd -= dt;
-  if (firing && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
+  // ... and swings whenever the sword is ready and the target is within reach
+  if (attacking && tv && inReach && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
     local.swordCd = SWORD.cd;
     me.swingT = 0;
     me.swingKind = local.combo;            // combo: left-to-right, right-to-left, overhead chop
     local.combo = (local.combo + 1) % 3;
-    spawnSlash(me.x, me.z, local.aim.x, local.aim.y, me.swingKind);
-    send({ t: 'a', dx: local.aim.x, dz: local.aim.y, c: me.swingKind });
+    spawnSlash(me.x, me.z, tdx, tdz, me.swingKind);
+    send({ t: 'a', id: targetId, c: me.swingKind });
     sfx(300, 0.12, 'sawtooth', 0.04, 500);
   }
 
-  // skills: hold 1 for Bolt, 2 for Starfall; both root the cat while channelling
+  // skills: 1 = Bolt at the target, 2 = Starfall at the cursor; both cost mana and root the cat while channelling
   if (me.castT < 0 && local.fireCd <= 0 && local.dashT <= 0) {
-    const skill = keys.has('Digit2') && local.meteorCd <= 0 ? 2 : keys.has('Digit1') ? 1 : 0;
+    let skill = 0;
+    if (keys.has('Digit2')) {
+      if (local.meteorCd > 0) notice('Starfall is not ready yet');
+      else if (stats.mp < METEOR.mp) notice('Not enough mana');
+      else skill = 2;
+    } else if (keys.has('Digit1')) {
+      if (!tv) notice('Select a target first');
+      else if (tDist > BOLT_RANGE) notice('The target is too far away');
+      else if (stats.mp < BOLT_MP) notice('Not enough mana');
+      else skill = 1;
+    }
     if (skill) {
-      Object.assign(me, { castT: 0, castSkill: skill, castDur: skill === 2 ? METEOR.cast : CAST_TIME });
+      Object.assign(me, { castT: 0, castSkill: skill, castDur: skill === 2 ? METEOR.cast : CAST_TIME, sitting: false });
+      if (skill === 1) attacking = true;   // an attack skill also starts the auto-attack
       send({ t: 'k', s: skill });
       sfx(skill === 2 ? 160 : 220, me.castDur, 'sine', 0.04, 500);
     }
   } else if (me.castT >= 0) {
     me.castT += dt;
     // Starfall lands on the cursor, limited to its range
-    let tx = aimPoint.x - me.x, tz = aimPoint.z - me.z;
-    const td = Math.hypot(tx, tz);
-    if (td > METEOR.range) { tx *= METEOR.range / td; tz *= METEOR.range / td; }
+    let sx = aimPoint.x - me.x, sz = aimPoint.z - me.z;
+    const sd = Math.hypot(sx, sz);
+    if (sd > METEOR.range) { sx *= METEOR.range / sd; sz *= METEOR.range / sd; }
     if (me.castSkill === 2) {
       aoeMarker.visible = true;
-      aoeMarker.position.set(me.x + tx, 0.08, me.z + tz);
+      aoeMarker.position.set(me.x + sx, 0.08, me.z + sz);
+    } else if (!tv) {
+      me.castT = -1;   // the target is gone: the bolt fizzles
     }
     if (me.castT >= me.castDur) {
       me.castT = -1;
@@ -734,28 +858,28 @@ function updateLocal(dt) {
       me.shootPose = 0.25;
       if (me.castSkill === 2) {
         local.meteorCd = METEOR.cd;
-        send({ t: 'q', x: me.x + tx, z: me.z + tz });
+        send({ t: 'q', x: me.x + sx, z: me.z + sz });
       } else {
-        spawnProjectile(bullets, bulletPool, me.x + local.aim.x * 0.8, me.z + local.aim.y * 0.8, local.aim.x, local.aim.y, 34, 1.1);
-        send({ t: 'f', dx: local.aim.x, dz: local.aim.y });
+        spawnBolt(me.x + tdx * 0.8, me.z + tdz * 0.8, targetId);
+        send({ t: 'f', id: targetId });
         sfx(660, 0.12, 'square', 0.04, -400);
       }
     }
   }
 
-  // The cat faces where it is going. While attacking or casting it faces the cursor, since that is where the hit lands;
-  // standing still, it keeps looking the way it last faced.
+  // The cat faces its target while fighting it, the landing spot while casting Starfall, and otherwise where it is going.
   let face = null;
-  if (me.swingT >= 0 || me.castT >= 0 || me.shootPose > 0) face = Math.atan2(local.aim.x, local.aim.y);
+  if (tv && (me.swingT >= 0 || me.shootPose > 0 || (me.castT >= 0 && me.castSkill === 1) || (attacking && inReach && !manual))) face = Math.atan2(tdx, tdz);
+  else if (me.castT >= 0) face = Math.atan2(aimPoint.x - me.x, aimPoint.z - me.z);
   else if (local.dashT > 0) face = Math.atan2(local.dashDir.x, local.dashDir.y);
-  else if (moveDir.lengthSq() > 0) face = Math.atan2(moveDir.x, moveDir.y);
+  else if (moving) face = Math.atan2(moveDir.x, moveDir.y);
   if (face !== null) me.yaw = lerpAngle(me.yaw, face, Math.min(1, dt * 14));
 
   local.sendT -= dt;
   if (local.sendT <= 0) {
     local.sendT = 1 / 15;
     const r = (v) => Math.round(v * 100) / 100;
-    send({ t: 'm', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(me.yaw), s: me.speed ? 1 : 0 });
+    send({ t: 'm', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(me.yaw), s: me.speed ? 1 : 0, st: me.sitting ? 1 : 0 });
   }
 
   const zone = zoneAt(d).name;
@@ -773,13 +897,14 @@ function updateAvatar(a, dt, isMe) {
   }
   a.root.position.set(a.x, 0, a.z);
   a.cat.group.position.y = a.y;
-  a.cat.group.rotation.y = a.yaw;
+  a.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
+  a.cat.group.rotation.y = a.yaw - cam.yaw;
   if (a.swingT >= 0 && (a.swingT += dt / 0.4) >= 1) a.swingT = -1;
   const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
   a.orb.visible = a.castT >= 0;
   a.orb.material = a.castSkill === 2 ? fireMat : bulletMat;
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, swing: a.swingT, swingKind: a.swingKind });
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, swing: a.swingT, swingKind: a.swingKind });
 }
 
 function updateViews(dt) {
@@ -796,7 +921,8 @@ function updateViews(dt) {
     v.age += dt;
     v.root.position.set(v.x, 0, v.z);
     v.root.scale.setScalar(Math.min(1, v.age / 0.4));
-    v.skeleton.group.rotation.y = v.yaw;
+    v.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
+    v.skeleton.group.rotation.y = v.yaw - cam.yaw;
     // monsters far outside the camera's view are neither drawn nor animated
     v.root.visible = (v.x - me.x) ** 2 + (v.z - me.z) ** 2 < 55 * 55;
     if (v.root.visible) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
@@ -827,17 +953,25 @@ function updateViews(dt) {
 
   // projectiles are simulated locally for looks; the server decides the damage
   bullets = bullets.filter((b) => {
-    const m = b.mesh.position;
-    m.x += b.vx * dt; m.z += b.vz * dt;
-    b.life -= dt;
-    let dead = b.life <= 0;
-    for (const v of mobViews.values()) {
-      const rr = v.def.r + 0.3;
-      if ((v.x - m.x) ** 2 + (v.z - m.z) ** 2 < rr * rr) { dead = true; break; }
+    const v = mobViews.get(b.id), m = b.mesh.position;
+    let done = !v;
+    if (v) {
+      const dx = v.x - m.x, dz = v.z - m.z, d = Math.hypot(dx, dz) || 0.001, step = 34 * dt;
+      m.y += (v.top * 0.5 - m.y) * Math.min(1, dt * 8);
+      if (d <= step + v.def.r * 0.6) { done = true; burst(v.x, v.top * 0.5, v.z, TEAL, 6, 5); }
+      else { m.x += dx / d * step; m.z += dz / d * step; }
     }
-    if (dead) bulletPool.release(b);
-    return !dead;
+    if (done) bulletPool.release(b);
+    return !done;
   });
+
+  const tv = mobViews.get(targetId);
+  targetRing.visible = !!tv;
+  if (tv) {
+    targetRing.position.set(tv.x, 0.07, tv.z);
+    targetRing.scale.setScalar(tv.skeleton.group.scale.y * 0.75 + 0.35);
+    targetRing.material.color.setHex(attacking ? 0xff4d5e : 0xffd76a);
+  }
   orbs = orbs.filter((o) => {
     const m = o.mesh.position;
     m.x += o.vx * dt; m.z += o.vz * dt;
@@ -882,6 +1016,8 @@ function updateHud() {
   $('who').textContent = `${names.get(myId) || 'Cat'} · Lv ${stats.level}`;
   $('hpFill').style.width = `${stats.hp / stats.maxHp * 100}%`;
   $('hpText').textContent = `${stats.hp} / ${stats.maxHp}`;
+  $('mpFill').style.width = `${stats.mp / stats.maxMp * 100}%`;
+  $('mpText').textContent = `${stats.mp} / ${stats.maxMp}`;
   $('xpFill').style.width = `${stats.xp / need * 100}%`;
   $('xpText').textContent = `${stats.xp} / ${need}`;
   $('enFill').style.width = `${stats.energy}%`;
@@ -890,6 +1026,7 @@ function updateHud() {
   $('dashFill').style.width = `${Math.max(0, Math.min(1, 1 - local.dashCd / 1.2)) * 100}%`;
   $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
   $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
+  $('sk0').classList.toggle('active', attacking);
   $('sk1').classList.toggle('active', me.castT >= 0 && me.castSkill === 1);
   $('sk2').classList.toggle('active', me.castT >= 0 && me.castSkill === 2);
   $('sk2cd').style.height = `${Math.max(0, local.meteorCd) / METEOR.cd * 100}%`;
@@ -897,6 +1034,18 @@ function updateHud() {
   $('gold').textContent = stats.gold;
   $('weapon').textContent = `Lv ${stats.weapon}`;
   $('online').textContent = online;
+
+  // target frame: name and level tinted by how dangerous the monster is for this player
+  const tv = mobViews.get(targetId);
+  $('target').style.display = tv ? 'block' : 'none';
+  if (tv) {
+    const diff = tv.lvl - stats.level;
+    $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
+    $('tgName').style.color = diff >= 5 ? '#ff5a6a' : diff >= 3 ? '#ffa24d' : diff >= -2 ? '#fff3b0' : diff >= -5 ? '#8ee68e' : '#aab4b8';
+    $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
+    $('tgHp').textContent = `${tv.hp} / ${tv.maxHp}`;
+    $('tgState').textContent = attacking ? 'Attacking' : 'Selected';
+  }
 
   const atSmith = Math.hypot(me.x - BLACKSMITH.x, me.z - BLACKSMITH.z) < SHOP_RANGE;
   const cost = upgradeCost(stats.weapon);
@@ -955,13 +1104,14 @@ function drawMinimap() {
 
 function updateCamera(dt) {
   if (state === 'playing') {
-    lookGoal.set(me.x, 1, me.z);
-    camGoal.set(me.x, 13.5, me.z + 10);
+    const flat = Math.cos(cam.pitch) * cam.dist;
+    lookGoal.set(me.x, 1.2, me.z);
+    camGoal.set(me.x + Math.sin(cam.yaw) * flat, 1.2 + Math.sin(cam.pitch) * cam.dist, me.z + Math.cos(cam.yaw) * flat);
   } else {
     camGoal.set(me.x, 1.2, me.z + 6.4);
     lookGoal.set(me.x, 0.45, me.z);
   }
-  const k = 1 - Math.exp(-5 * dt);
+  const k = 1 - Math.exp(-(state === 'playing' ? 12 : 5) * dt);
   camera.position.lerp(camGoal, k);
   camTarget.lerp(lookGoal, k);
   shake = Math.max(0, shake - dt * 2.5);
@@ -998,4 +1148,4 @@ function frame() {
 frame();
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, world, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, cam, camera, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };

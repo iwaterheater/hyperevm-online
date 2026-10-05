@@ -23,7 +23,8 @@
   .bar { height: 9px; margin: 3px 0 7px; border-radius: 6px; background: rgba(255, 255, 255, .1); overflow: hidden; }
   .bar:last-child { margin-bottom: 0; }
   .bar > i { display: block; height: 100%; width: 0; border-radius: 6px; transition: width .12s; }
-  #hpFill { background: linear-gradient(90deg, #ff6b8e, #ffb3c4); }
+  #hpFill, #tgFill { background: linear-gradient(90deg, #ff6b8e, #ffb3c4); }
+  #mpFill { background: linear-gradient(90deg, #4f8dff, #a9c8ff); }
   #xpFill { background: linear-gradient(90deg, #b58cff, #e0ccff); }
   #enFill { background: linear-gradient(90deg, var(--teal-dim), var(--teal)); }
   #enFill.full { animation: pulse .6s infinite alternate; }
@@ -34,6 +35,11 @@
   #gold { color: var(--gold); }
   #minimap { display: block; width: 144px; height: 144px; margin-top: 8px; border-radius: 50%; }
 
+  #target { top: 16px; left: 50%; transform: translateX(-50%); width: 260px; display: none; text-align: center; }
+  #target .title { margin-bottom: 4px; }
+  #notice { position: absolute; top: 31%; left: 0; right: 0; text-align: center; font-size: 17px; font-weight: 700; color: #ffb3c4;
+    text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity .25s; }
+  #notice.on { opacity: 1; }
   #banner { position: absolute; top: 20%; left: 0; right: 0; text-align: center; font-size: 40px; font-weight: 900;
     letter-spacing: .04em; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .8), 0 0 24px rgba(127, 232, 214, .9); opacity: 0;
     transition: opacity .4s; }
@@ -101,6 +107,8 @@
     <div class="title" id="who">Cat · Lv 1</div>
     <div class="label"><span>Health</span><span id="hpText"></span></div>
     <div class="bar"><i id="hpFill"></i></div>
+    <div class="label"><span>Mana</span><span id="mpText"></span></div>
+    <div class="bar"><i id="mpFill"></i></div>
     <div class="label"><span>Experience</span><span id="xpText"></span></div>
     <div class="bar"><i id="xpFill"></i></div>
     <div class="label"><span>Hyper energy</span><span id="enHint"></span></div>
@@ -114,16 +122,22 @@
     <div class="row"><span>Online</span><b id="online">1</b></div>
     <canvas id="minimap" width="288" height="288"></canvas>
   </div>
+  <div class="panel" id="target">
+    <div class="title" id="tgName"></div>
+    <div class="bar"><i id="tgFill"></i></div>
+    <div class="label"><span id="tgState"></span><span id="tgHp"></span></div>
+  </div>
   <div id="banner"></div>
+  <div id="notice"></div>
   <div id="chat"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…"></div>
   <div id="cast"><i id="castFill"></i></div>
   <div id="skills">
-    <div class="skill" id="sk0"><kbd>LMB</kbd><i class="icon"></i>Sword</div>
+    <div class="skill" id="sk0"><kbd>F</kbd><i class="icon"></i>Attack</div>
     <div class="skill" id="sk1"><kbd>1</kbd><i class="icon"></i>Bolt</div>
     <div class="skill" id="sk2"><kbd>2</kbd><i class="icon"></i>Starfall<i class="cd" id="sk2cd"></i><span class="time" id="sk2time"></span></div>
   </div>
   <div id="shop"></div>
-  <div id="hint">WASD — move · LMB — sword · 1 — Bolt · 2 — Starfall · Space — jump · Shift — dash · Q / RMB — hyper wave · Enter — chat · B — upgrade weapon at the Blacksmith · M — mute</div>
+  <div id="hint">WASD — move · click / Tab — target · F or click target again — attack · 1 — Bolt · 2 — Starfall · X — sit · RMB drag — camera · wheel — zoom · Space — jump · Shift — dash · Q — hyper wave · Enter — chat · B — Blacksmith</div>
 </div>
 <div id="flash"></div>
 
@@ -132,12 +146,13 @@
   <p>An open online world of cats: level up and hunt skeletons together with other players</p>
   <div class="keys">
     <div><kbd>WASD</kbd>move</div>
-    <div><kbd>LMB</kbd>sword</div>
+    <div><kbd>Click</kbd>target</div>
+    <div><kbd>F</kbd>attack</div>
     <div><kbd>1</kbd>Bolt</div>
     <div><kbd>2</kbd>Starfall</div>
-    <div><kbd>Space</kbd>jump</div>
+    <div><kbd>X</kbd>sit</div>
+    <div><kbd>RMB</kbd>camera</div>
     <div><kbd>Shift</kbd>dash</div>
-    <div><kbd>Q</kbd>hyper wave</div>
     <div><kbd>Enter</kbd>chat</div>
   </div>
   <input id="nameInput" maxlength="16" placeholder="Cat name" autocomplete="off">

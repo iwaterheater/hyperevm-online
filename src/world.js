@@ -406,6 +406,11 @@ export function createWorld(scene) {
     let material = null;
     await Promise.all(names.map(async (name) => {
       const gltf = await loader.loadAsync(`${dir}${name}.${ext}`);
+      // gate models ship with their doors shut; swing both leaves open so the passage reads as passable
+      gltf.scene.traverse((o) => {
+        if (o.name.endsWith('_door_left')) o.rotation.y = 1.4;
+        if (o.name.endsWith('_door_right')) o.rotation.y = -1.4;
+      });
       gltf.scene.updateMatrixWorld(true);
       const parts = [];
       gltf.scene.traverse((o) => {

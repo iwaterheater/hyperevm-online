@@ -31,15 +31,20 @@ PORT=3000 npm start
 
 | Input | Action |
 | --- | --- |
-| `W` `A` `S` `D` / arrows | Move |
-| Mouse | Aim |
-| Left mouse button (hold) | **Sword** — basic attack; hits every monster in a short cone in front of the cat, can be used on the move. Swings cycle through three animations: left-to-right, right-to-left and an overhead chop |
-| `1` (hold) | **Bolt** — a single projectile at the cursor; 0.65 s cast |
-| `2` | **Starfall** — a falling star that blasts an area at the cursor (range 16, radius 4.5); 0.9 s cast, 6 s cooldown |
+| `W` `A` `S` `D` / arrows | Move, relative to the camera; the cat turns to face where it walks |
+| Right mouse button (drag) | Turn the camera |
+| Mouse wheel | Zoom |
+| Left click on a monster | Select it as the target; a frame at the top shows its name, level and health |
+| `Tab` | Select the next nearest monster |
+| `Esc` | Clear the target |
+| `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps swinging its sword at it (auto-attack). Swings cycle through three animations |
+| `1` (hold) | **Bolt** — a homing projectile at the target (range 22); 0.65 s cast, 8 mana |
+| `2` | **Starfall** — a falling star that blasts an area at the cursor (range 16, radius 4.5); 0.9 s cast, 6 s cooldown, 22 mana |
 | | The cat stands still while casting a skill; dashing cancels the cast |
+| `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
 | `Shift` | Dash — brief invulnerability, damages enemies you pass through |
-| `Q` / `E` / right mouse button | Hyper wave (needs full hyper energy) |
+| `Q` / `E` | Hyper wave (needs full hyper energy) |
 | `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
 | `Enter` | Open chat / send message |
 | `M` | Mute sound |
@@ -70,7 +75,8 @@ The **Skeleton King** (level 18 boss) waits inside his walled fortress in the fa
 ### Progression
 
 - Killing monsters gives XP to every player who damaged them.
-- Levelling up raises max health and damage and fully heals you.
+- Levelling up raises max health, max mana and damage and fully restores both.
+- Mana is spent on skills and comes back slowly in the field, quickly while sitting, and fastest in town.
 - Monsters drop gold gems; gems also charge hyper energy.
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold. The King's hoard waits inside his fortress.
 - Spend gold at the Blacksmith in town (`B`) to upgrade your weapon.
@@ -103,6 +109,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Player movement is simulated on the client for responsiveness; the server sanity-checks the speed and snaps cheaters back.
 - Trees, rocks and buildings block the local player only: the server does not know about scenery, so monsters and projectiles pass through it.
 - Melee monsters telegraph their attacks: they stop, raise the weapon and the hit lands 0.4 seconds later, so it can be dodged.
+- Combat is target-based, as in classic MMORPGs: the server checks that the selected monster is alive and within reach before a swing or a bolt lands.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
 - Progress (level, XP, gold, weapon) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 

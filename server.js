@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, METEOR, SWORD, BLACKSMITH, SHOP_RANGE, CHESTS, CHEST_REACH, FORT_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
+  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, BOLT_RANGE, BOLT_MP, maxMpFor, METEOR, SWORD, BLACKSMITH, SHOP_RANGE, CHESTS, CHEST_REACH, FORT_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
 } from './src/shared.js';
 
 const PORT = process.env.PORT || 8765;
@@ -58,6 +58,7 @@ function flush() {
 let nextId = 1, now = 0;
 const players = new Map();
 const mobs = [];
+const mobById = new Map();
 let bullets = [], orbs = [], gems = [], meteors = [];
 const chests = CHESTS.map((c, i) => ({ ...c, i, openUntil: 0 }));
 
@@ -68,12 +69,14 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 function makeMob(type, lvl, sx, sz) {
   const def = MOB_TYPES[type];
   const maxHp = Math.ceil(def.hp * (1 + 0.45 * (lvl - 1)));
-  mobs.push({
+  const mob = {
     id: nextId++, type, ti: MOB_KEYS.indexOf(type), lvl, def, r: def.r, sx, sz, x: sx, z: sz,
     hp: maxHp, maxHp, dmg: Math.round(def.dmg * (1 + 0.15 * (lvl - 1))), xp: def.xp * lvl,
     kx: 0, kz: 0, target: 0, fireT: rand(1, 3), hitAt: 0, wx: sx, wz: sz, wanderAt: 0,
     dead: false, respawnAt: 0, dmgBy: new Set(), dashHit: '', swing: null, strafe: Math.random() < 0.5 ? 1 : -1,
-  });
+  };
+  mobs.push(mob);
+  mobById.set(mob.id, mob);
 }
 
 function spawnRing(count, rMin, rMax, lMin, lMax, types) {
@@ -126,6 +129,8 @@ function addXp(p, xp) {
     p.level++;
     p.maxHp = maxHpFor(p.level);
     p.hp = p.maxHp;
+    p.maxMp = maxMpFor(p.level);
+    p.mp = p.maxMp;
     p.events.push({ k: 'lvl', level: p.level });
     emit({ k: 'lvlfx', x: r2(p.x), z: r2(p.z) }, p.x, p.z);
   }
@@ -177,6 +182,7 @@ function respawnPlayer(p) {
   const a = rand(0, Math.PI * 2), r = rand(0, TOWN_R - 4);
   p.x = Math.cos(a) * r; p.z = Math.sin(a) * r; p.y = 0;
   p.hp = p.maxHp;
+  p.mp = p.maxMp;
   p.dead = false;
   p.lastMoveAt = now;
   p.events.push({ k: 'tp', x: r2(p.x), z: r2(p.z) });
@@ -298,27 +304,25 @@ function tick() {
 
   for (const p of players.values()) {
     if (p.dead) { if (now >= p.deadUntil) respawnPlayer(p); continue; }
-    if (Math.hypot(p.x, p.z) < TOWN_R) p.hp = Math.min(p.maxHp, p.hp + 25 * dt);
+    // regeneration: fast in town, slow in the field, and much faster while sitting down to rest
+    const inTown = Math.hypot(p.x, p.z) < TOWN_R, resting = p.sit && now - p.hurtAt > 2;
+    if (inTown) p.hp = Math.min(p.maxHp, p.hp + 25 * dt);
+    else if (resting) p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.05 * dt);
     else if (now - p.hurtAt > 6) p.hp = Math.min(p.maxHp, p.hp + 2 * dt);
+    p.mp = Math.min(p.maxMp, p.mp + p.maxMp * (inTown ? 0.08 : resting ? 0.06 : 0.015) * dt);
   }
 
   for (const m of mobs) updateMob(m, dt);
   separateMobs();
 
+  // bolts home in on the monster they were cast at
   bullets = bullets.filter((b) => {
-    const ox = b.x, oz = b.z;
-    b.x += b.vx * dt; b.z += b.vz * dt;
+    const m = mobById.get(b.target), p = players.get(b.owner);
     b.life -= dt;
-    if (b.life <= 0 || Math.hypot(b.x, b.z) > WORLD_R + 2) return false;
-    const p = players.get(b.owner);
-    if (!p) return false;
-    for (const m of mobs) {
-      const rr = m.r + 0.3;
-      if (!m.dead && segDist2(m.x, m.z, ox, oz, b.x, b.z) < rr * rr) {
-        damageMob(m, b.dmg, b.vx / 34, b.vz / 34, 4, p);
-        return false;
-      }
-    }
+    if (!m || m.dead || !p || b.life <= 0) return false;
+    const dx = m.x - b.x, dz = m.z - b.z, d = Math.hypot(dx, dz) || 0.001, step = 34 * dt;
+    if (d <= step + m.r) { damageMob(m, b.dmg, dx / d, dz / d, 4, p); return false; }
+    b.x += dx / d * step; b.z += dz / d * step;
     return true;
   });
 
@@ -383,7 +387,7 @@ function tick() {
       t: 's',
       n: players.size,
       me: {
-        hp: Math.ceil(p.hp), maxHp: p.maxHp, xp: p.xp, level: p.level, gold: p.gold,
+        hp: Math.ceil(p.hp), maxHp: p.maxHp, mp: Math.floor(p.mp), maxMp: p.maxMp, xp: p.xp, level: p.level, gold: p.gold,
         weapon: p.weapon, energy: p.energy, dead: p.dead ? 1 : 0,
       },
       p: [], m: [], g: [],
@@ -392,7 +396,7 @@ function tick() {
     };
     for (const q of players.values()) {
       if (q !== p && near(q)) {
-        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0]);
+        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0]);
       }
     }
     for (const m of mobs) if (!m.dead && near(m)) snap.m.push([m.id, m.ti, m.lvl, r2(m.x), r2(m.z), Math.ceil(m.hp), m.maxHp]);
@@ -420,34 +424,28 @@ const handlers = {
     p.y = Math.max(0, Math.min(8, num(msg.y)));
     p.yaw = num(msg.yaw);
     p.speed = msg.s ? 9 : 0;
+    p.sit = !!msg.st;
     p.lastMoveAt = now;
     clampWorld(p, 1);
   },
-  f(p, msg) {   // fire
-    if (p.dead || now < p.fireAt) return;
-    const dx = num(msg.dx), dz = num(msg.dz), l = Math.hypot(dx, dz);
-    if (!l) return;
+  f(p, msg) {   // skill 1: Bolt at the selected monster
+    const m = mobById.get(msg.id);
+    if (p.dead || now < p.fireAt || !m || m.dead || p.mp < BOLT_MP) return;
+    if (Math.hypot(m.x - p.x, m.z - p.z) > BOLT_RANGE + 3) return;   // a little slack for lag
     p.fireAt = now + CAST_TIME * 0.85;   // a bolt cannot come faster than a cast takes
-    const ux = dx / l, uz = dz / l, x = p.x + ux * 0.8, z = p.z + uz * 0.8;
-    bullets.push({ x, z, vx: ux * 34, vz: uz * 34, life: 1.1, owner: p.id, dmg: BOLT_DMG * dmgMult(p.level, p.weapon) });
-    emit({ k: 'shot', o: p.id, x: r2(x), z: r2(z), dx: r2(ux), dz: r2(uz) }, p.x, p.z);
+    p.mp -= BOLT_MP;
+    bullets.push({ x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, dmg: BOLT_DMG * dmgMult(p.level, p.weapon) });
+    emit({ k: 'shot', o: p.id, id: m.id, x: r2(p.x), z: r2(p.z) }, p.x, p.z);
   },
-  a(p, msg) {   // basic attack: sword swing in a cone
-    if (p.dead || now < p.swingAt) return;
-    const dx = num(msg.dx), dz = num(msg.dz), l = Math.hypot(dx, dz);
-    if (!l) return;
+  a(p, msg) {   // basic attack: one sword swing at the selected monster
+    const m = mobById.get(msg.id);
+    if (p.dead || now < p.swingAt || !m || m.dead) return;
+    const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
+    if (d > SWORD.range + m.r + 1) return;   // out of reach (with a little slack for lag)
     p.swingAt = now + SWORD.cd * 0.85;
-    const ux = dx / l, uz = dz / l;
     const kind = [0, 1, 2].includes(msg.c) ? msg.c : 2;   // which of the three swing animations to show
-    emit({ k: 'swing', o: p.id, dx: r2(ux), dz: r2(uz), c: kind }, p.x, p.z);
-    for (const m of mobs) {
-      if (m.dead) continue;
-      const mx = m.x - p.x, mz = m.z - p.z, d = Math.hypot(mx, mz) || 0.001;
-      // monsters right on top of the cat are hit regardless of facing
-      if (d < SWORD.range + m.r && (d < m.r + 0.8 || (mx * ux + mz * uz) / d > SWORD.minDot)) {
-        damageMob(m, SWORD.dmg * dmgMult(p.level, p.weapon), mx / d, mz / d, 7, p);
-      }
-    }
+    emit({ k: 'swing', o: p.id, dx: r2(dx / d), dz: r2(dz / d), c: kind }, p.x, p.z);
+    damageMob(m, SWORD.dmg * dmgMult(p.level, p.weapon), dx / d, dz / d, 5, p);
   },
   k(p, msg) {   // started casting: only tells nearby players to play the animation
     if (p.dead || now < p.castAt) return;
@@ -456,8 +454,9 @@ const handlers = {
     emit({ k: 'cast', o: p.id, s, d: s === 2 ? METEOR.cast : CAST_TIME }, p.x, p.z);
   },
   q(p, msg) {   // skill 2: Starfall at a ground point
-    if (p.dead || now < p.meteorAt) return;
+    if (p.dead || now < p.meteorAt || p.mp < METEOR.mp) return;
     p.meteorAt = now + METEOR.cd * 0.9;
+    p.mp -= METEOR.mp;
     let dx = num(msg.x) - p.x, dz = num(msg.z) - p.z;
     const d = Math.hypot(dx, dz);
     if (d > METEOR.range) { dx *= METEOR.range / d; dz *= METEOR.range / d; }
@@ -518,7 +517,7 @@ wss.on('connection', (ws) => {
         id: nextId++, ws, token, persist: !dup, name,
         x: Math.cos(a) * r, y: 0, z: Math.sin(a) * r, yaw: 0, speed: 0,
         level, xp: data.xp || 0, gold: data.gold || 0, weapon: data.weapon || 1, energy: 0,
-        hp: maxHpFor(level), maxHp: maxHpFor(level), dead: false, deadUntil: 0,
+        hp: maxHpFor(level), maxHp: maxHpFor(level), mp: maxMpFor(level), maxMp: maxMpFor(level), sit: false, dead: false, deadUntil: 0,
         fireAt: 0, castAt: 0, meteorAt: 0, swingAt: 0, dashUntil: 0, dashCdAt: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
         lastMoveAt: now, events: [],
       };
