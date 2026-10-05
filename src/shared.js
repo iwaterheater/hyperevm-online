@@ -32,6 +32,10 @@ export const ZONES = [
   { r: 175, name: 'Graveyard Wastes · Lv 5–9', lvl: [5, 9], mobs: 130, types: ['chaser', 'runner', 'shooter', 'shooter'] },
   { r: WORLD_R, name: 'Cursed Lands · Lv 10–15', lvl: [10, 15], mobs: 150, types: ['chaser', 'runner', 'shooter', 'tank', 'tank'] },
 ];
+// The blacksmith NPC sells weapon upgrades to players standing next to him.
+export const BLACKSMITH = { x: -4.8, z: 11.5 };
+export const SHOP_RANGE = 5.5;
+
 export const zoneAt = (dist) => ZONES.find((z) => dist <= z.r) || ZONES[ZONES.length - 1];
 
 export const BOSS = { x: 0, z: -228, lvl: 18 };

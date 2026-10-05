@@ -498,5 +498,5 @@ export function createWorld(scene) {
     crystal.position.y = 2.7 + Math.sin(time * 1.5) * 0.2;
   }
 
-  return { update, collide, ready, plots: PLOTS };
+  return { update, collide, ready, plots: PLOTS, block: (x, z, r) => obstacles.push({ x, z, r }) };
 }

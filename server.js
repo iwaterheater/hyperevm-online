@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, METEOR, SWORD, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
+  WORLD_R, TOWN_R, TICK, ATTACK_WINDUP, CAST_TIME, BOLT_DMG, METEOR, SWORD, BLACKSMITH, SHOP_RANGE, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, maxHpFor, dmgMult, upgradeCost,
 } from './src/shared.js';
 
 const PORT = process.env.PORT || 8765;
@@ -466,9 +466,9 @@ const handlers = {
     }
     orbs = orbs.filter((o) => Math.hypot(o.x - p.x, o.z - p.z) > R);
   },
-  b(p) {        // buy a weapon upgrade (town only)
+  b(p) {        // buy a weapon upgrade from the blacksmith
     const cost = upgradeCost(p.weapon);
-    if (p.dead || Math.hypot(p.x, p.z) > TOWN_R || p.gold < cost) return;
+    if (p.dead || Math.hypot(p.x - BLACKSMITH.x, p.z - BLACKSMITH.z) > SHOP_RANGE || p.gold < cost) return;
     p.gold -= cost;
     p.weapon++;
     p.events.push({ k: 'up', weapon: p.weapon });

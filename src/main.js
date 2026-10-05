@@ -6,7 +6,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createCat } from './cat.js';
 import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
-import { CAST_TIME, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
+import { createNpcs } from './npc.js';
+import { CAST_TIME, METEOR, SWORD, WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SHOP_RANGE, MOB_TYPES, MOB_KEYS, xpNext, upgradeCost, zoneAt } from './shared.js';
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
@@ -71,6 +72,9 @@ function textSprite(text, color = '#d5f5ee', height = 0.5) {
   sprite.scale.set(height * c.width / c.height, height, 1);
   return sprite;
 }
+
+let npcs = null;
+createNpcs(scene, textSprite, world.block).then((n) => { npcs = n; }, (err) => console.error('Townsfolk failed to load', err));
 
 function disposeSprite(s) {
   s.removeFromParent();
@@ -837,10 +841,10 @@ function updateHud() {
   $('weapon').textContent = `Lv ${stats.weapon}`;
   $('online').textContent = online;
 
-  const inTown = Math.hypot(me.x, me.z) < TOWN_R;
+  const atSmith = Math.hypot(me.x - BLACKSMITH.x, me.z - BLACKSMITH.z) < SHOP_RANGE;
   const cost = upgradeCost(stats.weapon);
-  $('shop').style.display = inTown ? 'block' : 'none';
-  if (inTown) {
+  $('shop').style.display = atSmith ? 'block' : 'none';
+  if (atSmith) {
     $('shop').textContent = stats.gold >= cost
       ? `B — upgrade weapon for ${cost} gold`
       : `Weapon upgrade: ${cost} gold (you have ${stats.gold})`;
@@ -914,6 +918,7 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   time += dt;
   world.update(time, me.x, me.z);
+  npcs?.update(dt, me);
 
   if (state === 'playing') {
     updateLocal(dt);

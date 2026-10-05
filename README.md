@@ -6,6 +6,7 @@ Players share one seamless world, hunt skeletons together, level up, collect gol
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0)
 - **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0) — both by Kay Lousberg (CC0)
+- **Townsfolk:** guards, blacksmith, sage and trader from the [KayKit Character Pack: Adventurers](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) by Kay Lousberg (CC0)
 - **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP and loot
 
 ## Quick start
@@ -39,7 +40,7 @@ PORT=3000 npm start
 | `Space` | Jump (double jump) |
 | `Shift` | Dash — brief invulnerability, damages enemies you pass through |
 | `Q` / `E` / right mouse button | Hyper wave (needs full hyper energy) |
-| `B` | Buy a weapon upgrade (in town only) |
+| `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
 | `Enter` | Open chat / send message |
 | `M` | Mute sound |
 
@@ -49,7 +50,7 @@ One continuous map with no loading screens. Zones get harder the further you go 
 
 | Zone | Distance from centre | Monster levels |
 | --- | --- | --- |
-| Hypercat Town | 0 – 24 | Walled safe zone: fast healing, weapon shop |
+| Hypercat Town | 0 – 24 | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon shop |
 | Green Meadows | 24 – 95 | 1 – 4 |
 | Graveyard Wastes | 95 – 175 | 5 – 9 |
 | Cursed Lands | 175 – 260 | 10 – 15 |
@@ -71,7 +72,7 @@ The **Skeleton King** (level 18 boss) waits inside a ring of pillars in the far 
 - Killing monsters gives XP to every player who damaged them.
 - Levelling up raises max health and damage and fully heals you.
 - Monsters drop gold gems; gems also charge hyper energy.
-- Spend gold in town (`B`) to upgrade your weapon.
+- Spend gold at the Blacksmith in town (`B`) to upgrade your weapon.
 - Dying costs 10% of your gold; you respawn in town.
 
 ## Project structure
@@ -85,6 +86,8 @@ src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their an
 assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
 assets/medieval/  KayKit buildings, walls, trees, rocks and props, with their CC0 license
 assets/halloween/ KayKit graveyard models, with their CC0 license
+assets/adventurers/ KayKit adventurer characters used as townsfolk, with their CC0 license
+src/npc.js        Townsfolk: guards at the gates, blacksmith, sage, trader
 src/world.js      Terrain, town, scenery, lighting and obstacle collision
 src/geo.js        Helpers for building vertex-coloured low-poly geometry
 src/shared.js     Constants and formulas used by both client and server
