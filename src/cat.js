@@ -97,7 +97,7 @@ function getShared() {
     hilt: new THREE.CylinderGeometry(0.032, 0.032, 0.2, 8),
     shield: new THREE.CylinderGeometry(0.36, 0.36, 0.06, 18),
     staff: new THREE.CylinderGeometry(0.03, 0.035, 1.6, 8),
-    bow: new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, -0.62, 0), new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0.62, 0)), 12, 0.028, 6),
+    bowLimb: new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, -0.62, 0), new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0.62, 0)), 12, 0.028, 6),
     bowString: new THREE.CylinderGeometry(0.008, 0.008, 1.24, 4),
   };
   return shared;
@@ -211,7 +211,7 @@ export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
     daggers() { blade(arms[1], 0.42); blade(arms[0], 0.42); },
     bow() {
       const g = hold(arms[0]);
-      part(g, S.bow, mats.wood, [0, 0, 0.1]);
+      part(g, S.bowLimb, mats.wood, [0, 0, 0.1]);
       part(g, S.bowString, mats.white, [0, 0, 0.1]);
     },
     staff() {

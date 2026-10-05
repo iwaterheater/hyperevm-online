@@ -80,6 +80,17 @@
   .prof div { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 12px; }
   .prof div span { flex: 1; opacity: .85; }
 
+  /* character status window */
+  #sheet { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(400px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
+  #sheet.on { display: block; }
+  #sheet h2 { margin: 0; font-size: 20px; color: var(--teal); }
+  #sheet .sub { font-size: 13px; opacity: .8; }
+  #sheet h3 { margin: 12px 0 4px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85; }
+  #sheet .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 18px; }
+  #sheet .cell { display: flex; justify-content: space-between; font-size: 14px; padding: 2px 0; border-bottom: 1px solid rgba(127, 232, 214, .12); }
+  #sheet .cell span { opacity: .8; }
+  #sheet .cell b.up { color: var(--gold); }
+
   /* class picker in the menu */
   .classes { display: flex; gap: 10px; justify-content: center; margin-bottom: 12px; }
   .classes button { width: 230px; padding: 10px 14px; text-align: left; white-space: normal; line-height: 1.25; color: #e8fffa; background: rgba(6, 24, 21, .85);
@@ -156,13 +167,18 @@
   <div id="cast"><i id="castFill"></i></div>
   <div id="buffs"></div>
   <div id="skills"></div>
+  <div class="panel" id="sheet">
+    <h2 id="sheetTitle"></h2>
+    <div class="sub" id="sheetSub"></div>
+    <div id="sheetBody"></div>
+  </div>
   <div class="panel" id="book">
     <h2 id="bookTitle">Skills</h2>
     <div class="sub" id="bookSub"></div>
     <div id="bookList"></div>
   </div>
   <div id="shop"></div>
-  <div id="hint">WASD — move · click / Tab — target · F — attack · 1–8 — skills · K — skill book · X — sit · RMB drag — camera · wheel — zoom · Space — jump · Enter — chat · B — Blacksmith</div>
+  <div id="hint">WASD — move · click / Tab — target · F — attack · 1–8 — skills · K — skill book · C — character · X — sit · RMB drag — camera · wheel — zoom · Space — jump · Enter — chat · B — Blacksmith</div>
 </div>
 <div id="flash"></div>
 
@@ -175,6 +191,7 @@
     <div><kbd>F</kbd>attack</div>
     <div><kbd>1–8</kbd>skills</div>
     <div><kbd>K</kbd>skill book</div>
+    <div><kbd>C</kbd>character</div>
     <div><kbd>X</kbd>sit</div>
     <div><kbd>RMB</kbd>camera</div>
     <div><kbd>Enter</kbd>chat</div>

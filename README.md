@@ -39,6 +39,7 @@ PORT=3000 npm start
 | `Esc` | Clear the target |
 | `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack) |
 | `1` – `8` | Skills, in the order they were learned; they cost mana and most have a cast time or a cooldown. The cat stands still while casting |
+| `C` | Character status window: attributes and combat stats |
 | `K` | Skill book: everything the class can learn. Buying skills and choosing a profession only works next to the Sage in town |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
@@ -81,7 +82,25 @@ A character starts as a **Fighter** or a **Mystic** (chosen in the menu) and pic
 | Mystic | Wizard | Magic damage: fire, area spells, sleep |
 | Mystic | Cleric | Support: heals and blesses everyone nearby, raises the fallen |
 
-Health, mana, attack, defence, attack speed and critical chance follow from class and level; there are no stat points to assign. Each class has its own hoodie colour and gear.
+Each class has its own hoodie colour and gear.
+
+### Character stats
+
+Press `C` for the character status window. Every class has six fixed base attributes, and all combat stats are derived from them, the level, the weapon upgrade, passive skills and active buffs — there are no points to assign.
+
+| Attribute | Raises |
+| --- | --- |
+| STR | P. Atk |
+| DEX | Atk. Spd, Accuracy, Evasion, Critical, Speed |
+| CON | HP |
+| INT | M. Atk |
+| WIT | Casting Spd, M. Critical |
+| MEN | M. Def, MP |
+
+- **P. Atk / M. Atk** against the target's **P. Def / M. Def**: damage is `attack × 100 / (100 + defence)`. Monsters have both defences too — warriors resist blades, mages resist spells.
+- **Accuracy** against **Evasion** decides whether a physical attack lands; spells always land.
+- **Critical** and **M. Critical** (per 1000) are the chances of a double-damage hit.
+- **Atk. Spd** sets the auto-attack interval, **Casting Spd** shortens the cast time of spells, **Speed** is how fast the cat runs.
 
 ### Skills
 
@@ -97,7 +116,7 @@ Health, mana, attack, defence, attack speed and critical chance follow from clas
 - Mana is spent on skills and comes back slowly in the field, quickly while sitting, and fastest in town.
 - Monsters drop gold coins.
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold. The King's hoard waits inside his fortress.
-- Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises all damage.
+- Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises P. Atk and M. Atk.
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
 
 ## Project structure

@@ -10,14 +10,13 @@ import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
 import {
   WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SAGE, near, CHESTS, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
-  professionsOf, SKILLS, skillsFor, hotbar, xpNext, upgradeCost, zoneAt,
+  professionsOf, SKILLS, skillsFor, hotbar, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost, zoneAt,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
 const ZONE_COLORS = [TEAL, 0x6fbf55, 0xb59a6a, 0xff5a70];   // town, meadows, graveyard, cursed lands
 const REACH = 2.4;    // melee reach, for the size of the slash effect
-const SHOW = 10;      // monster health and damage are shown multiplied by this, for rounder numbers
 const glow = (hex, k = 2.5) => new THREE.Color(hex).multiplyScalar(k);
 const css = (hex) => `#${hex.toString(16).padStart(6, '0')}`;
 const $ = (id) => document.getElementById(id);
@@ -328,6 +327,8 @@ let bullets = [], orbs = [], meteors = [];
 const me = makeAvatar();
 me.z = 6;   // menu pose: on the plaza, in front of the fountain
 const stats = { hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, sp: 0, level: 1, gold: 0, weapon: 1, cls: 'fighter', skills: {}, buffs: [], dead: false };
+// every derived stat of this character (P.Atk, Atk.Spd, Speed...), recomputed whenever the server state changes
+let sheet = statsOf('fighter', 1);
 const local = {
   vy: 0, jumps: 0, invuln: 0, fireCd: 0, swordCd: 0, combo: 0, dashT: 0, sendT: 0, cds: {},
   dashDir: new THREE.Vector2(0, 1), aim: new THREE.Vector2(0, 1), zone: '',
@@ -470,6 +471,7 @@ function onSnapshot(s) {
   const wasDead = stats.dead;
   Object.assign(stats, s.me, { dead: !!s.me.dead });
   setClass(me, stats.cls);
+  sheet = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, Object.fromEntries(stats.buffs.map(([stat, , mult]) => [stat, mult])));
   if (stats.dead !== wasDead) $('dead').classList.toggle('hidden', !stats.dead);
 
   syncViews(others, s.p,
@@ -583,17 +585,25 @@ function onEvent(ev) {
     case 'hit': {
       const v = mobViews.get(ev.id);
       if (v) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
-      if (ev.o === myId) floatText(ev.x, (v ? v.top : 2) + 0.5, ev.z, String(Math.max(1, Math.round(ev.d * SHOW))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
+      if (ev.o === myId) floatText(ev.x, (v ? v.top : 2) + 0.5, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
       sfx(520, 0.05, 'square', 0.025);
       break;
     }
+    case 'miss': {   // this player's attack missed (Accuracy against the monster's Evasion)
+      const v = mobViews.get(ev.id);
+      if (v && ev.o === myId) floatText(v.x, v.top + 0.5, v.z, 'Miss', '#aab4b8');
+      break;
+    }
+    case 'dodge':
+      floatText(me.x, 3.3, me.z, 'Dodge', '#a9d8ff');
+      break;
     case 'atk':
       mobViews.get(ev.id)?.skeleton.attack();
       break;
     case 'kill': {
       const r = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].r : 0.7;
       burst(ev.x, r * 1.5, ev.z, ev.ti >= 0 ? BONE : 0xffffff, 16 + r * 14, 8);
-      if (ev.o === myId && ev.d) floatText(ev.x, r * 3 + 1.2, ev.z, String(Math.max(1, Math.round(ev.d * SHOW))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
+      if (ev.o === myId && ev.d) floatText(ev.x, r * 3 + 1.2, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
       sfx(180, 0.18, 'sawtooth', 0.05, -120);
       break;
     }
@@ -741,10 +751,11 @@ addEventListener('keydown', (e) => {
     const list = nearbyMobs(40);
     if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
   }
-  if (e.code === 'Escape') { if (bookOpen) toggleBook(); else setTarget(0, false); }
+  if (e.code === 'Escape') { if (bookOpen) toggleBook(); else if (sheetOpen) toggleSheet(); else setTarget(0, false); }
   if (e.code === 'KeyF') attackKey();
   if (e.code === 'KeyX' && !stats.dead && me.castT < 0) { me.sitting = !me.sitting; if (me.sitting) attacking = false; }
   if (e.code === 'KeyK') toggleBook();
+  if (e.code === 'KeyC') toggleSheet();
   if (e.code === 'KeyB') send({ t: 'b' });
   if (e.code === 'KeyM') muted = !muted;
 });
@@ -899,9 +910,9 @@ function updateLocal(dt) {
   } else if (me.castT >= 0 || me.sitting) {
     me.speed = 0;   // rooted while casting or resting
   } else {
-    me.x += moveDir.x * 9 * dt;
-    me.z += moveDir.y * 9 * dt;
-    me.speed = moving ? 9 : 0;
+    me.x += moveDir.x * sheet.move * dt;
+    me.z += moveDir.y * sheet.move * dt;
+    me.speed = moving ? sheet.move : 0;
   }
   const d = Math.hypot(me.x, me.z), max = WORLD_R - 1;
   if (d > max) { me.x *= max / d; me.z *= max / d; }
@@ -913,7 +924,7 @@ function updateLocal(dt) {
 
   // ... and hits whenever its weapon is ready and the target is within reach
   if (attacking && tv && inReach && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
-    local.swordCd = cls.atkCd;
+    local.swordCd = sheet.atkCd;   // Atk.Spd
     if (cls.ranged) {
       me.shootPose = 0.3;   // the arrow itself appears when the server confirms the shot
     } else {
@@ -943,9 +954,10 @@ function updateLocal(dt) {
       else if (s.kind === 'strike' && !inReach) attacking = true;   // run up to the target first; the skill fires on arrival
       else if (targeted && s.range && tDist > s.range) warn('The target is too far away');
       else if (s.cast) {
-        Object.assign(me, { castT: 0, castSkill: pick, castDur: s.cast, sitting: false });
+        const duration = castTime(s, sheet);   // spells are sped up by Casting Spd
+        Object.assign(me, { castT: 0, castSkill: pick, castDur: duration, sitting: false });
         send({ t: 'k', s: pick });
-        sfx(220, s.cast, 'sine', 0.04, 500);
+        sfx(220, duration, 'sine', 0.04, 500);
       } else {
         useSkill(pick, tdx, tdz);
         local.fireCd = 0.3;
@@ -1194,7 +1206,7 @@ function renderBook(atSage) {
     const k = SKILLS[id], rank = stats.skills[id] | 0, max = k.sp.length, tooLow = stats.level < k.lvl;
     const row = el('div', `sk${tooLow ? ' locked' : ''}`), info = el('div', 'info'), name = el('div', 'name', k.name);
     name.append(el('small', '', `${k.kind === 'passive' ? 'passive · ' : ''}rank ${rank}/${max}${tooLow ? ` · level ${k.lvl}` : ''}`));
-    const facts = [k.mp && `${k.mp} mana`, k.cast && `${k.cast}s cast`, k.cd && `${k.cd}s cooldown`].filter(Boolean).join(' · ');
+    const facts = [k.mp && `${k.mp} mana`, k.cast && `${castTime(k, sheet).toFixed(2)}s cast`, k.cd && `${k.cd}s cooldown`].filter(Boolean).join(' · ');
     info.append(name, el('div', 'text', facts ? `${k.text} ${facts}.` : k.text));
     row.append(info, rank >= max
       ? button('Mastered', false, () => {})
@@ -1203,7 +1215,52 @@ function renderBook(atSage) {
   }
 }
 
+// ---------------------------------------------------------------- character status window
+
+let sheetOpen = false, sheetKey = null;
+function toggleSheet() {
+  sheetOpen = !sheetOpen;
+  sheetKey = null;
+  $('sheet').classList.toggle('on', sheetOpen);
+}
+
 const BUFF_NAMES = { patk: 'Attack up', pdef: 'Defence up', atk: 'Might' };
+const SHEET_ROWS = [
+  [['P. Atk', 'pAtk'], ['M. Atk', 'mAtk']],
+  [['P. Def', 'pDef'], ['M. Def', 'mDef']],
+  [['Accuracy', 'acc'], ['Evasion', 'eva']],
+  [['Critical', 'crit'], ['M. Critical', 'mCrit']],
+  [['Atk. Spd', 'atkSpd'], ['Casting Spd', 'castSpd']],
+  [['Speed', 'speed'], null],
+];
+
+function renderSheet() {
+  const key = [stats.cls, stats.level, stats.xp, stats.sp, stats.hp, stats.mp, stats.weapon, JSON.stringify(stats.buffs)].join('|');
+  if (key === sheetKey) return;
+  sheetKey = key;
+  const base = statsOf(stats.cls, stats.level, stats.skills, stats.weapon);   // without buffs, to highlight what they raise
+  const cell = (label, value, raised) => {
+    const c = el('div', 'cell');
+    c.append(el('span', '', label), el('b', raised ? 'up' : '', String(value)));
+    return c;
+  };
+  const section = (title, cells) => {
+    const box = el('div', 'grid');
+    box.append(...cells);
+    return [el('h3', '', title), box];
+  };
+  const need = xpNext(stats.level);
+  $('sheetTitle').textContent = names.get(myId) || 'Cat';
+  $('sheetSub').textContent = `${CLASSES[stats.cls].name} · level ${stats.level}`;
+  $('sheetBody').replaceChildren(
+    ...section('Status', [
+      cell('HP', `${stats.hp} / ${stats.maxHp}`), cell('MP', `${stats.mp} / ${stats.maxMp}`),
+      cell('Experience', `${(stats.xp / need * 100).toFixed(2)}%`), cell('SP', stats.sp),
+    ]),
+    ...section('Attributes', ATTR_NAMES.map((n) => cell(n, sheet[n]))),
+    ...section('Combat', SHEET_ROWS.flat().map((r) => (r ? cell(r[0], sheet[r[1]], sheet[r[1]] > base[r[1]]) : el('div')))),
+  );
+}
 
 function updateHud() {
   const need = xpNext(stats.level);
@@ -1221,6 +1278,7 @@ function updateHud() {
   $('weapon').textContent = `Lv ${stats.weapon}`;
   $('online').textContent = online;
   $('buffs').replaceChildren(...stats.buffs.map(([stat, left]) => el('span', '', `${BUFF_NAMES[stat] || stat} ${left}s`)));
+  if (sheetOpen) renderSheet();
 
   renderBar(hotbar(stats.cls, stats.skills));
   attackSlot.classList.toggle('active', attacking);
@@ -1240,7 +1298,7 @@ function updateHud() {
     $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
     $('tgName').style.color = diff >= 5 ? '#ff5a6a' : diff >= 3 ? '#ffa24d' : diff >= -2 ? '#fff3b0' : diff >= -5 ? '#8ee68e' : '#aab4b8';
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = `${Math.ceil(tv.hp * SHOW)} / ${tv.maxHp * SHOW}`;
+    $('tgHp').textContent = `${Math.ceil(tv.hp)} / ${tv.maxHp}`;
     $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
   }
 
@@ -1319,8 +1377,8 @@ function updateCamera(dt) {
 
 const clock = new THREE.Clock();
 let mapT = 0;
-function frame() {
-  const dt = Math.min(clock.getDelta(), 0.05);
+// One step of the client: simulation, HUD and rendering. Kept separate from the animation-frame loop so tests can drive it.
+function tick(dt) {
   time += dt;
   world.update(time, me.x, me.z);
   npcs?.update(dt, me);
@@ -1340,9 +1398,12 @@ function frame() {
   updateCamera(dt);
 
   composer.render();
+}
+function frame() {
+  tick(Math.min(clock.getDelta(), 0.05));
   requestAnimationFrame(frame);
 }
 frame();
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, world, cam, camera, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, cam, camera, tick, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };

@@ -5,35 +5,59 @@ export const TOWN_R = 24;
 export const TICK = 1 / 15;
 export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its swing and the hit landing
 
+// hp, pAtk: at level 1. pDef / mDef: multipliers on the level-based defence (warriors shrug off blades, mages shrug off spells).
+// eva: bonus to evasion.
 export const MOB_TYPES = {
-  chaser:  { name: 'Skeleton Minion',  r: 0.7,  hp: 3,   speed: 3.0, dmg: 10, xp: 10,  color: 0xff3b8d },
-  runner:  { name: 'Skeleton Rogue',   r: 0.45, hp: 1.5, speed: 5.2, dmg: 6,  xp: 8,   color: 0xff9a3b },
-  shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 3,   speed: 2.4, dmg: 8,  xp: 16,  color: 0xffe14d },
-  tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 14,  speed: 1.8, dmg: 20, xp: 45,  color: 0xb04dff },
-  boss:    { name: 'Skeleton King',    r: 2.8,  hp: 160, speed: 2.2, dmg: 14, xp: 600, color: 0xff2244 },
+  chaser:  { name: 'Skeleton Minion',  r: 0.7,  hp: 30,   speed: 3.0, pAtk: 14, pDef: 1,   mDef: 1,   eva: 0, xp: 10,  color: 0xff3b8d },
+  runner:  { name: 'Skeleton Rogue',   r: 0.45, hp: 15,   speed: 5.2, pAtk: 8,  pDef: 0.7, mDef: 0.9, eva: 6, xp: 8,   color: 0xff9a3b },
+  shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 30,   speed: 2.4, pAtk: 11, pDef: 0.7, mDef: 1.6, eva: 0, xp: 16,  color: 0xffe14d, magic: true },
+  tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 140,  speed: 1.8, pAtk: 28, pDef: 1.6, mDef: 0.8, eva: 0, xp: 45,  color: 0xb04dff },
+  boss:    { name: 'Skeleton King',    r: 2.8,  hp: 1600, speed: 2.2, pAtk: 20, pDef: 1.5, mDef: 1.5, eva: 2, xp: 600, color: 0xff2244, magic: true },
 };
 export const MOB_KEYS = Object.keys(MOB_TYPES);
+
+// A monster's combat stats at a given level.
+export function mobStats(type, level) {
+  const d = MOB_TYPES[type];
+  return {
+    maxHp: Math.ceil(d.hp * (1 + 0.45 * (level - 1))),
+    pAtk: Math.round(d.pAtk * (1 + 0.15 * (level - 1))),
+    pDef: Math.round((15 + 3 * level) * d.pDef),
+    mDef: Math.round((12 + 2.5 * level) * d.mDef),
+    acc: level + 10,
+    eva: level + 6 + d.eva,
+  };
+}
 
 // ---------------------------------------------------------------- classes
 
 // Two starting classes; at PROFESSION_LEVEL each branches into professions (`base` names the parent).
-// hp / mp: [at level 1, per level]. patk / matk scale physical and magic damage, pdef divides damage taken.
-// atkCd is the auto-attack interval, reach its range, hit its base damage.
+// attr: the six base attributes - STR, DEX, CON, INT, WIT, MEN - from which every combat stat is derived (see statsOf).
+// armor: base physical defence of what the class wears. reach: auto-attack range.
 export const CLASSES = {
-  fighter: { name: 'Fighter', base: null, hp: [110, 24], mp: [40, 6], patk: 1, matk: 0.4, pdef: 1, crit: 0.08, atkCd: 0.5, reach: 2.4, hit: 2,
+  fighter: { name: 'Fighter', base: null, attr: [40, 30, 43, 21, 11, 25], armor: 40, reach: 2.4,
     weapon: 'sword', hoodie: 0x35523f, text: 'Fights up close with a sword. Tough and simple to play.' },
-  mystic: { name: 'Mystic', base: null, hp: [80, 16], mp: [90, 16], patk: 0.5, matk: 1, pdef: 0.7, crit: 0.05, atkCd: 0.8, reach: 2.4, hit: 2,
+  mystic: { name: 'Mystic', base: null, attr: [22, 21, 27, 41, 20, 39], armor: 22, reach: 2.4,
     weapon: 'staff', hoodie: 0x3b4a8a, text: 'Casts spells from a distance. Fragile, lives on mana.' },
-  knight: { name: 'Knight', base: 'fighter', hp: [150, 32], mp: [50, 7], patk: 0.95, matk: 0.4, pdef: 1.5, crit: 0.08, atkCd: 0.55, reach: 2.4, hit: 2,
+  knight: { name: 'Knight', base: 'fighter', attr: [40, 28, 48, 21, 11, 27], armor: 62, reach: 2.4,
     weapon: 'shield', hoodie: 0x5a6470, text: 'Tank: heavy defence, a shield, and skills that pull monsters onto himself.' },
-  rogue: { name: 'Rogue', base: 'fighter', hp: [100, 22], mp: [50, 8], patk: 1.1, matk: 0.4, pdef: 0.9, crit: 0.25, atkCd: 0.36, reach: 2.4, hit: 2,
+  rogue: { name: 'Rogue', base: 'fighter', attr: [41, 46, 36, 21, 12, 24], armor: 32, reach: 2.4,
     weapon: 'daggers', hoodie: 0x6a2a2a, text: 'Melee damage: fast twin daggers, frequent critical hits, a quick dash.' },
-  archer: { name: 'Archer', base: 'fighter', hp: [95, 20], mp: [55, 9], patk: 1.25, matk: 0.4, pdef: 0.8, crit: 0.15, atkCd: 0.9, reach: 18, hit: 2, ranged: true,
+  archer: { name: 'Archer', base: 'fighter', attr: [39, 44, 34, 21, 13, 26], armor: 30, reach: 18, ranged: true,
     weapon: 'bow', hoodie: 0x6a6a2a, text: 'Ranged damage: shoots a bow from far away, weak when cornered.' },
-  wizard: { name: 'Wizard', base: 'mystic', hp: [85, 17], mp: [110, 20], patk: 0.5, matk: 1.35, pdef: 0.7, crit: 0.05, atkCd: 0.8, reach: 2.4, hit: 2,
+  wizard: { name: 'Wizard', base: 'mystic', attr: [21, 21, 27, 46, 26, 41], armor: 22, reach: 2.4,
     weapon: 'staff', hoodie: 0x5a2f7a, text: 'Magic damage: fire, wide area spells, and putting monsters to sleep.' },
-  cleric: { name: 'Cleric', base: 'mystic', hp: [100, 20], mp: [110, 20], patk: 0.6, matk: 1, pdef: 0.9, crit: 0.05, atkCd: 0.8, reach: 2.4, hit: 2,
+  cleric: { name: 'Cleric', base: 'mystic', attr: [24, 22, 33, 37, 22, 45], armor: 34, reach: 2.4,
     weapon: 'staff', hoodie: 0xcfc9ae, text: 'Support: heals and blesses everyone nearby, raises the fallen.' },
+};
+export const ATTR_NAMES = ['STR', 'DEX', 'CON', 'INT', 'WIT', 'MEN'];
+// What each kind of weapon contributes: attack values, base attack speed, critical rate (per 1000) and extra defence.
+export const WEAPONS = {
+  sword:   { pAtk: 18, mAtk: 6,  spd: 300, crit: 20,  pDef: 0 },
+  shield:  { pAtk: 17, mAtk: 6,  spd: 290, crit: 20,  pDef: 15 },
+  daggers: { pAtk: 16, mAtk: 6,  spd: 400, crit: 120, pDef: 0 },
+  bow:     { pAtk: 26, mAtk: 6,  spd: 160, crit: 60,  pDef: 0 },
+  staff:   { pAtk: 9,  mAtk: 24, spd: 250, crit: 10,  pDef: 0 },
 };
 export const CLASS_KEYS = Object.keys(CLASSES);
 export const START_CLASSES = CLASS_KEYS.filter((k) => !CLASSES[k].base);
@@ -130,9 +154,13 @@ export const skillsFor = (cls) => SKILL_KEYS.filter((id) => classLine(cls).inclu
 // learned active skills in hotbar order (keys 1, 2, 3…)
 export const hotbar = (cls, learned) => skillsFor(cls).filter((id) => SKILLS[id].kind !== 'passive' && learned[id] > 0).slice(0, MAX_SLOTS);
 
-// Stats derived from class, level and passive skills.
-export function statsOf(cls, level, learned = {}) {
-  const c = CLASSES[cls];
+// Every combat stat of a character, derived from its class attributes, level, weapon upgrade level, passive skills
+// and active buffs (`buffs` maps a stat name to a multiplier).
+//   STR -> P.Atk      DEX -> Atk.Spd, Accuracy, Evasion, Critical, Speed      CON -> HP
+//   INT -> M.Atk      WIT -> Casting Spd, M.Critical                         MEN -> M.Def, MP
+export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}) {
+  const c = CLASSES[cls], w = WEAPONS[c.weapon];
+  const [STR, DEX, CON, INT, WIT, MEN] = c.attr;
   const passive = (stat) => {
     let v = 0;
     for (const id of skillsFor(cls)) {
@@ -141,22 +169,44 @@ export function statsOf(cls, level, learned = {}) {
     }
     return v;
   };
+  const buff = (stat) => buffs[stat] || 1;
+  const grade = 1 + 0.4 * (weapon - 1);          // the Blacksmith's upgrades
+  const atkLevel = 1 + 0.1 * (level - 1), defLevel = 1 + 0.05 * (level - 1);
+  const atkSpd = Math.round(w.spd * (1 + (DEX - 30) * 0.012));
+  const castSpd = Math.round(333 * (1 + (WIT - 20) * 0.02));
+  const speed = Math.round(100 + DEX * 0.6);
   return {
-    maxHp: Math.round(c.hp[0] + c.hp[1] * (level - 1)),
-    maxMp: Math.round((c.mp[0] + c.mp[1] * (level - 1)) * (1 + passive('mp'))),
-    patk: c.patk * (1 + passive('patk')),
-    matk: c.matk * (1 + passive('matk')),
-    pdef: c.pdef * (1 + passive('pdef')),
-    crit: c.crit + passive('crit'),
+    STR, DEX, CON, INT, WIT, MEN,
+    maxHp: Math.round((80 + 20 * (level - 1)) * (1 + (CON - 30) * 0.03)),
+    maxMp: Math.round((40 + 9 * (level - 1)) * (1 + (MEN - 20) * 0.05) * (1 + passive('mp'))),
+    pAtk: Math.round(w.pAtk * grade * atkLevel * (1 + (STR - 40) * 0.025) * (1 + passive('patk')) * buff('patk') * buff('atk')),
+    mAtk: Math.round(w.mAtk * grade * atkLevel * (1 + (INT - 41) * 0.03) * (1 + passive('matk')) * buff('atk')),
+    pDef: Math.round((c.armor + w.pDef) * defLevel * (1 + passive('pdef')) * buff('pdef')),
+    mDef: Math.round(20 * defLevel * (1 + (MEN - 20) * 0.04)),
+    acc: Math.round(level + DEX * 0.3 + 5),
+    eva: Math.round(level + DEX * 0.3),
+    crit: Math.round(DEX * 2 + w.crit + passive('crit') * 1000),   // per 1000, as the status window shows it
+    mCrit: Math.round(WIT * 2),
+    atkSpd, castSpd, speed,
+    atkCd: 150 / atkSpd,          // seconds between auto-attacks
+    castMult: 333 / castSpd,      // multiplier on the cast time of spells
+    move: speed * 0.075,          // world units per second
   };
 }
+
+// Spells are sped up by Casting Spd; physical skills keep their own timing.
+export const isSpell = (s) => ['bolt', 'heal', 'sleep', 'buff', 'revive'].includes(s.kind) || (s.kind === 'ground' && !s.phys);
+export const castTime = (s, st) => (s.cast || 0) * (isSpell(s) ? st.castMult : 1);
+
+// Damage after the target's defence, and the chance of a physical attack landing.
+export const mitigate = (attack, defence) => attack * 100 / (100 + defence);
+export const hitChance = (acc, eva) => Math.max(0.4, Math.min(0.98, 0.9 + (acc - eva) * 0.015));
 
 // ---------------------------------------------------------------- progression
 
 export const xpNext = (level) => 100 * level * level;
 export const spFor = (xp) => Math.ceil(xp / 8);                  // skill points earned along with experience
 export const DEATH_XP_LOSS = 0.04;                               // share of the current level's experience lost on death
-export const dmgMult = (level, weapon) => (1 + 0.4 * (weapon - 1)) * (1 + 0.08 * (level - 1));
 export const upgradeCost = (weapon) => 40 * weapon;
 
 // ---------------------------------------------------------------- world
