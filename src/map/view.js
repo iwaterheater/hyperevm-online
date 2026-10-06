@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GROUND_TYPES, NPC_RADIUS, groundHalf, groundX, cellHash, isBlocked } from './format.js';
 import { modelInfo, colliderOf, glowOf } from './catalog.js';
 import { builtinModel } from './builtin.js';
+import { Grass } from './grass.js';
 
 // MapView draws a map: the terrain and the sea, the scenery objects (one instanced batch per model), the grass and flowers
 // that grow by themselves, the halos of lanterns and torches - and it knows what the objects block.
@@ -23,6 +24,7 @@ const TILES_PER_FRAME = 4;      // foliage tiles regrown per update()
 const REGROW_WAIT = 0.2;        // seconds without a collider change before the foliage around colliders regrows
 const FOLIAGE_RANGE = 200;      // game: tiles further than this from the player are hidden (the fog ends at 150)
 const FOLIAGE_EDGE = 4;         // nothing grows this close to the shore
+const GRASS_FULL = 0.14;        // the tuft density of a ground type at which the blade grass is at its thickest
 const GHOST_MAX = 500;
 const HALO_R = 0.55;            // radius of the halo sphere; glowOf() gives the radius a halo should have
 const CRYSTAL = 'builtin/crystal';
@@ -282,7 +284,9 @@ export class MapView {
 
     // full: the whole colour buffer waits for the GPU, so no update range may be added
     this.terrain = { mesh: null, sea: null, grain: null, size: 0, cell: 0, radius: -1, noise: null, base: null, color: null, full: true };
-    this.tiles = [];               // foliage tiles: { tx, tz, x, z /* centre */, tufts, flowers, wait }
+    this.tiles = [];               // foliage tiles: { tx, tz, x, z /* centre */, flowers, wait }
+    this.grass = new Grass();      // the blades; a tile writes where they grow when it regrows
+    this.root.add(this.grass.group);
     this.dirty = new Set();        // tiles to regrow; tile.wait: only once the colliders have been quiet
     this.stirred = false;          // a collider changed since the last update()
     this.quietAt = 0;              // since when the colliders are quiet (performance.now()), and for how much frame time
@@ -333,6 +337,7 @@ export class MapView {
       n++;
     }
     this.focus = focus;
+    this.grass.update(time, this.editor ? null : focus);
     this._cull();
     return this.dirty.size > 0 || this.waiting > 0;
   }
@@ -364,6 +369,7 @@ export class MapView {
     this.generation++;
     this._clear();
     this._dropTiles();
+    this.grass.dispose();
     this.halo?.dispose();
     this.haloGeometry.dispose();
     this.haloMaterial.dispose();
@@ -1138,9 +1144,10 @@ export class MapView {
       t.cell = cell;
       t.radius = -1;
       this._dropTiles();
+      this.grass.resize(size, cell);
       const per = Math.ceil(size / TILE), mid = (first) => (groundX(g, first) + groundX(g, Math.min(size - 1, first + TILE - 1))) / 2;
       for (let tz = 0; tz < per; tz++) {
-        for (let tx = 0; tx < per; tx++) this.tiles.push({ tx, tz, x: mid(tx * TILE), z: mid(tz * TILE), tufts: null, flowers: null, wait: false });
+        for (let tx = 0; tx < per; tx++) this.tiles.push({ tx, tz, x: mid(tx * TILE), z: mid(tz * TILE), flowers: null, wait: false });
       }
     }
     if (t.radius !== this.map.radius) {
@@ -1191,14 +1198,13 @@ export class MapView {
 
   // ---------------------------------------------------------------- foliage
 
-  // Grass tufts and flowers are not items: they grow from the ground cells, by type, in tiles of TILE x TILE vertices.
+  // Grass and flowers are not items: they grow from the ground cells, by type, in tiles of TILE x TILE vertices.
+  // The flowers are instances per tile; the grass is drawn by grass.js from the field the tiles write.
 
   _dropTiles() {
     for (const tile of this.tiles) {
-      for (const mesh of [tile.tufts, tile.flowers]) {
-        mesh?.removeFromParent();
-        mesh?.dispose();
-      }
+      tile.flowers?.removeFromParent();
+      tile.flowers?.dispose();
     }
     this.tiles = [];
     this.dirty.clear();
@@ -1231,29 +1237,24 @@ export class MapView {
   // meadow, and repainting one spot never reshuffles the foliage elsewhere. No hash salt is used twice.
   _grow(tile) {
     const map = this.map, { size, cell, cells } = map.ground, mid = (size - 1) / 2, area = cell * cell;
-    const reach = Math.max(0, map.radius - FOLIAGE_EDGE), tufts = [], flowers = [];
-    if (map.foliage) {
-      this._grid();
-      const ixEnd = Math.min(size, (tile.tx + 1) * TILE), izEnd = Math.min(size, (tile.tz + 1) * TILE);
-      for (let iz = tile.tz * TILE; iz < izEnd; iz++) {
-        for (let ix = tile.tx * TILE; ix < ixEnd; ix++) {
-          const f = GROUND_TYPES[cells[iz * size + ix]]?.foliage, x = (ix - mid) * cell, z = (iz - mid) * cell;
-          if (!f || !(x * x + z * z < reach * reach) || this._covered(x, z)) continue;
-          const H = (salt) => cellHash(ix, iz, salt);
-          // density is per square unit; the fraction of the expected count becomes a chance
-          let p = f.tuft * area, n = Math.floor(p) + (H(1) < p - Math.floor(p) ? 1 : 0);
-          for (let j = 0, s = 0; j < n; j++, s += 10) {
-            tufts.push(x + (H(s + 2) - 0.5) * cell, z + (H(s + 3) - 0.5) * cell, 0.7 + 0.8 * H(s + 4), Math.PI * 2 * H(s + 5));
-          }
-          p = f.flower * area;
-          n = Math.floor(p) + (H(6) < p - Math.floor(p) ? 1 : 0);
-          for (let j = 0, s = 0; j < n; j++, s += 10) {
-            flowers.push(x + (H(s + 7) - 0.5) * cell, z + (H(s + 8) - 0.5) * cell, 0.8 + 0.5 * H(s + 10), Math.floor(H(s + 9) * 4));
-          }
+    const reach = Math.max(0, map.radius - FOLIAGE_EDGE), flowers = [];
+    if (map.foliage) this._grid();
+    const ixEnd = Math.min(size, (tile.tx + 1) * TILE), izEnd = Math.min(size, (tile.tz + 1) * TILE);
+    for (let iz = tile.tz * TILE; iz < izEnd; iz++) {
+      for (let ix = tile.tx * TILE; ix < ixEnd; ix++) {
+        const type = GROUND_TYPES[cells[iz * size + ix]], f = type?.foliage, x = (ix - mid) * cell, z = (iz - mid) * cell;
+        const grows = !!f && map.foliage && x * x + z * z < reach * reach && !this._covered(x, z);
+        // the blades take their density from the type's tuft count; the meadow (0.14 per square unit) is full grass
+        this.grass.write(ix, iz, grows ? f.tuft / GRASS_FULL : 0, type?.id === 'dry_grass' ? 1 : 0);
+        if (!grows) continue;
+        const H = (salt) => cellHash(ix, iz, salt);
+        // density is per square unit; the fraction of the expected count becomes a chance
+        const p = f.flower * area, n = Math.floor(p) + (H(6) < p - Math.floor(p) ? 1 : 0);
+        for (let j = 0, s = 0; j < n; j++, s += 10) {
+          flowers.push(x + (H(s + 7) - 0.5) * cell, z + (H(s + 8) - 0.5) * cell, 0.8 + 0.5 * H(s + 10), Math.floor(H(s + 9) * 4));
         }
       }
     }
-    tile.tufts = this._plant(tile.tufts, 'builtin/grass_tuft', tufts, false);
     tile.flowers = this._plant(tile.flowers, 'builtin/flower_white', flowers, true);
   }
 
@@ -1286,9 +1287,9 @@ export class MapView {
   // Shows the tiles that should be seen: the layer switch and, in the game, the distance to the player.
   _cull() {
     const f = this.editor ? null : this.focus;
+    this.grass.group.visible = this.layers.foliage;
     for (const tile of this.tiles) {
       const on = this.layers.foliage && (!f || Math.hypot(tile.x - f.x, tile.z - f.z) < FOLIAGE_RANGE);
-      if (tile.tufts) tile.tufts.visible = on && tile.tufts.count > 0;
       if (tile.flowers) tile.flowers.visible = on && tile.flowers.count > 0;
     }
   }
