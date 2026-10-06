@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js --editor",
+    "test": "node --test test/*.test.mjs",
+    "bake": "node tools/bake-map.mjs",
+    "check": "node tools/check-imports.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

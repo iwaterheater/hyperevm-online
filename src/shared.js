@@ -15,6 +15,11 @@ export const MOB_TYPES = {
   boss:    { name: 'Skeleton King',    r: 2.8,  hp: 1600, speed: 2.2, pAtk: 20, pDef: 1.5, mDef: 1.5, eva: 2, xp: 600, color: 0xff2244, magic: true },
 };
 export const MOB_KEYS = Object.keys(MOB_TYPES);
+// How far monsters sense and roam, in world units; the map editor draws its threat rings from the same numbers.
+export const AGGRO_R = 13;        // a monster notices a player this close
+export const BOSS_AGGRO_R = 20;   // the same for a boss
+export const LEASH_R = 30;        // it only picks a target while it is this close to its home
+export const WANDER_R = 5;        // an idle monster strolls this far from its home on each axis
 
 // A monster's combat stats at a given level.
 export function mobStats(type, level) {
