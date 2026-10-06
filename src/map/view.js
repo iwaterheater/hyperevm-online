@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { GROUND_TYPES, NPC_RADIUS, WATER_LEVEL, groundHalf, groundX, cellHash, isBlocked, heightAt } from './format.js';
+import { GROUND_TYPES, MAX_SLOPE, NPC_RADIUS, WATER_LEVEL, groundHalf, groundX, cellHash, isBlocked, heightAt } from './format.js';
 import { modelInfo, colliderOf, glowOf } from './catalog.js';
 import { builtinModel } from './builtin.js';
 import { Grass } from './grass.js';
+import { createWater } from './water.js';
 
 // MapView draws a map: the terrain and the sea, the scenery objects (one instanced batch per model), the grass and flowers
 // that grow by themselves, the halos of lanterns and torches - and it knows what the objects block.
@@ -25,6 +26,7 @@ const TILES_PER_FRAME = 4;      // foliage tiles regrown per update()
 const REGROW_WAIT = 0.2;        // seconds without a collider change before the foliage around colliders regrows
 const FOLIAGE_RANGE = 200;      // game: tiles further than this from the player are hidden (the fog ends at 150)
 const FOLIAGE_EDGE = 4;         // nothing grows this close to the shore
+const SHORE_TOP = WATER_LEVEL + 0.9, SHORE_BAND = 0.6;   // ground lower than the top is sand: fully so one band below it
 const GRASS_FULL = 0.14;        // the tuft density of a ground type at which the blade grass is at its thickest
 const GHOST_MAX = 500;
 const HALO_R = 0.55;            // radius of the halo sphere; glowOf() gives the radius a halo should have
@@ -34,6 +36,8 @@ const FLOWERS = [0xffffff, 0xffe066, 0xff8fb3, 0xb18cff].map((hex) => new THREE.
 const RED = new THREE.Color().setRGB(1.6, 0.4, 0.4);              // a ghost that may not be placed here
 // the two colours of every ground type as linear rgb: [ar, ag, ab, br, bg, bb]
 const SHADES = GROUND_TYPES.map((t) => [...new THREE.Color(t.a).toArray(), ...new THREE.Color(t.b).toArray()]);
+const SAND = SHADES[GROUND_TYPES.findIndex((t) => t.id === 'sand')];
+const ROCK = [...new THREE.Color(0x6f6a64).toArray(), ...new THREE.Color(0x8c867d).toArray()];   // a slope too steep to walk shows as bare rock
 const NONE = [];                // the colliders of an object that blocks nothing
 
 const M = new THREE.Matrix4(), M2 = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler();
@@ -339,6 +343,7 @@ export class MapView {
     }
     this.focus = focus;
     this.grass.update(time, this.editor || !focus ? null : focus, focus ? this.heightAt(focus.x, focus.z) : 0);
+    this.water?.update(time);
     this._cull();
     return this.dirty.size > 0 || this.waiting > 0;
   }
@@ -380,8 +385,7 @@ export class MapView {
       t.mesh.geometry.dispose();
       t.mesh.material.dispose();
       t.grain.dispose();
-      t.sea.geometry.dispose();
-      t.sea.material.dispose();
+      this.water.dispose();
     }
     for (const model of this.loaded.values()) if (!model.missing && model.info.pack !== 'builtin') model.geometry.dispose();
     for (const m of this.materials.values()) free(m);
@@ -459,7 +463,7 @@ export class MapView {
     ix1 = Math.min(last, Math.floor(ix1)); iz1 = Math.min(last, Math.floor(iz1));
     if (!(ix0 <= ix1 && iz0 <= iz1)) return;
     const gx0 = Math.max(0, ix0 - 1), gz0 = Math.max(0, iz0 - 1), gx1 = Math.min(last, ix1 + 1), gz1 = Math.min(last, iz1 + 1);
-    this._paint(ix0, iz0, ix1, iz1);
+    this._paint(Math.max(0, ix0 - 1), Math.max(0, iz0 - 1), Math.min(last, ix1 + 1), Math.min(last, iz1 + 1));   // a height also turns its neighbours' slope
     this._shape(ix0, iz0, ix1, iz1);
     // an object stands on the surface under its origin: every cell that touches a moved vertex may have lifted one
     const x0 = groundX(g, gx0), x1 = groundX(g, gx1), z0 = groundX(g, gz0), z1 = groundX(g, gz1);
@@ -468,7 +472,8 @@ export class MapView {
     }
     if (t.color.updateRanges.length > 64) this._uploadAll();   // nothing is drawing the ground: stop collecting ranges
     // one span of rows over the grown rectangle: the recomputed rim must reach the GPU too
-    if (!t.full) t.color.addUpdateRange((gz0 * t.size + gx0) * 3, ((gz1 - gz0) * t.size + (gx1 - gx0) + 1) * 3);
+    const cx0 = Math.max(0, gx0 - 1), cz0 = Math.max(0, gz0 - 1), cx1 = Math.min(last, gx1 + 1), cz1 = Math.min(last, gz1 + 1);
+    if (!t.full) t.color.addUpdateRange((cz0 * t.size + cx0) * 3, ((cz1 - cz0) * t.size + (cx1 - cx0) + 1) * 3);
     t.color.needsUpdate = true;
     this._dirtyTiles(ix0, iz0, ix1, iz1, false);
   }
@@ -1141,9 +1146,8 @@ export class MapView {
       t.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, map: t.grain, roughness: 1 }));
       t.mesh.receiveShadow = true;
       t.mesh.frustumCulled = false;   // the hills move under the brush: no bounds to keep right
-      t.sea = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: 0x2f7d9c, roughness: 0.25 }));
-      t.sea.rotation.x = -HALF_PI;
-      t.sea.position.y = WATER_LEVEL;
+      this.water = createWater(WATER_LEVEL, this.grass.shared.uField, this.grass.shared.uFieldXf);
+      t.sea = this.water.mesh;
       t.mesh.visible = t.sea.visible = this.layers.ground;
       this.root.add(t.mesh, t.sea);
     }
@@ -1186,11 +1190,20 @@ export class MapView {
   // by one vertex. Soft borders: a drawn colour is the weighted average of the 3 x 3 base colours around the vertex
   // (centre 4, edges 2, corners 1, indices clamped at the edge of the grid) - the format stores no blend weights.
   _paint(ix0, iz0, ix1, iz1) {
-    const t = this.terrain, { size, noise: grain, base } = t, cells = this.map.ground.cells, color = t.color.array, last = size - 1;
+    const t = this.terrain, { size, noise: grain, base } = t, { cells, heights } = this.map.ground, color = t.color.array, last = size - 1;
     for (let iz = iz0; iz <= iz1; iz++) {
       for (let ix = ix0; ix <= ix1; ix++) {
         const i = iz * size + ix, c = SHADES[cells[i]] ?? SHADES[0], k = grain[i];
-        for (let ch = 0; ch < 3; ch++) base[i * 3 + ch] = c[ch] + (c[ch + 3] - c[ch]) * k;
+        // a shore makes itself: ground near the waterline is sand whatever was painted there, and darker the deeper it lies
+        const h = heights ? heights[i] : 0, wet = h < SHORE_TOP ? Math.min(1, (SHORE_TOP - h) / SHORE_BAND) : 0;
+        const deep = h < WATER_LEVEL ? Math.max(0.45, 1 + (h - WATER_LEVEL) * 0.12) : 1;
+        // ... and a cliff says so: where the ground is too steep to climb, the rock shows through
+        const steep = heights ? Math.min(1, Math.max(0, (this._steep(ix, iz) - MAX_SLOPE * 0.75) / (MAX_SLOPE * 0.3))) : 0;
+        for (let ch = 0; ch < 3; ch++) {
+          const own = c[ch] + (c[ch + 3] - c[ch]) * k, sand = SAND[ch] + (SAND[ch + 3] - SAND[ch]) * k;
+          const soft = own + (sand - own) * wet, rock = ROCK[ch] + (ROCK[ch + 3] - ROCK[ch]) * k;
+          base[i * 3 + ch] = (soft + (rock - soft) * steep) * deep;
+        }
       }
     }
     for (let iz = Math.max(0, iz0 - 1); iz <= Math.min(last, iz1 + 1); iz++) {
@@ -1203,6 +1216,13 @@ export class MapView {
         }
       }
     }
+  }
+
+  // How steep the ground is at a vertex, as rise over run: the steepest of the cells around it.
+  _steep(ix, iz) {
+    const { size, cell, heights: h } = this.map.ground, last = size - 1, i = iz * size + ix, c = h[i];
+    const l = ix > 0 ? h[i - 1] : c, r = ix < last ? h[i + 1] : c, u = iz > 0 ? h[i - size] : c, d = iz < last ? h[i + size] : c;
+    return Math.hypot(Math.max(Math.abs(c - l), Math.abs(r - c)), Math.max(Math.abs(c - u), Math.abs(d - c))) / cell;
   }
 
   // Sets the height of the vertices inside the inclusive rectangle - the map's relief, and beyond the radius the beach
@@ -1286,16 +1306,18 @@ export class MapView {
   // meadow, and repainting one spot never reshuffles the foliage elsewhere. No hash salt is used twice.
   _grow(tile) {
     const map = this.map, { size, cell, cells } = map.ground, mid = (size - 1) / 2, area = cell * cell;
-    const reach = Math.max(0, map.radius - FOLIAGE_EDGE), flowers = [];
+    const reach = Math.max(0, map.radius - FOLIAGE_EDGE), flowers = [], drawn = this.terrain.mesh.geometry.attributes.position.array;
     if (map.foliage) this._grid();
     const ixEnd = Math.min(size, (tile.tx + 1) * TILE), izEnd = Math.min(size, (tile.tz + 1) * TILE);
     for (let iz = tile.tz * TILE; iz < izEnd; iz++) {
       for (let ix = tile.tx * TILE; ix < ixEnd; ix++) {
         const type = GROUND_TYPES[cells[iz * size + ix]], f = type?.foliage, x = (ix - mid) * cell, z = (iz - mid) * cell;
         const dry = !map.ground.heights || map.ground.heights[iz * size + ix] > WATER_LEVEL + 0.1;   // nothing grows under the water
-        const grows = !!f && map.foliage && dry && x * x + z * z < reach * reach && !this._covered(x, z);
+        const gentle = !map.ground.heights || this._steep(ix, iz) < MAX_SLOPE * 0.9;                 // ... nor on a cliff face
+        const grows = !!f && map.foliage && dry && gentle && x * x + z * z < reach * reach && !this._covered(x, z);
         // the blades take their density from the type's tuft count; the meadow (0.14 per square unit) is full grass
-        this.grass.write(ix, iz, grows ? f.tuft / GRASS_FULL : 0, type?.id === 'dry_grass' ? 1 : 0, map.ground.heights ? map.ground.heights[iz * size + ix] : 0);
+        // the height as drawn - with the beach that slopes away beyond the radius: the water reads its depth from it
+        this.grass.write(ix, iz, grows ? f.tuft / GRASS_FULL : 0, type?.id === 'dry_grass' ? 1 : 0, drawn[(iz * size + ix) * 3 + 1]);
         if (!grows) continue;
         const H = (salt) => cellHash(ix, iz, salt);
         // density is per square unit; the fraction of the expected count becomes a chance

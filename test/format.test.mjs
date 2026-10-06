@@ -93,12 +93,12 @@ function lcg(seed = 1337) {
 test('the export list is exactly the one of the spec', () => {
   assert.deepEqual(Object.keys(format).sort(), [
     'COLLECTION', 'FORMAT_VERSION', 'GROUND_ALIASES', 'GROUND_INDEX', 'GROUND_SYMBOLS', 'GROUND_TYPES', 'KINDS', 'LAYERS', 'LAYER_OF',
-    'LIMITS', 'MOODS', 'MapError', 'NPC_KINDS', 'NPC_RADIUS', 'WATER_LEVEL',
+    'LIMITS', 'MAX_SLOPE', 'MOODS', 'MapError', 'NPC_KINDS', 'NPC_RADIUS', 'WATER_LEVEL',
     'cellHash', 'cellIndex', 'cellXZ', 'clampHeight', 'decodeHeights', 'decodeItem', 'decodeRows', 'emptyMap', 'encodeHeights', 'encodeItem',
     'encodeRows', 'groundAt', 'groundHalf',
     'groundIx', 'groundX', 'groupItems', 'hasBoss', 'heightAt', 'inShape', 'isBlocked', 'isSafe', 'maxRadius', 'migrate', 'moodAt', 'nearNpc',
     'normalize', 'npcsOf', 'pickLevel', 'pickType', 'pushOutOfSafe', 'qAngle', 'qHeight', 'qPos', 'qScale', 'quantizeItem', 'rayGround', 'regionAt',
-    'regionColor', 'regionIndex', 'regionLabel', 'resizeGround', 'serialize', 'shapeBounds', 'shapeCentre', 'spawnCount', 'spawnHome',
+    'regionColor', 'regionIndex', 'regionLabel', 'resizeGround', 'serialize', 'shapeBounds', 'shapeCentre', 'slopeAt', 'spawnCount', 'spawnHome',
     'startPoint', 'stringifyMap', 'toDeg', 'toRad', 'validate',
   ]);
 });
@@ -1755,6 +1755,7 @@ test('heights: a flat ground writes no key; hills round-trip on the 0.1 grid, ru
   g.heights[mid * g.size + mid] = 5;
   g.heights[mid * g.size + mid + 1] = 2.5;
   g.heights[(mid + 1) * g.size + mid] = -0.7;
+  map.start = { x: -20, z: -20, r: 3 };                       // away from the bump: a start on a cliff is an error
   const file = format.serialize(map), text = format.stringifyMap(file);
   assert.equal(file.ground.heights.length, g.size);
   assert.equal(file.ground.heights[0], `0*${g.size}`);
@@ -1818,4 +1819,20 @@ test('a pit below the waterline is a lake: deep water blocks, a shallow shore do
   assert.equal(format.isBlocked(map, 0, 0), false);
   assert.equal(format.clampHeight(-100), format.LIMITS.height[0]);
   assert.ok(format.LIMITS.height[0] < format.WATER_LEVEL);
+});
+
+test('a slope steeper than 45 degrees cannot be walked on; a ramp can', () => {
+  const map = format.emptyMap({ radius: 40 }), g = map.ground, mid = (g.size - 1) / 2;
+  assert.equal(format.slopeAt(map, 3, 3), 0);
+  // a plateau 6 high for x >= 10: the cliff face is the one column of cells between x = 8 and x = 10
+  for (let iz = 0; iz < g.size; iz++) for (let ix = mid + 5; ix < g.size; ix++) g.heights[iz * g.size + ix] = 6;
+  assert.equal(format.slopeAt(map, 9, 0.5), 3);
+  assert.equal(format.isBlocked(map, 9, 0.5), true);
+  assert.equal(format.isBlocked(map, 7, 0.5), false);       // the foot of the cliff
+  assert.equal(format.isBlocked(map, 12, 0.5), false);      // the top
+  // a ramp: 6 up over 12 units (rise over run 0.5) along the row z = 10..12
+  for (let k = 0; k <= 6; k++) for (const iz of [mid + 5, mid + 6]) g.heights[iz * g.size + mid - 1 + k] = k;
+  assert.equal(format.slopeAt(map, 4, 11), 0.5);
+  assert.equal(format.isBlocked(map, 4, 11), false);
+  assert.equal(format.MAX_SLOPE, 1);
 });

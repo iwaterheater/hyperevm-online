@@ -1054,21 +1054,21 @@ test('heights: a stroke that changes nothing leaves no step, and neither does on
 test('heights: whatever replaces the ground keeps the hills, and a ground without the array gets one for the stroke only', () => {
   const map = emptyMap(), store = createStore();
   store.load(map);
-  const before = text(map), ground = map.ground, mid = cellIndex(ground, 0, 0), rim = cellIndex(ground, 200, 0);
+  const before = text(map), ground = map.ground, mid = cellIndex(ground, 50, 0), rim = cellIndex(ground, 200, 0);
   store.exec(cmd.heights([mid, rim], [12, 4]));
-  assert.equal(heightOf(map, 0, 0), 12);
+  assert.equal(heightOf(map, 50, 0), 12);
   // a larger island: the grid grows around the old one and the hills stay where they are
   assert.deepEqual(store.exec(cmd.setProps({ radius: 300 })).props, ['radius', 'ground']);
   assert.notEqual(map.ground, ground);
   assert.equal(map.ground.heights.length, map.ground.cells.length);
-  assert.equal(heightOf(map, 0, 0), 12);
+  assert.equal(heightOf(map, 50, 0), 12);
   assert.equal(heightOf(map, 200, 0), 4);
   store.exec(cmd.heights([cellIndex(map.ground, 290, 0)], 7));
   assert.equal(heightOf(map, 290, 0), 7);
   assert.deepEqual(errors(map), []);
   const again = normalize(JSON.parse(text(map)));
   assert.equal(heightOf(again, 290, 0), 7, 'the file brings the hills back');
-  assert.equal(heightOf(again, 0, 0), 12);
+  assert.equal(heightOf(again, 50, 0), 12);
   // a batch reports the union of its rectangles and still says that the relief moved
   const both = store.exec(cmd.batch('Paint and raise', [cmd.paint([0], GROUND_INDEX.snow), cmd.heights([5], 1)]));
   assert.deepEqual(both.ground, { ix0: 0, iz0: 0, ix1: 5, iz1: 0, relief: true });

@@ -86,7 +86,8 @@ function flood(map, obs) {
     const z = (j - R) * STEP, row = sound ? groundIx(g, z) * size : 0;
     for (let i = 0; i < n; i++) {
       const x = (i - R) * STEP;
-      if (x * x + z * z > r2 || (sound && BLOCK[g.cells[row + groundIx(g, x)]] === true)) state[j * n + i] = 1;
+      // blocked as the game sees it: a blocking ground type, water too deep to wade, a slope too steep to climb
+      if (x * x + z * z > r2 || (sound && (BLOCK[g.cells[row + groundIx(g, x)]] === true || (g.heights && isBlocked(map, x, z))))) state[j * n + i] = 1;
     }
   }
   // close every cell whose centre lies inside test(x, z), looking only at the square around (cx, cz)

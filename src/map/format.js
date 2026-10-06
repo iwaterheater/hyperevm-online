@@ -143,10 +143,11 @@ export function groundAt(map, x, z) {
   const g = map.ground;
   return GROUND_TYPES[g.cells[groundIx(g, z) * g.size + groundIx(g, x)]];
 }
-// Nobody walks on a blocking ground type - nor where the ground lies deeper under the water than a cat can wade:
-// a pit dug below the waterline is a lake.
+// Nobody walks on a blocking ground type - nor where the ground lies deeper under the water than a cat can wade (a pit
+// dug below the waterline is a lake), nor on a slope too steep to climb (a cliff is a wall: the way up is a ramp).
 export function isBlocked(map, x, z) {
-  return groundAt(map, x, z)?.block === true || (!!map.ground.heights && heightAt(map, x, z) < WATER_LEVEL - WADE);
+  if (groundAt(map, x, z)?.block === true) return true;
+  return !!map.ground.heights && (heightAt(map, x, z) < WATER_LEVEL - WADE || slopeAt(map, x, z) > MAX_SLOPE);
 }
 
 // The same ground when it already reaches radius + 20; otherwise a NEW, larger one (same cell, smallest odd size that does):
@@ -170,6 +171,8 @@ export function resizeGround(ground, radius) {
 // The sea stands at this height everywhere: around the island, and in every hollow that reaches below it.
 export const WATER_LEVEL = -1.2;
 const WADE = 0.5;   // how deep under the water the ground may lie and still be walked on
+// The steepest ground that can be walked on, as rise over run: 1 is 45 degrees.
+export const MAX_SLOPE = 1;
 
 // ---- relief: one height per ground vertex, in world units on a 0.1 grid. The surface between the vertices is that of
 // the terrain mesh (two triangles per cell, split along the diagonal from (ix, iz + 1) to (ix + 1, iz)), so whatever
@@ -185,6 +188,18 @@ export function heightAt(map, x, z) {
   const ix = Math.min(last - 1, Math.floor(gx)), iz = Math.min(last - 1, Math.floor(gz)), fx = gx - ix, fz = gz - iz;
   const i = iz * g.size + ix, a = h[i], d = h[i + 1], b = h[i + g.size], c = h[i + g.size + 1];
   return fx + fz <= 1 ? a + fx * (d - a) + fz * (b - a) : c + (1 - fx) * (b - c) + (1 - fz) * (d - c);
+}
+
+// How steep the ground is under a world point, as rise over run (0 = level, 1 = 45 degrees): the slope of the triangle
+// of the terrain mesh the point lies on.
+export function slopeAt(map, x, z) {
+  const g = map.ground, h = g.heights;
+  if (!h) return 0;
+  const last = g.size - 1, mid = last / 2;
+  const gx = Math.max(0, Math.min(last, x / g.cell + mid)), gz = Math.max(0, Math.min(last, z / g.cell + mid));
+  const ix = Math.min(last - 1, Math.floor(gx)), iz = Math.min(last - 1, Math.floor(gz));
+  const i = iz * g.size + ix, a = h[i], d = h[i + 1], b = h[i + g.size], c = h[i + g.size + 1];
+  return gx - ix + gz - iz <= 1 ? Math.hypot(d - a, b - a) / g.cell : Math.hypot(c - b, c - d) / g.cell;
 }
 
 // Where a ray meets the ground: { x, y, z } | null. origin and dir are { x, y, z }; dir need not be normalised.

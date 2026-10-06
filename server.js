@@ -541,6 +541,15 @@ function clampWorld(o, margin) {
   if (d > max) { o.x *= max / d; o.z *= max / d; }
 }
 
+// A monster that would step onto ground nobody can walk on - water, lava, a lake - slides along its edge instead, as a
+// player does. One that already stands there (its home was flooded by a map change) may walk out.
+function keepAshore(m, fromX, fromZ) {
+  if (!isBlocked(map, m.x, m.z) || isBlocked(map, fromX, fromZ)) return;
+  if (!isBlocked(map, m.x, fromZ)) m.z = fromZ;
+  else if (!isBlocked(map, fromX, m.z)) m.x = fromX;
+  else { m.x = fromX; m.z = fromZ; }
+}
+
 // squared distance from point p to segment a-b
 function segDist2(px, pz, ax, az, bx, bz) {
   const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
@@ -694,8 +703,10 @@ function updateMob(m, dt) {
   const damp = Math.exp(-6 * dt);
   if (now < m.stunUntil || now < m.sleepUntil) {   // out of action: no thinking, no moving, no attacking
     m.swing = null;
+    const fromX = m.x, fromZ = m.z;
     m.x += m.kx * dt; m.z += m.kz * dt;
     m.kx *= damp; m.kz *= damp;
+    keepAshore(m, fromX, fromZ);
     pushOutOfSafe(map, m, m.r + 0.5);   // a blow can knock it into a safe region; it does not stay there
     return;
   }
@@ -760,10 +771,12 @@ function updateMob(m, dt) {
     }
   }
 
+  const fromX = m.x, fromZ = m.z;
   m.x += (mx * speed + m.kx) * dt;
   m.z += (mz * speed + m.kz) * dt;
   m.kx *= damp; m.kz *= damp;
   clampWorld(m, m.r);
+  keepAshore(m, fromX, fromZ);
   // Safe regions eject monsters rather than stop them at the edge: one that got further in than a tick of travel - by a
   // knockback, a shove from its neighbours or a bad home - would otherwise stand there as a free punching bag.
   pushOutOfSafe(map, m, m.r + 0.5);
