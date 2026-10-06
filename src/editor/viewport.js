@@ -4,6 +4,8 @@ import { createLighting } from '../map/lighting.js';
 import { createComposer } from '../postfx.js';
 import { GROUND_TYPES, LAYER_OF, LIMITS, MOODS, cellIndex, groundIx, groundX, moodAt, qPos, regionLabel, shapeBounds } from '../map/format.js';
 import { reportOnce } from './actions.js';
+import { createDrape, discGeometry, plateGeometry } from './drape.js';
+import { rayRelief } from './relief.js';
 import { chordLabel } from './keymap.js';
 import { pivotOf, snapPoint } from './tools/common.js';
 
@@ -16,6 +18,9 @@ import { pivotOf, snapPoint } from './tools/common.js';
 //   what a click there would pick. A tool that got pointerDown always gets pointerUp.
 // - It is the ONLY caller of the MapView mutators: store and ui events are turned into view calls here and nowhere else.
 // - It draws what belongs to no tool: grid, map boundary, colliders, selection boxes, the pivot, the brush ring.
+// - It knows the relief: the ground point of a Hit is where the cursor's ray meets the TERRAIN (Hit.y is its height),
+//   the camera orbits a point ON the ground, and every ground overlay lies on the hills - the grid as a second mesh
+//   over the terrain's own geometry, the collider shapes through the drape (drape.js), the brush ring vertex by vertex.
 //
 // Other modules reach it as ctx.viewport. What the contract does not name but the page needs is at the end of the
 // returned object: pickPoint and setCursor (the renderers behind ui.pickPoint / ui.setCursor), modal / cancelModal
@@ -40,7 +45,10 @@ const ON_TOP = { depthTest: false, depthWrite: false, transparent: true, toneMap
 const BLOCK = GROUND_TYPES.map((t) => t.block === true);
 // the 12 edges of a box as pairs of corners; corner i has max x / y / z where bit 0 / 1 / 2 of i is set
 const EDGES = [0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 3, 4, 6, 5, 7, 0, 4, 1, 5, 2, 6, 3, 7];
-const RING_SEGMENTS = 96;
+const RING_SEGMENTS = 128;
+const FILL_SEGMENTS = 48, FILL_RINGS = 10;   // the faint disc inside the brush ring
+const BRUSH_LIFT = 0.03;        // the brush lies this far over the ground it is draped on
+const EYE_ROOM = 1;             // the camera never comes closer to the ground under it than this
 const NO_PICK = Object.freeze({ item: null, kind: null, handle: null });
 const MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 
@@ -100,11 +108,14 @@ function ringGeometry() {
   g.setIndex(index);
   return g;
 }
-function writeRing(array, o, r0, r1) {
+// One band r0 .. r1 around (x, z) in world coordinates, every vertex on the ground (`height`) under it.
+function writeRing(array, o, x, z, r0, r1, height) {
   for (let i = 0; i <= RING_SEGMENTS; i++) {
     const a = i / RING_SEGMENTS * TAU, c = Math.cos(a), s = Math.sin(a);
-    array[o++] = c * r0; array[o++] = 0; array[o++] = s * r0;
-    array[o++] = c * r1; array[o++] = 0; array[o++] = s * r1;
+    for (const r of [r0, r1]) {
+      const px = x + c * r, pz = z + s * r;
+      array[o++] = px; array[o++] = height(px, pz) + BRUSH_LIFT; array[o++] = pz;
+    }
   }
   return o;
 }
@@ -133,6 +144,7 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   let tipTimer = 0, tipText = null, readoutText = null, progressText = null;
   let pickFrame = -1, pickResult = NO_PICK, pickX = 0, pickY = 0;
   let selDirty = true, pivot = null, groundVersion = 0;
+  let orbitY = 0, lag = 0;   // the height of the point the camera orbits; how far it still is from the ground under it
   let colVersion = -1, colGround = -1;
   let brushDirty = false, actionsDone = false, loads = 0;
   let hiddenModels = new Set(ui.hiddenModels ?? []);
@@ -168,6 +180,8 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   const view = new MapView(scene, { editor: true });
   view.onChange = () => invalidate();   // a queued model arrived: the view cannot ask for a frame itself
   ctx.view ??= view;
+  const drape = createDrape();          // the relief for everything that lies on the ground (drape.js)
+  const groundY = (x, z) => drape.height(x, z);
 
   const overlay = new THREE.Group();    // tool-owned temporary visuals
   overlay.name = 'tool-overlay';
@@ -183,7 +197,8 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   const V = new THREE.Vector3(), V2 = new THREE.Vector3(), M = new THREE.Matrix4();
   const BOX = new THREE.Box3(), BOX2 = new THREE.Box3();
-  const G1 = { x: 0, z: 0, on: false }, S1 = { x: 0, y: 0, front: false };
+  const G1 = { x: 0, y: 0, z: 0, on: false }, S1 = { x: 0, y: 0, front: false };
+  const FROM = { x: 0, y: 0, z: 0 };
   const CORNERS = Array.from({ length: 8 }, () => new THREE.Vector3());
 
   // ---------------------------------------------------------------- core overlays
@@ -192,17 +207,21 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     uniforms: { uRadius: { value: 260 }, uGrid: { value: 1 }, uBoundary: { value: 1 } },
     vertexShader: GRID_VERTEX, fragmentShader: GRID_FRAGMENT,
   });
-  const gridMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2), gridMaterial);
+  // The grid is drawn on the terrain's own triangles (view.groundGeometry, taken up in updateVisuals): the same
+  // vertices, so it lies on every hill exactly and the depth rule of the ground overlays is all it needs.
+  const gridBlank = new THREE.BufferGeometry();
+  const gridMesh = new THREE.Mesh(gridBlank, gridMaterial);
   gridMesh.renderOrder = 1;
+  gridMesh.frustumCulled = false;       // the view reshapes that geometry under the brush: no bounds to keep right
   gridMesh.visible = false;
 
-  const colliderMaterial = new THREE.MeshBasicMaterial({ color: 0xff3355, transparent: true, opacity: 0.3, ...GROUND_OVERLAY });
+  const colliderMaterial = drape.apply(new THREE.MeshBasicMaterial({ color: 0xff3355, transparent: true, opacity: 0.3, ...GROUND_OVERLAY }));
   const colliderGroup = new THREE.Group();
   colliderGroup.visible = false;
-  const colliders = {   // three instanced sets: collider circles, collider boxes, blocked ground vertices
-    circle: { mesh: null, geometry: new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2) },
-    box: { mesh: null, geometry: new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2) },
-    cell: { mesh: null, geometry: new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2) },
+  const colliders = {   // three instanced sets: collider circles, collider boxes, blocked ground vertices - cut fine enough to bend over a slope
+    circle: { mesh: null, geometry: discGeometry(24, 3) },
+    box: { mesh: null, geometry: plateGeometry(8) },
+    cell: { mesh: null, geometry: plateGeometry(2) },
   };
 
   // every selection box in ONE LineSegments, drawn over the scene
@@ -221,8 +240,11 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   const brushGroup = new THREE.Group();
   brushGroup.visible = false;
   const brushRing = new THREE.Mesh(ringGeometry(), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, ...GROUND_OVERLAY }));
-  const brushFill = new THREE.Mesh(new THREE.CircleGeometry(1, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, ...GROUND_OVERLAY }));
-  brushRing.frustumCulled = false;
+  // both are rewritten in world coordinates for every position of the brush, vertex by vertex on the ground under it
+  const brushDisc = discGeometry(FILL_SEGMENTS, FILL_RINGS), brushUnit = brushDisc.attributes.position.array.slice();
+  brushDisc.attributes.position.setUsage(THREE.DynamicDrawUsage);
+  const brushFill = new THREE.Mesh(brushDisc, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, ...GROUND_OVERLAY }));
+  brushRing.frustumCulled = brushFill.frustumCulled = false;
   brushRing.renderOrder = 4;
   brushFill.renderOrder = 3;
   brushGroup.add(brushFill, brushRing);
@@ -278,7 +300,13 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     rig.yaw = wrap(rig.yaw);
     if (d > max) { rig.x *= max / d; rig.z *= max / d; }
     const cp = Math.cos(rig.pitch);
-    camera.position.set(rig.x + rig.distance * cp * Math.sin(rig.yaw), rig.distance * Math.sin(rig.pitch), rig.z + rig.distance * cp * Math.cos(rig.yaw));
+    // The camera orbits a point ON the ground: over a hill it rides up with it instead of ending up inside.
+    // `lag` is what an edit of the ground left between that point and the ground (see settle()).
+    orbitY = groundY(rig.x, rig.z) + lag;
+    camera.position.set(rig.x + rig.distance * cp * Math.sin(rig.yaw), orbitY + rig.distance * Math.sin(rig.pitch), rig.z + rig.distance * cp * Math.cos(rig.yaw));
+    // ... and a hill between the camera and its target lifts the camera over it: a ray that starts under the ground
+    // would find nothing but its own start
+    camera.position.y = Math.max(camera.position.y, groundY(camera.position.x, camera.position.z) + EYE_ROOM);
     // built from the angles, not with lookAt: straight down (the overhead view) has no "up" to look along.
     // yaw 0 looks north (-Z) with east (+X) to the right, like the minimap
     camera.rotation.set(-rig.pitch, rig.yaw, 0, 'YXZ');
@@ -293,6 +321,20 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     cameraMoved = true;   // the next frame re-aims the pointer and resizes what is measured in pixels
     pickFrame = -1;
     invalidate();
+  }
+
+  // The ground under the orbit point moved (a sculpt stroke, an undo): the camera stays where it is - a view that
+  // jumps while the brush is down is a brush nobody can aim - and `lag` remembers how far its orbit point now is from
+  // the ground. settle() takes that up once the button is released, in a fraction of a second.
+  function keepOrbit() {
+    lag = orbitY - groundY(rig.x, rig.z);
+    if (lag !== 0) invalidate();
+  }
+  function settle(dt) {
+    if (lag === 0 || press?.kind === 'tool') return;
+    lag *= Math.exp(-Math.max(dt, 1 / 240) * 8);
+    if (Math.abs(lag) < 0.01) lag = 0;
+    applyRig();
   }
 
   // A camera move in progress: { t, from, to } - `to` holds only the rig keys that move, each can be taken out alone.
@@ -449,16 +491,32 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     RAYCASTER.setFromCamera(NDC, camera);   // also sets raycaster.camera, which view.pickObject measures pixels with
     return RAYCASTER.ray;
   }
-  // Where a ray meets the ground plane y = 0. The terrain mesh is never raycast.
+  // Where a ray meets the ground: the relief of the map (rayRelief walks the triangles of the height grid; the terrain
+  // MESH is never raycast), and on a map without a hill simply the plane y = 0, to the last digit what it always was.
   function groundOf(ray, out) {
-    const p = ray.intersectPlane(GROUND, V);
-    if (p && Math.hypot(p.x - ray.origin.x, p.y - ray.origin.y, p.z - ray.origin.z) <= MISS) {
-      out.x = p.x; out.z = p.z; out.on = true;
-      return out;
+    const o = ray.origin, d = ray.direction, map = store.map;
+    if (map && drape.hilly) {
+      // nothing is higher than the highest vertex: the air above it is skipped in one step
+      const top = drape.top + 0.5, skip = o.y > top ? (d.y < 0 ? (o.y - top) / -d.y : Infinity) : 0;
+      if (skip < MISS) {
+        FROM.x = o.x + d.x * skip; FROM.y = o.y + d.y * skip; FROM.z = o.z + d.z * skip;
+        const p = rayRelief(map, FROM, d, MISS - skip);
+        if (p) {
+          out.x = p.x; out.y = p.y; out.z = p.z; out.on = true;
+          return out;
+        }
+      }
+    } else {
+      const p = ray.intersectPlane(GROUND, V);
+      if (p && Math.hypot(p.x - o.x, p.y - o.y, p.z - o.z) <= MISS) {
+        out.x = p.x; out.y = 0; out.z = p.z; out.on = true;
+        return out;
+      }
     }
-    const l = Math.hypot(ray.direction.x, ray.direction.z);
-    out.x = ray.origin.x + (l > 1e-9 ? ray.direction.x / l * MISS : 0);
-    out.z = ray.origin.z + (l > 1e-9 ? ray.direction.z / l * MISS : 0);
+    const l = Math.hypot(d.x, d.z);
+    out.x = o.x + (l > 1e-9 ? d.x / l * MISS : 0);
+    out.z = o.z + (l > 1e-9 ? d.z / l * MISS : 0);
+    out.y = groundY(out.x, out.z);
     out.on = false;
     return out;
   }
@@ -494,7 +552,7 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     let picked = null;
     const resolve = () => picked ?? (picked = pickAt(sx, sy, fresh, hit));
     const hit = {
-      x: g.x, z: g.z, onGround: g.on,
+      x: g.x, z: g.z, y: g.y, onGround: g.on,   // y: the height of the ground there
       ix: inside ? groundIx(ground, g.x) : -1, iz: inside ? groundIx(ground, g.z) : -1,
       sx, sy,
       get item() { return resolve().item; },
@@ -508,9 +566,9 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   }
   // A hit for a known ground point: nothing is picked.
   function hitWorld(x, z) {
-    const ground = store.map?.ground, inside = !!ground && cellIndex(ground, x, z) >= 0;
-    const p = toScreen(x, 0, z, S1);
-    return { x, z, onGround: true, ix: inside ? groundIx(ground, x) : -1, iz: inside ? groundIx(ground, z) : -1, sx: p.x, sy: p.y, item: null, kind: null, handle: null };
+    const ground = store.map?.ground, inside = !!ground && cellIndex(ground, x, z) >= 0, y = groundY(x, z);
+    const p = toScreen(x, y, z, S1);
+    return { x, z, y, onGround: true, ix: inside ? groundIx(ground, x) : -1, iz: inside ? groundIx(ground, z) : -1, sx: p.x, sy: p.y, item: null, kind: null, handle: null };
   }
 
   function pickAt(sx, sy, fresh, hit) {
@@ -543,7 +601,7 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     if (m.handle) return true;
     if (typeof m.priority === 'number') return m.priority <= 3;
     if (m.kind === 'region' || !Number.isFinite(m.item?.x)) return false;
-    const p = toScreen(m.item.x, 0, m.item.z, S1);
+    const p = toScreen(m.item.x, groundY(m.item.x, m.item.z), m.item.z, S1);
     return p.front && Math.hypot(p.x - sx, p.y - sy) <= PIN_PX + 0.5;
   }
 
@@ -607,13 +665,16 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   // the point that stands for an item in a box select: an object's middle, a marker's centre
   function anchorOf(item, kind, out) {
     if (kind === 'object') {
-      const b = modelBox(item.m);
-      return out.set(item.x, item.y + (b ? (b.max.y - b.min.y) * 0.5 * item.s * item.sy : 0.5), item.z);
+      const b = modelBox(item.m);   // (an object's y is counted from the ground it stands on)
+      return out.set(item.x, groundY(item.x, item.z) + item.y + (b ? (b.max.y - b.min.y) * 0.5 * item.s * item.sy : 0.5), item.z);
     }
     const a = markers('anchorOf', item);
-    if (a && Number.isFinite(a.x) && Number.isFinite(a.z)) return out.set(a.x, a.y ?? 0, a.z);
-    if (kind === 'region') { const b = shapeBounds(item.shape); return out.set((b.minX + b.maxX) / 2, 0, (b.minZ + b.maxZ) / 2); }
-    return out.set(item.x, 0, item.z);
+    if (a && Number.isFinite(a.x) && Number.isFinite(a.z)) return out.set(a.x, a.y ?? groundY(a.x, a.z), a.z);
+    if (kind === 'region') {
+      const b = shapeBounds(item.shape), x = (b.minX + b.maxX) / 2, z = (b.minZ + b.maxZ) / 2;
+      return out.set(x, groundY(x, z), z);
+    }
+    return out.set(item.x, groundY(item.x, item.z), item.z);
   }
   function itemsInRect(x0, y0, x1, y1, kinds) {
     const map = store.map, out = [];
@@ -648,11 +709,11 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     const b = markers('boundsOf', item, target);
     if (b?.isBox3 && !b.isEmpty()) return b === target ? target : target.copy(b);
     if (kind === 'region') {
-      const s = shapeBounds(item.shape);
-      return target.set(V.set(s.minX, 0, s.minZ), V2.set(s.maxX, 0.1, s.maxZ));
+      const s = shapeBounds(item.shape), y = groundY((s.minX + s.maxX) / 2, (s.minZ + s.maxZ) / 2);
+      return target.set(V.set(s.minX, y, s.minZ), V2.set(s.maxX, y + 0.1, s.maxZ));
     }
-    const r = Math.max(item.r ?? 0, 0.6);
-    return target.set(V.set(item.x - r, 0, item.z - r), V2.set(item.x + r, 0.1, item.z + r));
+    const r = Math.max(item.r ?? 0, 0.6), y = groundY(item.x, item.z);
+    return target.set(V.set(item.x - r, y, item.z - r), V2.set(item.x + r, y + 0.1, item.z + r));
   }
   function boundsOfItems(items, target) {
     target.makeEmpty();
@@ -1154,7 +1215,8 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     set.mesh.instanceMatrix.needsUpdate = true;
     return set.mesh.instanceMatrix.array;
   }
-  // What blocks: the collider circles and boxes of the view, and every ground vertex of a blocking type.
+  // What blocks: the collider circles and boxes of the view, and every ground vertex of a blocking type. The shapes
+  // are laid out on y = 0; their material lifts every vertex onto the ground (the drape).
   function rebuildColliders() {
     const map = store.map;
     colVersion = view.obstaclesVersion;
@@ -1238,12 +1300,18 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     brushDirty = false;
     const { x, z, radius: r, inner } = brushState, array = brushRing.geometry.attributes.position.array;
     // two pixels wide at any zoom, but never a ring so fat that it hides what a small brush points at
-    const t = clamp(unitsPerPixel(x, 0, z) * 2, 0.02, r * 0.3), second = inner > 0 && inner < r - t * 2;
-    const o = writeRing(array, 0, r - t, r);
-    writeRing(array, o, second ? inner - t * 0.6 : 0, second ? inner : 0);
+    const t = clamp(unitsPerPixel(x, groundY(x, z), z) * 2, 0.02, r * 0.3), second = inner > 0 && inner < r - t * 2;
+    // the ring and the disc inside it lie ON the terrain: a ring through the middle of a hill would show where the
+    // brush is on the map, not what it is about to touch
+    const o = writeRing(array, 0, x, z, r - t, r, groundY);
+    writeRing(array, o, x, z, second ? inner - t * 0.6 : 0, second ? inner : 0, groundY);
     brushRing.geometry.attributes.position.needsUpdate = true;
-    brushGroup.position.set(x, 0, z);
-    brushFill.scale.set(r, 1, r);
+    const fill = brushDisc.attributes.position.array;
+    for (let i = 0; i < fill.length; i += 3) {
+      const px = x + brushUnit[i] * r, pz = z + brushUnit[i + 2] * r;
+      fill[i] = px; fill[i + 1] = groundY(px, pz) + BRUSH_LIFT; fill[i + 2] = pz;
+    }
+    brushDisc.attributes.position.needsUpdate = true;
   }
 
   // Everything the viewport draws itself, brought up to date right before a frame is drawn.
@@ -1253,7 +1321,9 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
       lighting.set(moodAt(map, rig.x, rig.z));
       lighting.follow(rig.x, rig.z, clamp(rig.distance * 0.6, 30, 300));   // the whole shadow rig scales with the view
     }
-    gridMesh.visible = !!map && (!!o.grid || !!o.boundary);
+    const terrain = view.groundGeometry;   // another object after the grid changed size
+    if (terrain && gridMesh.geometry !== terrain) gridMesh.geometry = terrain;
+    gridMesh.visible = !!map && !!terrain && (!!o.grid || !!o.boundary);
     gridMaterial.uniforms.uGrid.value = o.grid ? 1 : 0;
     gridMaterial.uniforms.uBoundary.value = o.boundary ? 1 : 0;
     colliderGroup.visible = !!map && !!o.colliders;
@@ -1265,9 +1335,10 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     const mark = !!pivot && !ctx.gizmo?.visible;
     pivotMark.visible = mark;
     if (mark) {
-      pivotMark.position.set(pivot.x, 0, pivot.z);
+      const y = groundY(pivot.x, pivot.z);
+      pivotMark.position.set(pivot.x, y, pivot.z);
       pivotMark.quaternion.copy(camera.quaternion);
-      pivotMark.scale.setScalar(Math.max(unitsPerPixel(pivot.x, 0, pivot.z), 1e-6));
+      pivotMark.scale.setScalar(Math.max(unitsPerPixel(pivot.x, y, pivot.z), 1e-6));
     }
     drawBrush();
   }
@@ -1312,6 +1383,7 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
       keyPan(dt);
     }
     stepAnim(dt);
+    settle(dt);
     if (cameraMoved) {
       cameraMoved = false;
       brushDirty = true;
@@ -1401,7 +1473,6 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   function fitMap() {
     const R = radius();
     gridMaterial.uniforms.uRadius.value = R;
-    gridMesh.scale.set(R + 8, 1, R + 8);
     applyRig();   // the limits of distance and target follow the radius
   }
 
@@ -1413,6 +1484,9 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     hoverItem = hoverKind = null;   // the view and the markers forget their hover themselves
     showTip(null);
     groundVersion++;
+    drape.sync(map);
+    lag = 0;
+    brushDirty = true;
     fitMap();
     if (!homed) {   // the first map: start at the start point. A revert or an import keeps the camera where it is
       homed = true;
@@ -1455,10 +1529,18 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     if (props.includes('radius') || props.includes('foliage') || props.includes('ground')) {
       view.refresh();
       groundVersion++;
+      if (props.includes('ground')) { drape.sync(map); keepOrbit(); }   // another ground object, with its own heights
+      brushDirty = true;
       fitMap();
     } else if (change.ground) {
       view.repaintGround(change.ground.ix0, change.ground.iz0, change.ground.ix1, change.ground.iz1);
       groundVersion++;
+      if (change.ground.relief) {
+        // the shape of the ground moved: whatever lies on it follows, and what the cursor points at is another point
+        drape.sync(map);
+        keepOrbit();
+        brushDirty = true;
+      }
     }
     if (hoverItem && store.kindOf(hoverItem) === null) setHover(null, null);
     selDirty = true;   // a selected item may have moved; a few hundred boxes are cheaper than finding out
@@ -1559,7 +1641,9 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     view.dispose();
     lighting.dispose();
     for (const set of Object.values(colliders)) { set.mesh?.dispose(); set.geometry.dispose(); }
+    gridMesh.geometry = gridBlank;   // the terrain's geometry is the view's, and gone with it
     for (const mesh of [gridMesh, selLines, pivotMark, brushRing, brushFill]) { mesh.geometry.dispose(); mesh.material.dispose(); }
+    drape.dispose();
     colliderMaterial.dispose();
     renderer.dispose();
     dom.remove(); readoutEl.remove(); tipEl.remove();
@@ -1581,6 +1665,8 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     get info() { return stats; },
     tick,
     // ---- beyond §10.8: what the page needs from the owner of the canvas
+    drape,                                                 // the relief for ground overlays: drape.apply(material), drape.height(x, z)
+    groundY,                                               // (x, z) -> the height of the ground there
     pickPoint, setCursor,                                  // the renderers behind ui.pickPoint / ui.setCursor (attached above)
     get modal() { return modal ? modal.type : null; },     // 'grab' | 'pick' | null - the keymap skips the tool while one is open
     cancelModal,                                           // Escape: -> true when a modal was open

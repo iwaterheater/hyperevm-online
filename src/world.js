@@ -20,7 +20,10 @@ export function createWorld(scene, map) {
   function update(time, dt, x, z) {
     if ((moodT -= dt) <= 0) { moodT = MOOD_EVERY; mood = moodAt(map, x, z); }
     lighting.approach(mood, 1 - Math.exp(-dt * MOOD_RATE));
-    lighting.follow(x, z);   // the shadow frustum follows the player
+    lighting.follow(x, z);   // the shadow frustum follows the player ...
+    const y = heightAt(x, z);   // ... up the hills too: the rig is built around y = 0, so it is lifted to the player's ground
+    lighting.sun.position.y += y;
+    lighting.sun.target.position.y = y;
     focus.x = x; focus.z = z;
     view.update(time, dt, focus);
   }
@@ -40,5 +43,8 @@ export function createWorld(scene, map) {
   }
 
   snapMood(map.start.x, map.start.z);
-  return { view, ready, update, collide, snapMood };
+  // The height of the ground under a world point: everything that walks adds it to its own height.
+  const heightAt = (x, z) => view.heightAt(x, z);
+
+  return { view, ready, update, collide, snapMood, heightAt };
 }

@@ -66,7 +66,8 @@ const GROUP = { key: 'g', label: 'Group', type: 'group', pattern: GROUP_PATTERN,
 const SCHEMA = {
   object: [
     { key: 'm', label: 'Model', type: 'model' },
-    X, { key: 'y', type: 'number', step: 0.1, min: L.objectY[0], max: L.objectY[1] }, Z,
+    // y is counted from the ground under the object: on a hill it stands on the hill at y = 0
+    X, { key: 'y', type: 'number', step: 0.1, min: L.objectY[0], max: L.objectY[1], title: 'Height above the ground under the object (0 = standing on it)' }, Z,
     RY, { key: 'rx', label: 'Tilt X', type: 'angle' }, { key: 'rz', label: 'Tilt Z', type: 'angle' },
     { key: 's', label: 'Scale', type: 'number', min: L.scale[0], max: L.scale[1], step: 0.05, digits: 3 },
     { key: 'sy', label: 'Height ×', type: 'number', min: L.scale[0], max: L.scale[1], step: 0.05, digits: 3 },

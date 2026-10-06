@@ -1,13 +1,14 @@
 import { h, button, selectField, rafThrottle } from '../ui/dom.js';
 import { hintFor } from '../keymap.js';
 import { SNAP_STEPS } from '../state.js';
-import { GROUND_TYPES, regionIndex, regionLabel, spawnCount } from '../../map/format.js';
+import { GROUND_TYPES, heightAt, regionIndex, regionLabel, spawnCount } from '../../map/format.js';
 
 // The status bar (#status): what is under the cursor, what is selected, what the map holds, how the last frame did -
 // and the switches a mapper reaches for all the time: the snap toggle with its step, the issue count, the hotkey sheet.
 // It only shows state and asks for changes through `ui` and actions; it never writes the map.
 //
-// Left to right: save state and map revision · issues · cursor x, z · ground type · region · selection · totals ·
+// Left to right: save state and map revision · issues · cursor x, z and the height of the ground there · ground type ·
+// region · selection · totals ·
 // the status text (ui.setStatus) · snap · fps, triangles, draw calls · help.
 
 const PERF_MS = 250;    // the frame numbers change on every frame: four readings a second are plenty
@@ -39,7 +40,7 @@ export default function mount(el, ctx) {
   issues.classList.add('issues', 'flat');
 
   // ---- under the cursor
-  const cursor = text('cursor ui-mono', 'Cursor position on the ground (x east, z south)');
+  const cursor = text('cursor ui-mono', 'Cursor position on the ground (x east, z south) and the height of the ground there');
   const ground = text('ground', 'Ground type under the cursor');
   const region = text('region', 'Region under the cursor (the one that wins there)');
 
@@ -109,12 +110,13 @@ export default function mount(el, ctx) {
   function syncCursor() {
     const hit = ui.cursor, map = store.map;
     if (!hit || !map || hit.onGround === false || !Number.isFinite(hit.x) || !Number.isFinite(hit.z)) {
-      put(cursor, 'x —  z —');
+      put(cursor, 'x —  z —  h —');
       put(ground, '');
       put(region, '');
       return;
     }
-    put(cursor, `x ${coord(hit.x)}  z ${coord(hit.z)}`);
+    // the height is read from the map, not from the Hit: the ground may have moved under a cursor that rests (a sculpt stroke)
+    put(cursor, `x ${coord(hit.x)}  z ${coord(hit.z)}  h ${heightAt(map, hit.x, hit.z).toFixed(1)}`);
     const onGrid = hit.ix >= 0 && hit.iz >= 0;
     const type = onGrid ? GROUND_TYPES[map.ground.cells[hit.iz * map.ground.size + hit.ix]] : null;
     put(ground, onGrid ? (type?.name ?? 'Unknown ground') + (type?.block ? ' (blocks)' : '') : 'Off the ground grid');

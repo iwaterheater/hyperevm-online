@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { GROUND_TYPES, NPC_RADIUS, groundHalf, groundX, cellHash, isBlocked } from './format.js';
+import { GROUND_TYPES, NPC_RADIUS, WATER_LEVEL, groundHalf, groundX, cellHash, isBlocked, heightAt } from './format.js';
 import { modelInfo, colliderOf, glowOf } from './catalog.js';
 import { builtinModel } from './builtin.js';
 import { Grass } from './grass.js';
@@ -13,6 +13,7 @@ import { Grass } from './grass.js';
 // An object is addressed by reference: the very object inside map.objects.
 
 const HALF_PI = Math.PI / 2;
+const LIFTED = [];               // scratch: the objects whose ground moved
 const MAX_LOADS = 8;            // model files in flight at once
 const GRID = 8;                 // cell of the collision grid and of the origin index, world units
 const BIG = 1024;               // a collider over more grid cells than this is kept in a list of its own
@@ -337,7 +338,7 @@ export class MapView {
       n++;
     }
     this.focus = focus;
-    this.grass.update(time, this.editor ? null : focus);
+    this.grass.update(time, this.editor || !focus ? null : focus, focus ? this.heightAt(focus.x, focus.z) : 0);
     this._cull();
     return this.dirty.size > 0 || this.waiting > 0;
   }
@@ -413,7 +414,7 @@ export class MapView {
     this._file(obj, slot);
     if (slot.i < 0) return;
     const mesh = slot.batch.mesh;
-    compose(obj, 0, 0, M).toArray(mesh.instanceMatrix.array, slot.i * 16);
+    compose(obj, this._gy(obj), 0, M).toArray(mesh.instanceMatrix.array, slot.i * 16);
     touch(mesh);
     this._collider(obj, slot);
     this._halo(obj, slot);
@@ -446,8 +447,9 @@ export class MapView {
 
   // ---------------------------------------------------------------- terrain
 
-  // After ground.cells changed inside the INCLUSIVE vertex rectangle: recolours it (and the rim that blends with it)
-  // and regrows the foliage of the tiles it touches. Heights and normals stay.
+  // After ground.cells or ground.heights changed inside the INCLUSIVE vertex rectangle: recolours it (and the rim that
+  // blends with it), reshapes it, puts the objects that stand on it back on the ground and regrows the foliage of the
+  // tiles it touches.
   repaintGround(ix0, iz0, ix1, iz1) {
     const t = this.terrain, g = this.map?.ground;
     if (!g || !t.mesh) return;
@@ -458,6 +460,12 @@ export class MapView {
     if (!(ix0 <= ix1 && iz0 <= iz1)) return;
     const gx0 = Math.max(0, ix0 - 1), gz0 = Math.max(0, iz0 - 1), gx1 = Math.min(last, ix1 + 1), gz1 = Math.min(last, iz1 + 1);
     this._paint(ix0, iz0, ix1, iz1);
+    this._shape(ix0, iz0, ix1, iz1);
+    // an object stands on the surface under its origin: every cell that touches a moved vertex may have lifted one
+    const x0 = groundX(g, gx0), x1 = groundX(g, gx1), z0 = groundX(g, gz0), z1 = groundX(g, gz1);
+    for (const obj of this.queryCircle((x0 + x1) / 2, (z0 + z1) / 2, Math.hypot(x1 - x0, z1 - z0) / 2 + g.cell, LIFTED)) {
+      if (obj.x >= x0 && obj.x <= x1 && obj.z >= z0 && obj.z <= z1) this._lift(obj);
+    }
     if (t.color.updateRanges.length > 64) this._uploadAll();   // nothing is drawing the ground: stop collecting ranges
     // one span of rows over the grown rectangle: the recomputed rim must reach the GPU too
     if (!t.full) t.color.addUpdateRange((gz0 * t.size + gx0) * 3, ((gz1 - gz0) * t.size + (gx1 - gx0) + 1) * 3);
@@ -498,14 +506,30 @@ export class MapView {
 
   // -> target: the instance matrix of the object (the pack scale is not in it: it is baked into the geometry).
   matrixOf(obj, target = new THREE.Matrix4()) {
-    return compose(obj, 0, 0, target);
+    return compose(obj, this._gy(obj), 0, target);
+  }
+
+  // The height of the ground under a world point (0 before a map is loaded). An object's own y is counted from it.
+  heightAt(x, z) {
+    return this.map ? heightAt(this.map, x, z) : 0;
+  }
+
+  // The geometry of the terrain mesh, or null before a map is loaded: vertex i is ground vertex i, with the heights
+  // the terrain is drawn at. Read-only, and another object after the grid changed size - the editor lays its ground
+  // overlays (grid, tints) over it as second meshes, which then lie on the ground exactly.
+  get groundGeometry() {
+    return this.terrain.mesh?.geometry ?? null;
+  }
+
+  _gy(obj) {
+    return this.map ? heightAt(this.map, obj.x, obj.z) : 0;
   }
 
   // -> target: the world bounding box; a 1-unit box at the object's position while its model is not loaded.
   boundsOf(obj, target = new THREE.Box3()) {
     const model = this._modelNow(obj.m);
-    if (!model) return target.setFromCenterAndSize(V.set(obj.x, obj.y, obj.z), S.set(1, 1, 1));
-    return target.copy(model.bounds).applyMatrix4(compose(obj, 0, 0, M));
+    if (!model) return target.setFromCenterAndSize(V.set(obj.x, obj.y + this._gy(obj), obj.z), S.set(1, 1, 1));
+    return target.copy(model.bounds).applyMatrix4(compose(obj, this._gy(obj), 0, M));
   }
 
   // The object under a ray -> { obj, point: Vector3, distance } | null. Only the view's own batches are tested, never
@@ -806,7 +830,7 @@ export class MapView {
     }
     const mesh = batch.mesh, i = slot.i = mesh.count++;
     batch.objs[i] = obj;
-    compose(obj, 0, 0, M).toArray(mesh.instanceMatrix.array, i * 16);
+    compose(obj, this._gy(obj), 0, M).toArray(mesh.instanceMatrix.array, i * 16);
     mesh.instanceColor?.array.set(TINT[slot.state], i * 3);
     touch(mesh);
     this._collider(obj, slot);
@@ -972,7 +996,7 @@ export class MapView {
       this.haloObjs[slot.halo] = obj;
     }
     const k = g.r / HALO_R;
-    M.makeScale(k, k, k).setPosition(g.x, g.y, g.z).toArray(this.halo.instanceMatrix.array, slot.halo * 16);
+    M.makeScale(k, k, k).setPosition(g.x, g.y + this._gy(obj), g.z).toArray(this.halo.instanceMatrix.array, slot.halo * 16);
     C.set(g.color).multiplyScalar(1.6).toArray(this.halo.instanceColor.array, slot.halo * 3);
     touch(this.halo);
   }
@@ -991,7 +1015,7 @@ export class MapView {
       }
       mesh.geometry = model.geometry;
       mesh.material = this._ghostMaterial(model.material, g.valid);
-      compose(obj, 0, 0, mesh.matrix);
+      compose(obj, this._gy(obj), 0, mesh.matrix);
       mesh.matrixWorldNeedsUpdate = true;
       mesh.visible = true;
     }
@@ -1116,9 +1140,10 @@ export class MapView {
       t.grain = grainTexture();
       t.mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ vertexColors: true, map: t.grain, roughness: 1 }));
       t.mesh.receiveShadow = true;
+      t.mesh.frustumCulled = false;   // the hills move under the brush: no bounds to keep right
       t.sea = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: 0x2f7d9c, roughness: 0.25 }));
       t.sea.rotation.x = -HALF_PI;
-      t.sea.position.y = -1.2;
+      t.sea.position.y = WATER_LEVEL;
       t.mesh.visible = t.sea.visible = this.layers.ground;
       this.root.add(t.mesh, t.sea);
     }
@@ -1150,17 +1175,8 @@ export class MapView {
         for (let tx = 0; tx < per; tx++) this.tiles.push({ tx, tz, x: mid(tx * TILE), z: mid(tz * TILE), flowers: null, wait: false });
       }
     }
-    if (t.radius !== this.map.radius) {
-      // the beach slopes into the sea beyond the radius
-      const pos = t.mesh.geometry.attributes.position, radius = t.radius = this.map.radius;
-      for (let i = 0; i < pos.count; i++) {
-        const r = Math.hypot(pos.getX(i), pos.getZ(i));
-        pos.setY(i, r > radius ? -Math.min(4, (r - radius) * 0.3) : 0);
-      }
-      pos.needsUpdate = true;
-      t.mesh.geometry.computeVertexNormals();
-      t.mesh.geometry.computeBoundingSphere();
-    }
+    t.radius = this.map.radius;
+    this._shape(0, 0, size - 1, size - 1);
     this._paint(0, 0, size - 1, size - 1);
     this._uploadAll();
     this._dirtyTiles(0, 0, size - 1, size - 1, false);
@@ -1187,6 +1203,39 @@ export class MapView {
         }
       }
     }
+  }
+
+  // Sets the height of the vertices inside the inclusive rectangle - the map's relief, and beyond the radius the beach
+  // that slopes into the sea - and the normals inside the rectangle grown by one vertex.
+  _shape(ix0, iz0, ix1, iz1) {
+    const t = this.terrain, { size, cell } = t, heights = this.map.ground.heights, radius = this.map.radius, last = size - 1;
+    const { position, normal } = t.mesh.geometry.attributes, p = position.array, n = normal.array;
+    for (let iz = iz0; iz <= iz1; iz++) {
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const i = iz * size + ix, r = Math.hypot(p[i * 3], p[i * 3 + 2]);
+        p[i * 3 + 1] = (heights ? heights[i] : 0) - (r > radius ? Math.min(4, (r - radius) * 0.3) : 0);
+      }
+    }
+    for (let iz = Math.max(0, iz0 - 1); iz <= Math.min(last, iz1 + 1); iz++) {
+      for (let ix = Math.max(0, ix0 - 1); ix <= Math.min(last, ix1 + 1); ix++) {
+        const i = iz * size + ix, l = Math.max(0, ix - 1), r = Math.min(last, ix + 1), u = Math.max(0, iz - 1), d = Math.min(last, iz + 1);
+        const dx = (p[(iz * size + r) * 3 + 1] - p[(iz * size + l) * 3 + 1]) / ((r - l) * cell);
+        const dz = (p[(d * size + ix) * 3 + 1] - p[(u * size + ix) * 3 + 1]) / ((d - u) * cell);
+        const k = 1 / Math.hypot(dx, 1, dz);
+        n[i * 3] = -dx * k; n[i * 3 + 1] = k; n[i * 3 + 2] = -dz * k;
+      }
+    }
+    position.needsUpdate = normal.needsUpdate = true;
+  }
+
+  // The ground under an object moved: its instance and its halo follow. What it blocks does not change.
+  _lift(obj) {
+    const slot = this.slots.get(obj);
+    if (!slot || slot.i < 0) return;
+    const mesh = slot.batch.mesh;
+    compose(obj, this._gy(obj), 0, M).toArray(mesh.instanceMatrix.array, slot.i * 16);
+    touch(mesh);
+    this._halo(obj, slot);
   }
 
   _uploadAll() {
@@ -1243,9 +1292,10 @@ export class MapView {
     for (let iz = tile.tz * TILE; iz < izEnd; iz++) {
       for (let ix = tile.tx * TILE; ix < ixEnd; ix++) {
         const type = GROUND_TYPES[cells[iz * size + ix]], f = type?.foliage, x = (ix - mid) * cell, z = (iz - mid) * cell;
-        const grows = !!f && map.foliage && x * x + z * z < reach * reach && !this._covered(x, z);
+        const dry = !map.ground.heights || map.ground.heights[iz * size + ix] > WATER_LEVEL + 0.1;   // nothing grows under the water
+        const grows = !!f && map.foliage && dry && x * x + z * z < reach * reach && !this._covered(x, z);
         // the blades take their density from the type's tuft count; the meadow (0.14 per square unit) is full grass
-        this.grass.write(ix, iz, grows ? f.tuft / GRASS_FULL : 0, type?.id === 'dry_grass' ? 1 : 0);
+        this.grass.write(ix, iz, grows ? f.tuft / GRASS_FULL : 0, type?.id === 'dry_grass' ? 1 : 0, map.ground.heights ? map.ground.heights[iz * size + ix] : 0);
         if (!grows) continue;
         const H = (salt) => cellHash(ix, iz, salt);
         // density is per square unit; the fraction of the expected count becomes a chance
@@ -1276,7 +1326,7 @@ export class MapView {
     const matrix = mesh.instanceMatrix.array;
     for (let i = 0; i < n; i++) {
       const s = data[i * 4 + 2], turn = flowers ? 0 : data[i * 4 + 3], cos = Math.cos(turn) * s, sin = Math.sin(turn) * s;
-      matrix.set([cos, 0, -sin, 0, 0, s, 0, 0, sin, 0, cos, 0, data[i * 4], 0, data[i * 4 + 1], 1], i * 16);
+      matrix.set([cos, 0, -sin, 0, 0, s, 0, 0, sin, 0, cos, 0, data[i * 4], heightAt(this.map, data[i * 4], data[i * 4 + 1]), data[i * 4 + 1], 1], i * 16);
       if (flowers) FLOWERS[data[i * 4 + 3]].toArray(mesh.instanceColor.array, i * 3);
     }
     mesh.count = n;
@@ -1301,14 +1351,14 @@ export class MapView {
     const { mesh, objs } = this.crystal, array = mesh.instanceMatrix.array;
     if (!mesh.count) return;
     if (!mesh.boundingSphere) {   // an edit dropped the bounds: measure them at rest, with room to bob
-      objs.forEach((obj, i) => compose(obj, 0, 0, M).toArray(array, i * 16));
+      objs.forEach((obj, i) => compose(obj, this._gy(obj), 0, M).toArray(array, i * 16));
       mesh.computeBoundingSphere();
       mesh.boundingSphere.radius += 0.2;
       mesh.computeBoundingBox();
       mesh.boundingBox.expandByScalar(0.2);
     }
     const dy = Math.sin(time * 1.5) * 0.2, dry = time * 0.7;
-    objs.forEach((obj, i) => compose(obj, dy, dry, M).toArray(array, i * 16));
+    objs.forEach((obj, i) => compose(obj, this._gy(obj) + dy, dry, M).toArray(array, i * 16));
     mesh.instanceMatrix.needsUpdate = true;
   }
 }

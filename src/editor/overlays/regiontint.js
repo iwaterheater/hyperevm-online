@@ -3,8 +3,9 @@
 // vertex has the colour of the fallback region: a gap between two regions is as visible as an overlap.
 //
 // One canvas of size x size pixels, pixel (ix, iz) = regionColor(map, regionAt(vertex)) at alpha 0.35:
-// - in the viewport it is ONE textured plane over the ground grid, a texel per vertex (NearestFilter: the tint shows
-//   the grid the game decides on, not a smoothed guess);
+// - in the viewport it is ONE textured mesh over the ground grid, a texel per vertex (NearestFilter: the tint shows
+//   the grid the game decides on, not a smoothed guess) - drawn on the terrain's own triangles (view.groundGeometry),
+//   so it lies on every hill;
 // - the minimap draws the same canvas over its own picture (ctx.overlays.regiontint.canvas, with `version` to know
 //   when it changed).
 // It is recomputed 150 ms after a region change - while a region is dragged that is a few times a second, each time a
@@ -18,7 +19,6 @@ import { runs } from '../raster.js';
 
 const ALPHA = 0.35;
 const DELAY = 150;           // ms from a region change to the recompute
-const Y = 0.02;              // just over the ground, under the markers' fills, discs and outlines
 const HEX = /^#[0-9a-f]{6}$/i;
 const UNKNOWN = [128, 128, 128];   // a colour that is no '#rrggbb' (a map that still has that error) is drawn grey
 
@@ -68,11 +68,15 @@ export default function create(ctx) {
   const material = new THREE.MeshBasicMaterial({
     transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false,
   });
-  // A unit plane laid on the ground, scaled to the grid. Its texture row 0 is the north edge (iz = 0) and its column 0
-  // the west edge (ix = 0): the vertex order of the ground itself.
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), material);
-  mesh.position.y = Y;
-  mesh.renderOrder = 0;
+  // The terrain's own geometry with the tint as its texture: the uv of that geometry runs 0 .. 1 from the first
+  // vertex to the last, row 0 of the picture being the north edge (iz = 0) and column 0 the west edge (ix = 0) - the
+  // vertex order of the ground itself. Drawn first of the ground overlays (render order), so the markers' fills,
+  // discs and outlines lie over it; the depth rule of the material keeps it clear of the terrain it shares its
+  // triangles with.
+  const blank = new THREE.BufferGeometry();
+  const mesh = new THREE.Mesh(blank, material);
+  mesh.renderOrder = -1;
+  mesh.frustumCulled = false;   // the view reshapes that geometry under the brush: no bounds to keep right
   mesh.visible = false;    // until there is a picture
   mesh.raycast = () => {};
   group.add(mesh);
@@ -87,7 +91,7 @@ export default function create(ctx) {
     stale = false;
     const map = store.map;
     if (!map) return;
-    const { size, cell } = map.ground;
+    const { size } = map.ground;
     if (!canvas || canvas.width !== size || canvas.height !== size) {
       // ONE canvas for the life of the page (the minimap may keep the reference); a map of another size resizes it
       canvas ??= document.createElement('canvas');
@@ -106,8 +110,10 @@ export default function create(ctx) {
     paintTint(map, image.data);
     g2d.putImageData(image, 0, 0);
     texture.needsUpdate = true;
-    // a texel covers the cell-sized square around its vertex, so the plane reaches half a cell beyond the outer vertices
-    mesh.scale.set(size * cell, 1, size * cell);
+    // A texel belongs to a vertex: the uv 0 .. 1 of the terrain is stretched to run from the middle of the first
+    // texel to the middle of the last, so vertex (ix, iz) reads the centre of texel (ix, iz).
+    texture.repeat.set((size - 1) / size, (size - 1) / size);
+    texture.offset.set(0.5 / size, 0.5 / size);
     mesh.visible = true;
     version++;
     viewport.invalidate();
@@ -155,6 +161,9 @@ export default function create(ctx) {
     // Every rendered frame. Timers of a background tab may come late: a frame that is drawn after the 150 ms brings
     // the tint up to date itself.
     update() {
+      // the terrain is another geometry after the grid changed size
+      const terrain = ctx.view?.groundGeometry;
+      if (terrain && mesh.geometry !== terrain) mesh.geometry = terrain;
       if (group.visible) settle();
     },
   };

@@ -3707,3 +3707,50 @@ CONTRACT: read the module before calling it. The differences that matter to step
       Shift+click swept up) or the one model the eyedropper took. §9.10 Regions panel: the level range has a cell of
       its own that never shrinks; a typed end goes to every selected region and the other end of each stays its own
       (`withEnd` in `fields.js`). `thumbs.js` draws through stand-ins it owns and disposes them with its renderer.
+16. **Relief (hills).** The world is no longer flat; each line overrides the section it names.
+    - §3.3 / §4.8 format: `ground.heights` is a `Float32Array` with one height per ground vertex, on a 0.1 grid within
+      `LIMITS.height` (−1 … 60); a file writes it as `ground.heights` (rows of tenths, runs as `value*count`) and
+      omits the key for a flat ground. `heightAt(map, x, z)` reads the surface as the terrain mesh draws it (two
+      triangles per cell, split along the diagonal from `(ix, iz + 1)` to `(ix + 1, iz)`), `qHeight` / `clampHeight`
+      put a number on the grid, `rayGround` walks a ray in half cells, `resizeGround` carries the heights along.
+      An object's `y` is its height ABOVE the ground under its origin (§2.3); spawns, chests, NPCs and the start
+      stand on the ground. `view.repaintGround` also reshapes the terrain inside the rectangle and seats the objects
+      there again; `view.heightAt(x, z)`; `view.groundGeometry` (additive) is the terrain's own BufferGeometry.
+    - §10.6 `cmd.heights(indices, values, label = 'Sculpt')`: indices into `ground.heights`, one height per index or
+      one number for all; written through `clampHeight`; a vertex that holds its value is skipped. It keeps ONE
+      record per vertex (the first `before`), merges with a following `heights` inside a group, has `unchanged`
+      (a stroke that ends where it began leaves no step) and gives a ground without the array one for the stroke
+      (undo removes it again). §10.5: `Change.ground` carries `relief: true` when heights moved inside the rectangle
+      (a `batch` keeps the flag); paint alone never sets it. Listeners that seat things on the ground react to
+      `change.ground?.relief` and to `props` containing `'ground'`.
+    - §10.10 tool `sculpt` (`tools/sculpt.js`; key `Y` — `H` is `view.home`; layer `ground`; picks `[]`; context
+      `brush`), modes `raise | lower | smooth | flatten | set | ramp` (`mode`, `setMode`), `opts = { radius, strength,
+      soft, height, slope }`. A held brush works in `update(dt)` at rates per second (`relief.js`, pure, tested in
+      `test/relief.test.mjs`: `dab`, `ramp`, `falloff`, `slopeAt`, `rayRelief`), on a private float copy of the
+      heights, and asks for the next frame itself; press–drag–release is one store group; `Esc` cancels it; a
+      `'load'` drops the stroke. Alt at the press inverts Raise / Lower, Shift smooths, Alt+click in the other modes
+      takes the height under the cursor for Set height. `opts.slope` (degrees, 0 = off) limits how far a stroke
+      pushes a vertex above its lowest (below its highest) 4-neighbour; Smooth and Ramp are not limited.
+      §11.2: in context `brush`, `[` `]` are the radius, `Shift+[` `Shift+]` the strength, `1`–`6` the mode.
+    - §10.8 viewport: a Hit's `x` / `z` are where the cursor's ray meets the TERRAIN and `Hit.y` is the height there
+      (`rayRelief`: exact, cut at every grid line and cell diagonal; on a map without a hill the plane `y = 0` as
+      before). `hitWorld` projects the terrain point; `viewport.project(x, y, z)` is unchanged — a caller with a
+      ground point passes `viewport.groundY(x, z)` (additive), as `__editor.click / drag` do. The camera orbits the
+      ground point under its target and never sinks below the ground under itself; while a tool holds the button it
+      does not follow ground that moves under it, and settles afterwards. `viewport.brush` drapes ring and disc on
+      the terrain vertex by vertex. `viewport.drape` (additive, `drape.js`): one float texture of the heights and
+      `drape.apply(material)`, which lifts every vertex of a flat overlay onto the ground in its vertex shader with
+      the triangles of `heightAt`; `discGeometry` / `plateGeometry` are flat shapes cut fine enough to bend, and
+      `drapePath(points, height, …)` cuts a ground polyline into pieces that follow a slope.
+    - What lies ON the terrain exactly (the terrain's own triangles, `view.groundGeometry`, with the ground-overlay
+      depth rule): the grid and the boundary, the region tint, the fill of a selected or hovered region (a picture
+      of the regions, two texels per cell). Draped per vertex (exact at a vertex, flat between vertices): spawn
+      discs, their outlines, threat rings, the start disc, facing arrows, the colliders overlay, the Terrain tool's
+      cell preview, the brush ring. Placed at the height of the ground under them: pins, knobs, chest models,
+      labels, the gizmo, the pivot mark, selection boxes, region outlines and the Measure / Region / Place / Paste
+      guide lines (cut into pieces of a cell). §10.9 `markers.pick` measures against those same points; on a hilly
+      map every rim is walked (the ground-distance shortcut holds on a plane only).
+    - §9.14: the status bar shows the height under the cursor (`h`); the minimap shades slopes; `checks.js` adds the
+      warning `steep-ground` for a chest, an NPC, a spawn centre or the start on a slope above 45° (`STEEP`). §9.13:
+      the inspector's `Y` is the height above the ground (a field entry may carry `title`). §9.4: surface snap
+      subtracts the ground under the point, so the object lands on the surface it was dropped on.

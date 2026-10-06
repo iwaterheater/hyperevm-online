@@ -64,8 +64,9 @@ function mulberry(seed) {
 // one number in [0, 1) for piece `i` of a row, independent of the others
 const rollAt = (seed, i, salt) => mulberry((seed ^ Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(salt, 0x85ebca6b)) >>> 0)();
 
-// Line segments on the ground, rewritten on every change of the ghost.
-function groundLines(color, opacity) {
+// Line segments on the ground, rewritten on every change of the ghost. height: (x, z) -> the height of the ground
+// there, so both ends of a segment stand on the hill (the lines are drawn over the scene, never hidden by it).
+function groundLines(color, opacity, height) {
   let array = new Float32Array(2048 * 6), n = 0;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(array, 3).setUsage(THREE.DynamicDrawUsage));
@@ -82,8 +83,8 @@ function groundLines(color, opacity) {
       array = next;
       geometry.setAttribute('position', new THREE.BufferAttribute(array, 3).setUsage(THREE.DynamicDrawUsage));
     }
-    array[n++] = x0; array[n++] = LINE_Y; array[n++] = z0;
-    array[n++] = x1; array[n++] = LINE_Y; array[n++] = z1;
+    array[n++] = x0; array[n++] = height(x0, z0) + LINE_Y; array[n++] = z0;
+    array[n++] = x1; array[n++] = height(x1, z1) + LINE_Y; array[n++] = z1;
   };
   return {
     mesh, seg,
@@ -226,13 +227,14 @@ export default function create(ctx) {
   // Where a single object would stand for this pointer position: { x, y, z, reason } (reason: why not, or null).
   // p carries the position and the modifier keys (a Hit plus an event, or `pointer`).
   function aim(p, ev = p) {
-    let x = p.x, z = p.z, y = 0, on = p.onGround !== false;
+    let x = p.x, z = p.z, top = null, on = p.onGround !== false;
     if (opts.surfaceSnap) {
       const s = surface(p.sx, p.sy);
-      if (s) { x = s.x; z = s.z; y = s.y; on = true; }
+      if (s) { x = s.x; z = s.z; top = s.y; on = true; }
     }
     const q = snapPoint(ctx, x, z, ev);
-    y = clamp(qPos(y + finite(opts.yOffset, 0)), LIMITS.objectY);
+    // an object's y is its height above the GROUND under it: a surface that was hit is so far above that ground
+    const y = clamp(qPos((top === null ? 0 : top - ctx.view.heightAt(q.x, q.z)) + finite(opts.yOffset, 0)), LIMITS.objectY);
     return { x: q.x, y, z: q.z, reason: on ? refuse(q.x, q.z) : 'Point at the ground' };
   }
 
@@ -644,8 +646,8 @@ export default function create(ctx) {
       pointer = null;
       statusText = null;
       notice = null;
-      foot = groundLines(0xffd27a, 0.9);
-      guide = groundLines(0x8fc2ff, 0.9);
+      foot = groundLines(0xffd27a, 0.9, ctx.viewport.groundY);
+      guide = groundLines(0x8fc2ff, 0.9, ctx.viewport.groundY);
       ctx.viewport.overlay.add(guide.mesh, foot.mesh);
       const c = ui.cursor;
       if (c) remember({}, c);   // the tool was chosen with a key: the pointer is over the viewport already

@@ -19,11 +19,14 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { h, row, button } from '../ui/dom.js';
 import { chordLabel, keyText } from '../keymap.js';
 import { snapPoint } from './common.js';
+import { drapePath } from '../drape.js';
 
 const MAX_POINTS = 200;        // one label per segment: more than this is a drawing, not a measurement
 const SAME_PX = 3;             // a click this close to the last point is the second half of a double-click
 const LINE_COLOR = 0xffd24d, RING_COLOR = 0xffd24d;
 const Y = 0.1;                 // above every ground overlay; the preview is drawn without a depth test anyway
+const PIECE = 2;               // a line follows the ground in pieces of this length, so it climbs a hill instead of crossing it
+const level = () => 0;         // the ground of a caller that names no height: flat
 const noRaycast = () => {};    // previews are never picked: a stray scene raycast must not find them
 
 // ---------------------------------------------------------------- polygon maths (pure)
@@ -79,7 +82,8 @@ export function measure(points) {
 // A polyline on the ground that keeps its width on screen. set(points) replaces it; a line needs two points.
 // The geometry is made anew for every set: a LineGeometry cannot be resized, and replacing its buffers in place would
 // leave the old ones on the GPU until the page goes.
-export function createLine(color, { width = 2.5, opacity = 1 } = {}) {
+//   height   (x, z) -> the height of the ground there (viewport.groundY): the line lies on the hills
+export function createLine(color, { width = 2.5, opacity = 1, height = level } = {}) {
   const material = new LineMaterial({ color, linewidth: width, transparent: true, opacity, depthTest: false, depthWrite: false, toneMapped: false });
   const line = new Line2(new LineGeometry(), material);
   line.frustumCulled = false;   // rewritten on every pointer move: bounds would be stale more often than right
@@ -93,9 +97,7 @@ export function createLine(color, { width = 2.5, opacity = 1 } = {}) {
       line.geometry = new LineGeometry();
       line.visible = points.length >= 2;
       if (!line.visible) return;
-      const pos = [];
-      for (const p of points) pos.push(p[0], Y, p[1]);
-      line.geometry.setPositions(pos);
+      line.geometry.setPositions(drapePath(points, height, { lift: Y, step: PIECE }));
     },
     // the size of the canvas in CSS pixels: what a line width is measured against
     resolution(w, h) { material.resolution.set(w || 1, h || 1); },
@@ -123,8 +125,8 @@ function knobTexture() {
   return knob;
 }
 
-// Knobs of a fixed size on screen at ground points. set(points) replaces them.
-export function createDots(color, { size = 12 } = {}) {
+// Knobs of a fixed size on screen at ground points. set(points) replaces them. height: as for createLine.
+export function createDots(color, { size = 12, height = level } = {}) {
   const geometry = new THREE.BufferGeometry();
   const material = new THREE.PointsMaterial({
     color, size, sizeAttenuation: false, map: knobTexture(), transparent: true, alphaTest: 0.05, depthTest: false, depthWrite: false, toneMapped: false,
@@ -146,7 +148,7 @@ export function createDots(color, { size = 12 } = {}) {
       }
       const attr = geometry.attributes.position;
       if (attr) {
-        for (let i = 0; i < n; i++) attr.setXYZ(i, points[i][0], Y, points[i][1]);
+        for (let i = 0; i < n; i++) attr.setXYZ(i, points[i][0], height(points[i][0], points[i][1]) + Y, points[i][1]);
         attr.needsUpdate = true;
       }
       geometry.setDrawRange(0, n);
@@ -202,7 +204,7 @@ export default function create(ctx) {
     if (!visuals) return;
     const box = visuals.layer.getBoundingClientRect();
     for (const l of visuals.labels) {
-      const p = viewport.project(l.x, 0, l.z);
+      const p = viewport.project(l.x, viewport.groundY(l.x, l.z), l.z);
       l.el.hidden = !p.visible;
       if (p.visible) l.el.style.transform = `translate(-50%, -50%) translate(${Math.round(p.x - box.left)}px, ${Math.round(p.y - box.top)}px)`;
     }
@@ -294,6 +296,8 @@ export default function create(ctx) {
     held = false;
     if (visuals) refresh();
   });
+  // The ground moved under the lines (an undo of a sculpt stroke): they are laid on it again.
+  store.on('change', (change) => { if (visuals && (change.ground?.relief || change.props.includes('ground'))) refresh(); });
 
   return {
     id: 'measure', label: 'Measure', icon: '↔', layer: null, picks: [], hidden: false,
@@ -308,8 +312,9 @@ export default function create(ctx) {
     activate() {
       const group = new THREE.Group();
       group.name = 'measure';
-      const path = createLine(LINE_COLOR), closing = createLine(LINE_COLOR, { width: 1.5, opacity: 0.45 });
-      const rubber = createLine(LINE_COLOR, { width: 1.5, opacity: 0.7 }), dots = createDots(0xffffff);
+      const height = viewport.groundY;
+      const path = createLine(LINE_COLOR, { height }), closing = createLine(LINE_COLOR, { width: 1.5, opacity: 0.45, height });
+      const rubber = createLine(LINE_COLOR, { width: 1.5, opacity: 0.7, height }), dots = createDots(0xffffff, { height });
       group.add(closing.object, path.object, rubber.object, dots.object);
       viewport.overlay.add(group);
       // one layer for the labels over the canvas, under the viewport's own readout and tip
@@ -343,7 +348,7 @@ export default function create(ctx) {
       held = true;
       cursor = null;
       if (last) {
-        const s = viewport.project(last[0], 0, last[1]);
+        const s = viewport.project(last[0], viewport.groundY(last[0], last[1]), last[1]);
         // a double-click delivers its two clicks first: the second one must not add the same point again
         if (segmentLength(last, p) < 0.01 || Math.hypot(s.x - ev.clientX, s.y - ev.clientY) < SAME_PX) { drawLive(); return; }
       }

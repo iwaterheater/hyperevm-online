@@ -5,7 +5,8 @@ import * as THREE from 'three';
 // blades costs four draw calls and no memory. Four rings of blades lie around the point the camera looks at - fine and
 // dense close by, coarse and wide far away.
 // What grows where comes from the field: one texel per ground vertex, written by MapView from the ground types
-// (G = how densely grass grows, B = how dry it is). The view owns the group; lights, fog and shadows are the scene's.
+// (R = the height of the ground, G = how densely grass grows, B = how dry it is). The view owns the group; lights,
+// fog and shadows are the scene's.
 
 // spacing: world units between blades; radius: how far the ring reaches; segs: quads per blade; faceCam: how much a
 // blade turns its flat side to the camera (far blades must, or they vanish edge-on)
@@ -62,7 +63,7 @@ float wbNoise2(vec2 p) {
   return mix(mix(wbHash12(i), wbHash12(i + vec2(1.0, 0.0)), u.x),
              mix(wbHash12(i + vec2(0.0, 1.0)), wbHash12(i + vec2(1.0, 1.0)), u.x), u.y);
 }
-// G grass density, B dryness
+// R ground height, G grass density, B dryness
 vec4 vegField(vec2 xz) { return texture(uField, xz * uFieldXf.x + uFieldXf.y); }
 
 uvec4 vegPcg4(uvec4 v) {
@@ -115,7 +116,7 @@ vGCol = vec3(0.0); vVegTrans = 0.0; vVegAO = 1.0;
   float dens = fld.y;
   float keep = smoothstep(r1.w, r1.w + 0.15, dens * 1.3);
   float sc = fade * keep;
-  vec3 root = vec3(rootXZ.x, -0.04, rootXZ.y);
+  vec3 root = vec3(rootXZ.x, fld.x - 0.04, rootXZ.y);
   vec4 clipC = projectionMatrix * (viewMatrix * vec4(root + vec3(0.0, 0.4, 0.0), 1.0));
   bool culled = sc < 0.02 || clipC.w < -2.0
     || abs(clipC.x) > clipC.w * 1.04 + 1.6 || abs(clipC.y) > clipC.w * 1.04 + 2.2;
@@ -145,7 +146,7 @@ vGCol = vec3(0.0); vVegTrans = 0.0; vVegAO = 1.0;
 
     float dry = fld.z;
     float big = wbNoise2(rootXZ * 0.045 + 3.1);
-    float camD = distance(vec3(rootXZ.x, 0.0, rootXZ.y), cameraPosition);
+    float camD = distance(root, cameraPosition);
     float far = smoothstep(14.0, 70.0, camD);
     float h = mix(0.3, 0.62, r2.x) * mix(0.72, 1.3, ch.x) * mix(1.15, 0.78, clumpD);
     h *= mix(0.45, 1.0, smoothstep(0.0, 0.75, dens));
@@ -271,7 +272,7 @@ export class Grass {
     this.group = new THREE.Group();
     this.group.name = 'grass';
     this.size = 0;
-    this.data = null;        // RGBA bytes, one texel per ground vertex
+    this.data = null;        // RGBA half floats, one texel per ground vertex
     this.stale = false;
     this.shared = {
       uTime: { value: 0 },
@@ -334,8 +335,8 @@ export class Grass {
     if (this.size !== size) {
       this.shared.uField.value?.dispose();
       this.size = size;
-      this.data = new Uint8Array(size * size * 4);
-      const field = new THREE.DataTexture(this.data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+      this.data = new Uint16Array(size * size * 4);   // half floats: heights need more than a byte, and they filter everywhere
+      const field = new THREE.DataTexture(this.data, size, size, THREE.RGBAFormat, THREE.HalfFloatType);
       field.magFilter = field.minFilter = THREE.LinearFilter;   // soft meadow borders between the vertices
       field.needsUpdate = true;
       this.shared.uField.value = field;
@@ -345,18 +346,19 @@ export class Grass {
     this.stale = true;
   }
 
-  // density and dryness (0..1) of the grass at one ground vertex
-  write(ix, iz, density, dry) {
-    const i = (iz * this.size + ix) * 4;
-    this.data[i + 1] = Math.round(Math.min(1, Math.max(0, density)) * 255);
-    this.data[i + 2] = Math.round(Math.min(1, Math.max(0, dry)) * 255);
+  // density and dryness (0..1) of the grass at one ground vertex, and the height of the ground there
+  write(ix, iz, density, dry, height = 0) {
+    const i = (iz * this.size + ix) * 4, half = THREE.DataUtils.toHalfFloat;
+    this.data[i] = half(height);
+    this.data[i + 1] = half(Math.min(1, Math.max(0, density)));
+    this.data[i + 2] = half(Math.min(1, Math.max(0, dry)));
     this.stale = true;
   }
 
-  // Once per frame. player { x, z } | null: the blades around it lie down.
-  update(time, player = null) {
+  // Once per frame. player { x, z } | null: the blades around it lie down. ground: the height it stands on.
+  update(time, player = null, ground = 0) {
     this.shared.uTime.value = time;
-    if (player) this.shared.uPlayerPos.value.set(player.x, 0, player.z);
+    if (player) this.shared.uPlayerPos.value.set(player.x, ground, player.z);
     else this.shared.uPlayerPos.value.copy(FAR_AWAY);
     if (this.stale && this.shared.uField.value) {
       this.shared.uField.value.needsUpdate = true;

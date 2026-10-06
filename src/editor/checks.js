@@ -22,16 +22,20 @@
 //   object-blocked     ONE row for all the objects that stand on ground nobody can walk on (water, lava ...): after a
 //                      pond was painted over a wood, this is where the trees in it are found. It may be meant - a
 //                      pier, a rock in a lake - so it only says so.
+//   steep-ground       an NPC, a chest, the centre of a spawn or the start point on a slope steeper than STEEP degrees:
+//                      whoever stands there stands on a wall
 //   heavy-model        one model above MODEL_TRIANGLES triangles in total
 //   many-triangles     more than TOTAL_TRIANGLES instanced triangles in total
 //   model-failed       a model that failed to load (drawn as a magenta box)
 import { GROUND_TYPES, LIMITS, groundIx, isBlocked, shapeBounds, shapeCentre } from '../map/format.js';
 import { runs } from './raster.js';
+import { slopeAt } from './relief.js';
 
 export const PLAYER_R = 0.4;              // what view.collide() pushes out of obstacles
 export const REACH = 1.5;                 // an item counts as reached when a walkable cell this close to it was
 export const TOTAL_TRIANGLES = 2500000;
 export const MODEL_TRIANGLES = 300000;
+export const STEEP = 45;                  // degrees: what an NPC, a chest, a camp or the start should not stand on
 const STEP = 1;                           // the flood grid: one cell per world unit
 
 const BLOCK = GROUND_TYPES.map((t) => t.block === true);
@@ -219,6 +223,17 @@ export function editorChecks(map, { obstacles = null, missing = null, triangles 
           at(t.kind, t.index, t.item));
       }
     }
+  }
+
+  // ---- steep-ground: only a map with hills can have one
+  if (map.ground.heights) {
+    const steep = (name, path, where, p) => {
+      if (!finite(p.x) || !finite(p.z)) return;
+      const slope = slopeAt(map, p.x, p.z);
+      if (slope > STEEP) warn('steep-ground', path, `${name} stands on a slope of ${Math.round(slope)} degrees: smooth or flatten the ground there, or move it.`, where);
+    };
+    for (const t of targets) steep(t.name, t.path, at(t.kind, t.index, t.item), t.item);
+    steep('The start point', 'start', at('start', 0, map.start), map.start);
   }
 
   // ---- region-hidden

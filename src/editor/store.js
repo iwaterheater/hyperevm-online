@@ -22,7 +22,8 @@ const GROUP_ID = /^g([1-9]\d*)$/;       // the ids newGroupIds() hands out: g1, 
 // What a command did to the map. Every key is always present, so a listener never has to test for one.
 //   added / removed / updated   item references per list; updated.start is [] or [map.start]
 //   order    lists whose order changed ('regions')
-//   ground   null, or { ix0, iz0, ix1, iz1 }: the INCLUSIVE vertex rectangle that was repainted
+//   ground   null, or { ix0, iz0, ix1, iz1 }: the INCLUSIVE vertex rectangle that was repainted; with `relief: true`
+//            when heights changed inside it (what stands on the ground there has to be seated again)
 //   props    changed top-level keys: 'name' | 'radius' | 'foliage' | 'fallback' | 'ground' (the ground OBJECT was replaced)
 //   origin   'do' | 'undo' | 'redo' | 'cancel' - set by the store
 export function emptyChange(origin = 'do') {

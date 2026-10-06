@@ -3,8 +3,9 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { MOB_TYPES, MOB_KEYS, AGGRO_R, BOSS_AGGRO_R, WANDER_R } from '../shared.js';
-import { LAYER_OF, NPC_RADIUS, inShape, shapeBounds, shapeCentre, regionLabel, regionColor, hasBoss } from '../map/format.js';
+import { LAYER_OF, NPC_RADIUS, groundHalf, groundX, heightAt, inShape, shapeBounds, shapeCentre, regionLabel, regionColor, hasBoss } from '../map/format.js';
 import { mixText } from './spawnstats.js';
+import { discGeometry, drapePath } from './drape.js';
 
 // Markers: everything of a map that is not scenery - monster spawns, chests, NPCs, regions and the start point - as
 // the editor shows it, and the answer to "what is under the cursor" for those five kinds.
@@ -15,6 +16,11 @@ import { mixText } from './spawnstats.js';
 //
 // Picking is analytic: the cursor is compared with projected points, segments and circles, in pixels. No ray is cast
 // at a mesh, so a pick costs the same whether the markers are drawn, hidden behind a house or off screen.
+//
+// Everything stands ON the ground, hills included. Pins, knobs, chest models and labels are placed at the height of
+// the ground under them; discs, rings and arrows are flat shapes whose material lifts every vertex onto the ground
+// (the drape, drape.js); a region outline is cut into pieces that follow the slope, and a region fill is painted
+// into a texture that is laid over the terrain's own triangles. Picking measures against those same points.
 //
 // A pick result is { item, kind, handle, distance } as the contract says, plus two fields the viewport needs to slot
 // scenery in between (the pick order is handles, pins, SCENERY, areas):
@@ -35,7 +41,9 @@ const KNOB_PX = [5, 3.6, 4.6];  // radius on screen of a handle knob: region ver
 const MIN_DISC = 0.6;           // a spawn of radius 0 (the boss) still shows a disc one can find
 const MAX_LABELS = 200;
 const LABEL_H = 16, LABEL_PAD = 6, LABEL_DOT = 10, LABEL_GAP = 2, LABEL_SLOTS = 4;
-const Y_FILL = 0.03, Y_DISC = 0.04, Y_RING = 0.05, Y_LINE = 0.06;   // ground overlays, stacked so that they never fight
+const Y_DISC = 0.04, Y_RING = 0.05, Y_LINE = 0.06;   // ground overlays, stacked over the ground so that they never fight
+const RING_SEGMENTS = 128;      // of a disc outline: fine enough to follow a slope around a large camp
+const FILL_PX = [256, 1024];    // the side of the region fill texture: two texels per ground cell, within these
 const CHEST_MODELS = ['dungeon/chest', 'dungeon/chest_gold'];
 const CHEST_SCALE = [1.3, 2];
 const NPC_HEIGHT = 2;           // a townsman is about as tall as a cat
@@ -131,15 +139,18 @@ function markInner(g) {
 }
 
 // The outline of a disc: the ring 0.96 .. 1, scaled per instance by the radius.
-const ringGeometry = () => markInner(flat(new THREE.RingGeometry(0.96, 1, 48)));
+const ringGeometry = () => markInner(flat(new THREE.RingGeometry(0.96, 1, RING_SEGMENTS)));
 
-// The threat ring: 48 segments, every other one left out - a dashed circle without a dashed material.
+// The threat ring: 48 segments, every other one left out - a dashed circle without a dashed material. A dash is three
+// short pieces: around a large camp one straight dash would cut through the slope it lies on.
 function dashGeometry() {
-  const pos = [], inner = 0.978;
+  const pos = [], inner = 0.978, pieces = 3;
   for (let i = 0; i < 48; i += 2) {
-    const a = i / 48 * Math.PI * 2, b = (i + 1) / 48 * Math.PI * 2;
-    const ax = Math.cos(a), az = Math.sin(a), bx = Math.cos(b), bz = Math.sin(b);
-    pos.push(ax * inner, 0, az * inner, ax, 0, az, bx, 0, bz, ax * inner, 0, az * inner, bx, 0, bz, bx * inner, 0, bz * inner);
+    for (let k = 0; k < pieces; k++) {
+      const a = (i + k / pieces) / 48 * Math.PI * 2, b = (i + (k + 1) / pieces) / 48 * Math.PI * 2;
+      const ax = Math.cos(a), az = Math.sin(a), bx = Math.cos(b), bz = Math.sin(b);
+      pos.push(ax * inner, 0, az * inner, ax, 0, az, bx, 0, bz, ax * inner, 0, az * inner, bx, 0, bz, bx * inner, 0, bz * inner);
+    }
   }
   return markInner(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)));
 }
@@ -188,8 +199,13 @@ function pinGeometry() {
 }
 
 // An arrow on the ground pointing along local +Z - the forward of an item at ry = 0 - starting clear of the pin.
+// Shaft and head are cut into short strips across, so the arrow bends over the slope it points up or down.
 function arrowGeometry() {
-  const pos = [-0.11, 0, 0.95, 0.11, 0, 0.95, 0.11, 0, 1.6, -0.11, 0, 0.95, 0.11, 0, 1.6, -0.11, 0, 1.6, -0.36, 0, 1.6, 0.36, 0, 1.6, 0, 0, 2.25];
+  const pos = [], strips = 3;
+  // the strip between z0 and z1 of a shape whose half width is w0 at z0 and w1 at z1
+  const strip = (z0, w0, z1, w1) => pos.push(-w0, 0, z0, w0, 0, z0, w1, 0, z1, -w0, 0, z0, w1, 0, z1, -w1, 0, z1);
+  for (let k = 0; k < strips; k++) strip(0.95 + 0.65 * k / strips, 0.11, 0.95 + 0.65 * (k + 1) / strips, 0.11);
+  for (let k = 0; k < strips; k++) strip(1.6 + 0.65 * k / strips, 0.36 * (1 - k / strips), 1.6 + 0.65 * (k + 1) / strips, 0.36 * (1 - (k + 1) / strips));
   return new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
 }
 
@@ -289,6 +305,9 @@ class Screen {
     this.backFor = null;
     this.w = 1; this.h = 1; this.k = 1; this.ortho = false;
     this.x = 0; this.y = 0; this.d = 0;   // the last point: pixels and depth
+    this.hy = () => 0;                    // (x, z) -> the height of the ground there; the owner sets it
+    this.hilly = false;                   // is the ground anything but flat? (a straight edge is then a bent line)
+    this.step = 4;                        // ... and is measured in pieces of about this length
   }
 
   set(camera, w, h) {
@@ -310,6 +329,11 @@ class Screen {
     return true;
   }
 
+  // the same for a point ON the ground
+  on(x, z) {
+    return this.at(x, this.hy(x, z), z);
+  }
+
   // world units that one pixel covers at depth d
   perPx(d) {
     return (this.ortho ? 2 : 2 * d) / (this.k * this.h);
@@ -317,16 +341,32 @@ class Screen {
 
   // Pixels from (cx, cy) to the ground segment a-b; Infinity when it lies behind the camera. A segment that crosses the
   // camera plane is cut there first: a projected point behind the eye is mirrored and would pull the line across the screen.
+  // Both ends stand on the ground; between them the segment is straight (pathPx follows a slope).
   segPx(ax, az, bx, bz, cx, cy) {
     const e = this.m.elements, near = 0.01;
-    const wa = e[3] * ax + e[11] * az + e[15], wb = e[3] * bx + e[11] * bz + e[15];
+    let ay = this.hy(ax, az), by = this.hy(bx, bz);
+    const wa = e[3] * ax + e[7] * ay + e[11] * az + e[15], wb = e[3] * bx + e[7] * by + e[11] * bz + e[15];
     if (wa < near && wb < near) return Infinity;
-    if (wa < near) { const t = (near - wa) / (wb - wa); ax += (bx - ax) * t; az += (bz - az) * t; }
-    else if (wb < near) { const t = (near - wb) / (wa - wb); bx += (ax - bx) * t; bz += (az - bz) * t; }
-    if (!this.at(ax, 0, az)) return Infinity;
+    if (wa < near) { const t = (near - wa) / (wb - wa); ax += (bx - ax) * t; ay += (by - ay) * t; az += (bz - az) * t; }
+    else if (wb < near) { const t = (near - wb) / (wa - wb); bx += (ax - bx) * t; by += (ay - by) * t; bz += (az - bz) * t; }
+    if (!this.at(ax, ay, az)) return Infinity;
     const x0 = this.x, y0 = this.y;
-    if (!this.at(bx, 0, bz)) return Infinity;
+    if (!this.at(bx, by, bz)) return Infinity;
     return distSeg(cx, cy, x0, y0, this.x, this.y);
+  }
+
+  // Pixels from (cx, cy) to the ground line a-b as it is drawn: over hills it is walked in short pieces, each with
+  // its ends on the ground (the edge of a region that crosses a ridge is no straight line on screen).
+  pathPx(ax, az, bx, bz, cx, cy) {
+    if (!this.hilly) return this.segPx(ax, az, bx, bz, cx, cy);
+    const n = Math.max(1, Math.min(64, Math.ceil(Math.hypot(bx - ax, bz - az) / this.step)));
+    let best = Infinity, x0 = ax, z0 = az;
+    for (let i = 1; i <= n; i++) {
+      const x1 = ax + (bx - ax) * i / n, z1 = az + (bz - az) * i / n;
+      best = Math.min(best, this.segPx(x0, z0, x1, z1, cx, cy));
+      x0 = x1; z0 = z1;
+    }
+    return best;
   }
 
   // Pixels from (cx, cy) to the ground circle. A circle is drawn as an ellipse (or worse, near the eye), so it is
@@ -354,6 +394,9 @@ class Screen {
   // measured with the smaller of the two scales the projection has there. Infinity towards the horizon, where one
   // pixel spans any distance. It lets a pick skip every circle whose rim is nowhere near the cursor.
   reach(x, z, px) {
+    // On hills there is no such bound: a rim on the near side of a ridge is drawn right next to a ground point far
+    // behind the ridge. Every circle is walked then.
+    if (this.hilly) return Infinity;
     if (!this.at(x, 0, z)) return Infinity;
     const x0 = this.x, y0 = this.y, h = Math.max(1e-3, 8 * this.perPx(this.d));   // a step of about 8 pixels
     if (!this.at(x + h, 0, z)) return Infinity;
@@ -380,9 +423,10 @@ class Screen {
 
   // Pixels from (cx, cy) to the pin standing at (x, z): the segment from its tip on the ground to its top.
   pinPx(x, z, cx, cy) {
-    if (!this.at(x, 0, z)) return Infinity;
+    const y = this.hy(x, z);
+    if (!this.at(x, y, z)) return Infinity;
     const bx = this.x, by = this.y, top = PIN_HEIGHT * this.perPx(this.d);
-    if (!this.at(x, top, z)) return Math.hypot(cx - bx, cy - by);
+    if (!this.at(x, y + top, z)) return Math.hypot(cx - bx, cy - by);
     return distSeg(cx, cy, bx, by, this.x, this.y);
   }
 }
@@ -418,6 +462,11 @@ export class Markers {
     this.camKey = new Float64Array(21);   // the camera and canvas the screen-sized things were laid out for
     this.size = { w: 0, h: 0 };
     this.screen = new Screen();
+    // the height of the ground under a point: where every marker stands
+    this.height = (x, z) => { const map = this.ctx.store.map; return map ? heightAt(map, x, z) : 0; };
+    this.screen.hy = this.height;
+    this.drape = ctx.viewport?.drape ?? null;   // lifts the flat shapes onto the ground in their vertex shader
+    const draped = (material) => this.drape?.apply(material) ?? material;
 
     // ground overlays follow one depth rule: tested against the scene, never written, pulled towards the eye
     const ground = { transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false };
@@ -425,11 +474,12 @@ export class Markers {
     this.ringWidth = new THREE.Vector2(RING_PX, 800);   // pixels, canvas height: the uniforms of the two ring materials
     this.dashWidth = new THREE.Vector2(DASH_PX, 800);
     this.materials = {
-      disc: new THREE.MeshBasicMaterial({ ...ground, opacity: 0.18 }),
-      ring: ringMaterial({ ...ground, opacity: 0.95, side: THREE.DoubleSide }, this.ringWidth),
-      dash: ringMaterial({ ...ground, opacity: 0.8, side: THREE.DoubleSide }, this.dashWidth),
-      arrow: new THREE.MeshBasicMaterial({ ...ground, opacity: 0.95, side: THREE.DoubleSide }),
-      fill: new THREE.MeshBasicMaterial({ ...ground, opacity: 0.16, vertexColors: true, side: THREE.DoubleSide }),
+      disc: draped(new THREE.MeshBasicMaterial({ ...ground, opacity: 0.18 })),
+      ring: draped(ringMaterial({ ...ground, opacity: 0.95, side: THREE.DoubleSide }, this.ringWidth)),
+      dash: draped(ringMaterial({ ...ground, opacity: 0.8, side: THREE.DoubleSide }, this.dashWidth)),
+      arrow: draped(new THREE.MeshBasicMaterial({ ...ground, opacity: 0.95, side: THREE.DoubleSide })),
+      // the fill is a picture of the selected regions laid over the terrain's own triangles (_styleRegions)
+      fill: new THREE.MeshBasicMaterial({ ...ground, opacity: 0.16 }),
       // pins and knobs are drawn over the scene: a marker behind a house must still be found, and the pick is analytic anyway
       pin: new THREE.MeshBasicMaterial({ ...onTop, vertexColors: true }),
       knob: new THREE.MeshBasicMaterial({ ...onTop }),
@@ -442,8 +492,9 @@ export class Markers {
       })),
     };
     this.geometries = {
-      disc: flat(new THREE.CircleGeometry(1, 48)),
+      disc: discGeometry(64, 16),           // rings of quads: a fan would cut straight through a hill inside the disc
       ring: ringGeometry(),
+      blank: new THREE.BufferGeometry(),    // what the fill is drawn with until the terrain is there
       dash: dashGeometry(),
       pin: pinGeometry(),
       arrow: arrowGeometry(),
@@ -461,9 +512,12 @@ export class Markers {
     this.chestAsked = false;
     this.ghosts = null;                   // the batches of a paste preview, made when the first one is shown
 
-    this.lines = [];                      // [{ region, line, state }] - one Line2 per visible region
+    this.lines = [];                      // [{ region, line, state, box, stale }] - one Line2 per visible region
+    this.linesStale = false;              // the ground moved under some of them: those are draped again
     this.fill = null;                     // one mesh for the translucent fill of every selected or hovered region
     this.fillKey = null;                  // which regions it covers, in which state; null = build it anew
+    this.fillCanvas = null;               // the picture of those regions, and its texture
+    this.fillTexture = null;
 
     // what the camera-sized instances stand for; filled by _rebuild(), placed by _place()
     this.pinList = [];                    // [{ x, z, r, g, b }]
@@ -543,7 +597,9 @@ export class Markers {
     const sc = this.screen, sel = store.selection;
     const want = (kind) => kinds.includes(kind) && this.on[LAYER_OF[kind]];
     const ok = (kind, item) => (ui.isPickable ? ui.isPickable(kind, item) : true);
-    const far = (x, z) => Math.hypot(eye.x - x, eye.y, eye.z - z);
+    const far = (x, z) => Math.hypot(eye.x - x, eye.y - this.height(x, z), eye.z - z);
+    sc.hilly = !!this.drape?.hilly;
+    sc.step = 2 * (map.ground?.cell ?? 2);
     const hit = (item, kind, priority, part, px, distance, handle = null) => ({ item, kind, handle, distance, priority, part, px });
     const disc = (item) => Math.max(item.r, MIN_DISC);
     // A rim can only be under the cursor when the ground point is about one radius from the centre: that settles most
@@ -571,9 +627,9 @@ export class Markers {
           const p = s.points;
           for (let i = 0; i < p.length; i++) {
             const [x, z] = p[i], [nx, nz] = p[(i + 1) % p.length];
-            if (vertex && sc.at(x, 0, z)) offer(item, kind, 'vertex', i, Math.hypot(sc.x - cx, sc.y - cy), x, z);
+            if (vertex && sc.on(x, z)) offer(item, kind, 'vertex', i, Math.hypot(sc.x - cx, sc.y - cy), x, z);
             // a midpoint loses a tie against a vertex: on a short edge the two knobs touch
-            if (mid && sc.at((x + nx) / 2, 0, (z + nz) / 2)) offer(item, kind, 'edge', i, Math.hypot(sc.x - cx, sc.y - cy) + 0.01, (x + nx) / 2, (z + nz) / 2);
+            if (mid && sc.on((x + nx) / 2, (z + nz) / 2)) offer(item, kind, 'edge', i, Math.hypot(sc.x - cx, sc.y - cy) + 0.01, (x + nx) / 2, (z + nz) / 2);
           }
         } else if (radius) {
           // the pin of a small camp stands on its own rim: there the pin wins, or the camp could never be dragged
@@ -618,7 +674,7 @@ export class Markers {
         const s = item.shape;
         if (s.type === 'circle') { edge(item, 'region', 'outline', rim(s.x, s.z, s.r)); continue; }
         let px = Infinity;
-        for (let i = 0, p = s.points, j = p.length - 1; i < p.length; j = i++) px = Math.min(px, sc.segPx(p[j][0], p[j][1], p[i][0], p[i][1], cx, cy));
+        for (let i = 0, p = s.points, j = p.length - 1; i < p.length; j = i++) px = Math.min(px, sc.pathPx(p[j][0], p[j][1], p[i][0], p[i][1], cx, cy));
         edge(item, 'region', 'outline', px);
       }
     }
@@ -664,28 +720,44 @@ export class Markers {
   // marker, on the ground. (A scenery object is the view's business; given one, this answers with its origin.)
   anchorOf(item) {
     const kind = this.kindOf(item);
-    if (kind === 'region') { const c = shapeCentre(item.shape); return { x: c.x, y: 0, z: c.z }; }
-    return { x: item?.x ?? 0, y: kind === 'object' ? item.y ?? 0 : 0, z: item?.z ?? 0 };
+    if (kind === 'region') { const c = shapeCentre(item.shape); return { x: c.x, y: this.height(c.x, c.z), z: c.z }; }
+    const x = item?.x ?? 0, z = item?.z ?? 0;
+    return { x, y: this.height(x, z) + (kind === 'object' ? item.y ?? 0 : 0), z };
+  }
+
+  // The lowest and the highest ground under a rectangle, from nine points of it: enough for a box around something
+  // that lies on a slope.
+  _span(minX, minZ, maxX, maxZ, out = { min: 0, max: 0 }) {
+    out.min = Infinity; out.max = -Infinity;
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        const y = this.height(minX + (maxX - minX) * i / 2, minZ + (maxZ - minZ) * j / 2);
+        if (y < out.min) out.min = y;
+        if (y > out.max) out.max = y;
+      }
+    }
+    return out;
   }
 
   // -> the world bounding box of what is drawn for the item (selection boxes, framing the camera).
   boundsOf(item, target = new THREE.Box3()) {
     const kind = this.kindOf(item);
     if (kind === 'region') {
-      const b = shapeBounds(item.shape);
-      return target.set(V.set(b.minX, 0, b.minZ), V2.set(b.maxX, 0.1, b.maxZ));
+      const b = shapeBounds(item.shape), y = this._span(b.minX, b.minZ, b.maxX, b.maxZ);
+      return target.set(V.set(b.minX, y.min, b.minZ), V2.set(b.maxX, y.max + 0.1, b.maxZ));
     }
     if (kind === 'spawn' || kind === 'start') {
-      const r = Math.max(item.r, MIN_DISC);
-      return target.set(V.set(item.x - r, 0, item.z - r), V2.set(item.x + r, 0.1, item.z + r));
+      const r = Math.max(item.r, MIN_DISC), y = this._span(item.x - r, item.z - r, item.x + r, item.z + r);
+      return target.set(V.set(item.x - r, y.min, item.z - r), V2.set(item.x + r, y.max + 0.1, item.z + r));
     }
+    const x = item?.x ?? 0, z = item?.z ?? 0, ground = this.height(x, z);
     if (kind === 'chest') {
       const i = item.big ? 1 : 0, model = this.chestModels[i];
       if (model) return target.copy(model.bounds).applyMatrix4(this._chestMatrix(item, i));
-      return target.set(V.set(item.x - 0.7, 0, item.z - 0.7), V2.set(item.x + 0.7, 1.2, item.z + 0.7));
+      return target.set(V.set(x - 0.7, ground, z - 0.7), V2.set(x + 0.7, ground + 1.2, z + 0.7));
     }
-    if (kind === 'npc') return target.set(V.set(item.x - NPC_RADIUS, 0, item.z - NPC_RADIUS), V2.set(item.x + NPC_RADIUS, NPC_HEIGHT, item.z + NPC_RADIUS));
-    const x = item?.x ?? 0, y = item?.y ?? 0, z = item?.z ?? 0;
+    if (kind === 'npc') return target.set(V.set(x - NPC_RADIUS, ground, z - NPC_RADIUS), V2.set(x + NPC_RADIUS, ground + NPC_HEIGHT, z + NPC_RADIUS));
+    const y = ground + (item?.y ?? 0);
     return target.set(V.set(x - 0.5, y, z - 0.5), V2.set(x + 0.5, y + 1, z + 0.5));
   }
 
@@ -730,6 +802,9 @@ export class Markers {
   _sync(camera) {
     if (this.disposed) return false;
     this._flush();
+    // the fill lies on the terrain's own triangles, which are another geometry after the grid changed size
+    const terrain = this.ctx.view?.groundGeometry;
+    if (this.fill && terrain && this.fill.geometry !== terrain) this.fill.geometry = terrain;
     const shown = this._shown(), moved = this._moved(camera) || shown !== this.shown;
     this.shown = shown;
     if (moved || this.placeDirty) {
@@ -754,7 +829,8 @@ export class Markers {
     for (const batch of [this.discs, this.rings, this.threats, this.arrows, this.pins, this.knobs, ...this.chests]) batch?.dispose();
     this._dropGhosts();
     this._dropLines();
-    if (this.fill) { this.fill.geometry.dispose(); this.fill.removeFromParent(); }
+    this.fill?.removeFromParent();          // (its geometry is the terrain's, and the view's to dispose)
+    this.fillTexture?.dispose();
     for (const g of Object.values(this.geometries)) g.dispose();
     for (const m of Object.values(this.materials)) for (const one of [m].flat()) one.dispose();
     this.root.removeFromParent();
@@ -774,11 +850,27 @@ export class Markers {
     this._invalidate();
   }
 
-  // A store change: only what touches a marker makes work here (a scatter stroke or a terrain stroke does not).
+  // A store change: only what touches a marker makes work here (a scatter stroke or a paint stroke does not).
   _changed(change) {
     const touched = (key) => !change || change.added?.[key]?.length || change.removed?.[key]?.length || change.updated?.[key]?.length;
-    const regions = touched('regions') || !change || change.order?.includes('regions') || change.props?.includes('fallback');
+    // another ground object (a resize) may hold other heights anywhere: everything is seated again
+    const regions = touched('regions') || !change || change.order?.includes('regions') || change.props?.includes('fallback') || change.props?.includes('ground');
     if (regions || touched('spawns') || touched('chests') || touched('npcs') || touched('start')) this._stale(!!regions);
+    if (change?.ground?.relief) this._lifted(change.ground);
+  }
+
+  // The ground moved inside a vertex rectangle (a sculpt stroke, sixty times a second): pins, knobs, chests and
+  // labels are seated again - a few hundred numbers - and of the region outlines only those that cross the rectangle.
+  _lifted(rect) {
+    const g = this.ctx.store.map?.ground;
+    if (!g) return;
+    const x0 = groundX(g, rect.ix0 - 1), x1 = groundX(g, rect.ix1 + 1), z0 = groundX(g, rect.iz0 - 1), z1 = groundX(g, rect.iz1 + 1);
+    for (const entry of this.lines) {
+      const b = entry.box;
+      if (b.maxX < x0 || b.minX > x1 || b.maxZ < z0 || b.minZ > z1) continue;
+      entry.stale = this.linesStale = true;
+    }
+    this._stale();
   }
 
   _layers() {
@@ -835,6 +927,10 @@ export class Markers {
       this.dirty = true;
       this._rebuildRegions();
     }
+    if (this.linesStale) {
+      this.linesStale = false;
+      for (const entry of this.lines) if (entry.stale) this._drapeLine(entry);
+    }
     if (this.dirty) {
       this.dirty = false;
       this._rebuild();
@@ -859,7 +955,7 @@ export class Markers {
 
   _chestMatrix(item, i, target = M) {
     const k = CHEST_SCALE[i];
-    return target.makeRotationY(item.ry ?? 0).scale(V.set(k, k, k)).setPosition(item.x, 0, item.z);
+    return target.makeRotationY(item.ry ?? 0).scale(V.set(k, k, k)).setPosition(item.x, this.height(item.x, item.z), item.z);
   }
 
   _state(item) {
@@ -875,6 +971,8 @@ export class Markers {
 
   // Rewrites every instance from the map: discs, outlines, threat rings, chest models; and lists what _place() sizes
   // by the camera. A few hundred matrices at most - cheaper than tracking which marker moved.
+  // Discs, rings and arrows are laid out on y = 0 plus their small lift: their material puts every vertex on the
+  // ground (the drape). A chest model is a rigid thing and stands at the height of the ground under its centre.
   _rebuild() {
     this._loadChests();
     const { store, ui } = this.ctx, map = store.map, sel = store.selection;
@@ -976,16 +1074,16 @@ export class Markers {
     // instance lands on top, and the dark rim keeps a pink pin readable on a pink disc.
     this.pins.begin(this.pinList.length * 2);
     for (const p of this.pinList) {
-      const s = sc.at(p.x, 0, p.z) ? unit * sc.perPx(sc.d) : 0;
-      this.pins.put(M.makeScale(s * 1.34, s * 1.17, s * 1.34).setPosition(p.x, -0.17 * s, p.z), dark[0], dark[1], dark[2]);
-      this.pins.put(M.makeScale(s, s, s).setPosition(p.x, 0, p.z), p.r, p.g, p.b);
+      const y = this.height(p.x, p.z), s = sc.at(p.x, y, p.z) ? unit * sc.perPx(sc.d) : 0;
+      this.pins.put(M.makeScale(s * 1.34, s * 1.17, s * 1.34).setPosition(p.x, y - 0.17 * s, p.z), dark[0], dark[1], dark[2]);
+      this.pins.put(M.makeScale(s, s, s).setPosition(p.x, y, p.z), p.r, p.g, p.b);
     }
     this.pins.end();
 
     this.arrows.begin(this.arrowList.length);
     for (const a of this.arrowList) {
       // never smaller than life: close up an arrow is a metre long, from afar it keeps up with its pin
-      const s = sc.at(a.x, 0, a.z) ? Math.max(1, unit * sc.perPx(sc.d) * 0.9) : 0;
+      const s = sc.on(a.x, a.z) ? Math.max(1, unit * sc.perPx(sc.d) * 0.9) : 0;
       this.arrows.put(M.makeRotationY(a.ry).scale(V.set(s, s, s)).setPosition(a.x, Y_RING, a.z), a.r, a.g, a.b);
     }
     this.arrows.end();
@@ -993,9 +1091,9 @@ export class Markers {
     // a knob has its dark rim the same way
     this.knobs.begin(this.knobList.length * 2);
     for (const k of this.knobList) {
-      const s = sc.at(k.x, 0, k.z) ? KNOB_PX[k.type] * sc.perPx(sc.d) : 0, c = rgb(KNOB_COLOR[k.type]);
-      this.knobs.put(M.makeScale(s * 1.4, s * 1.4, s * 1.4).setPosition(k.x, 0, k.z), dark[0], dark[1], dark[2]);
-      this.knobs.put(M.makeScale(s, s, s).setPosition(k.x, 0, k.z), c[0], c[1], c[2]);
+      const y = this.height(k.x, k.z), s = sc.at(k.x, y, k.z) ? KNOB_PX[k.type] * sc.perPx(sc.d) : 0, c = rgb(KNOB_COLOR[k.type]);
+      this.knobs.put(M.makeScale(s * 1.4, s * 1.4, s * 1.4).setPosition(k.x, y, k.z), dark[0], dark[1], dark[2]);
+      this.knobs.put(M.makeScale(s, s, s).setPosition(k.x, y, k.z), c[0], c[1], c[2]);
     }
     this.knobs.end();
   }
@@ -1010,7 +1108,36 @@ export class Markers {
     this.lines.length = 0;
   }
 
-  // One Line2 per region that is shown: a circle as a polyline fine enough for its size, a polygon closed.
+  // The outline of a region as a LineGeometry: a circle as a polyline fine enough for its size, a polygon closed -
+  // and over hills every edge cut into pieces of a ground cell, each point on the ground, so the line climbs the
+  // slope instead of running through it.
+  _lineGeometry(region) {
+    const { store, ui } = this.ctx, map = store.map, s = region.shape, points = [];
+    if (s.type === 'circle') {
+      const n = Math.max(48, Math.min(256, Math.round(s.r * 1.5)));
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2;
+        points.push([s.x + Math.cos(a) * s.r, s.z + Math.sin(a) * s.r]);
+      }
+    } else for (const p of s.points) points.push(p);
+    const pos = drapePath(points, this.height, { lift: Y_LINE, closed: true, step: this.drape?.hilly ? map.ground.cell : Infinity });
+    // a locked region is drawn dimmer: it is there, but it will not answer a click
+    const c = rgb(regionColor(map, region)), k = ui.itemFlag?.(region, 'locked') ? 0.5 : 1, colors = new Float32Array(pos.length);
+    for (let i = 0; i < colors.length; i += 3) { colors[i] = c[0] * k; colors[i + 1] = c[1] * k; colors[i + 2] = c[2] * k; }
+    const geometry = new LineGeometry();
+    geometry.setPositions(pos);
+    geometry.setColors(colors);
+    return geometry;
+  }
+
+  // The ground moved under this outline: the same line, draped again.
+  _drapeLine(entry) {
+    entry.stale = false;
+    entry.line.geometry.dispose();
+    entry.line.geometry = this._lineGeometry(entry.region);
+  }
+
+  // One Line2 per region that is shown.
   _rebuildRegions() {
     this._dropLines();
     this.fillKey = null;
@@ -1018,28 +1145,12 @@ export class Markers {
     if (!map || !this.on.regions) return;
     for (const region of map.regions) {
       if (ui.itemFlag?.(region, 'hidden')) continue;
-      const s = region.shape, pos = [];
-      if (s.type === 'circle') {
-        const n = Math.max(48, Math.min(256, Math.round(s.r * 1.5)));
-        for (let i = 0; i <= n; i++) {
-          const a = i / n * Math.PI * 2;
-          pos.push(s.x + Math.cos(a) * s.r, Y_LINE, s.z + Math.sin(a) * s.r);
-        }
-      } else {
-        for (const p of s.points) pos.push(p[0], Y_LINE, p[1]);
-        pos.push(s.points[0][0], Y_LINE, s.points[0][1]);
-      }
-      // a locked region is drawn dimmer: it is there, but it will not answer a click
-      const c = rgb(regionColor(map, region)), k = ui.itemFlag?.(region, 'locked') ? 0.5 : 1, colors = new Float32Array(pos.length);
-      for (let i = 0; i < colors.length; i += 3) { colors[i] = c[0] * k; colors[i + 1] = c[1] * k; colors[i + 2] = c[2] * k; }
-      const geometry = new LineGeometry();
-      geometry.setPositions(pos);
-      geometry.setColors(colors);
-      const line = new Line2(geometry, this.materials.lines[0]);
+      const line = new Line2(this._lineGeometry(region), this.materials.lines[0]);
       line.renderOrder = 4;
+      line.frustumCulled = false;   // redraped under the brush: bounds would be stale more often than right
       line.raycast = noRaycast;
       this.body.add(line);
-      this.lines.push({ region, line, state: 0 });
+      this.lines.push({ region, line, state: 0, box: shapeBounds(region.shape), stale: false });
     }
   }
 
@@ -1054,38 +1165,48 @@ export class Markers {
     }
     if (key === this.fillKey) return;
     this.fillKey = key;
-    if (this.fill) {
-      this.fill.geometry.dispose();
-      this.fill.removeFromParent();
-      this.fill = null;
+    if (this.fill) this.fill.visible = false;
+    const map = this.ctx.store.map;
+    if (!key || !map || typeof document === 'undefined') return;
+    // The fill is a PICTURE of the regions, laid over the terrain's own triangles: a region is hundreds of units wide,
+    // and no triangle of that size lies on a hill. The picture covers the ground grid, north at its top like the
+    // ground itself (the terrain's uv runs 0 .. 1 over the grid), and its edge is as fine as half a ground cell.
+    const g = map.ground, half = groundHalf(g), px = Math.max(FILL_PX[0], Math.min(FILL_PX[1], (g.size - 1) * 2));
+    const canvas = this.fillCanvas ??= document.createElement('canvas');
+    if (canvas.width !== px || !this.fillTexture) {
+      canvas.width = canvas.height = px;
+      this.fillTexture?.dispose();          // a texture cannot change its size on the GPU
+      this.fillTexture = new THREE.CanvasTexture(canvas);
+      this.fillTexture.colorSpace = THREE.SRGBColorSpace;
+      this.fillTexture.generateMipmaps = false;
+      this.fillTexture.minFilter = THREE.LinearFilter;
+      const first = !this.materials.fill.map;
+      this.materials.fill.map = this.fillTexture;
+      if (first) this.materials.fill.needsUpdate = true;
     }
-    if (!key) return;
-    const map = this.ctx.store.map, pos = [], colors = [];
-    const tri = (ax, az, bx, bz, cx, cz, c) => {
-      pos.push(ax, Y_FILL, az, bx, Y_FILL, bz, cx, Y_FILL, cz);
-      for (let i = 0; i < 3; i++) colors.push(c[0], c[1], c[2]);
-    };
+    const c2d = canvas.getContext('2d'), k = px / (2 * half), at = (v) => (v + half) * k;
+    c2d.clearRect(0, 0, px, px);
     for (const { region, state } of this.lines) {
       if (!state) continue;
-      const s = region.shape, c = rgb(regionColor(map, region));
-      if (s.type === 'circle') {
-        for (let i = 0, n = 64; i < n; i++) {
-          const a = i / n * Math.PI * 2, b = (i + 1) / n * Math.PI * 2;
-          tri(s.x, s.z, s.x + Math.cos(a) * s.r, s.z + Math.sin(a) * s.r, s.x + Math.cos(b) * s.r, s.z + Math.sin(b) * s.r, c);
-        }
-      } else {
-        const p = s.points, faces = THREE.ShapeUtils.triangulateShape(p.map((q) => new THREE.Vector2(q[0], q[1])), []);
-        for (const [i, j, k] of faces) tri(p[i][0], p[i][1], p[j][0], p[j][1], p[k][0], p[k][1], c);
+      const s = region.shape;
+      c2d.fillStyle = css(regionColor(map, region));
+      c2d.beginPath();
+      if (s.type === 'circle') c2d.arc(at(s.x), at(s.z), s.r * k, 0, Math.PI * 2);
+      else {
+        s.points.forEach((p, i) => (i ? c2d.lineTo(at(p[0]), at(p[1])) : c2d.moveTo(at(p[0]), at(p[1]))));
+        c2d.closePath();
       }
+      c2d.fill();
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    this.fill = new THREE.Mesh(geometry, this.materials.fill);
-    this.fill.renderOrder = 0;
-    this.fill.frustumCulled = false;
-    this.fill.raycast = noRaycast;
-    this.body.add(this.fill);
+    this.fillTexture.needsUpdate = true;
+    if (!this.fill) {
+      this.fill = new THREE.Mesh(this.ctx.view?.groundGeometry ?? this.geometries.blank, this.materials.fill);
+      this.fill.renderOrder = 0;
+      this.fill.frustumCulled = false;
+      this.fill.raycast = noRaycast;
+      this.body.add(this.fill);
+    }
+    this.fill.visible = true;
   }
 
   // ---------------------------------------------------------------- ghost
@@ -1136,8 +1257,8 @@ export class Markers {
     gh.pins.begin(spawns.length + chests.length + npcs.length);
     gh.arrows.begin(chests.length + npcs.length);
     const pin = (item, c) => {
-      const s = sc.at(item.x, 0, item.z) ? unit * sc.perPx(sc.d) : 0;
-      gh.pins.put(M.makeScale(s, s, s).setPosition(item.x, 0, item.z), c.r, c.g, c.b);
+      const y = this.height(item.x, item.z), s = sc.at(item.x, y, item.z) ? unit * sc.perPx(sc.d) : 0;
+      gh.pins.put(M.makeScale(s, s, s).setPosition(item.x, y, item.z), c.r, c.g, c.b);
       return s;
     };
     const arrow = (item, s, c) => {
@@ -1218,7 +1339,7 @@ export class Markers {
     const sc = this.screen, target = viewport?.target ?? { x: 0, z: 0 }, list = [];
     const byLevel = !!ui.overlays?.levelColors;
     const offer = (item, kind, x, z, color) => {
-      if (!sc.at(x, 0, z) || sc.x < -60 || sc.x > w + 60 || sc.y < -20 || sc.y > h + 20) return;
+      if (!sc.on(x, z) || sc.x < -60 || sc.x > w + 60 || sc.y < -20 || sc.y > h + 20) return;
       const state = this._state(item);
       list.push({ item, kind, color, state, sx: sc.x, sy: sc.y, rank: state * 2 + (kind === 'region' ? 1 : 0), d: (x - target.x) ** 2 + (z - target.z) ** 2 });
     };
@@ -1232,7 +1353,7 @@ export class Markers {
     }
     list.sort((a, b) => b.rank - a.rank || a.d - b.d);
     if (list.length > MAX_LABELS) list.length = MAX_LABELS;
-    const far = sc.at(target.x, 0, target.z) && sc.perPx(sc.d) > LABEL_FAR;
+    const far = sc.on(target.x, target.z) && sc.perPx(sc.d) > LABEL_FAR;
 
     // where each one goes
     g.font = this.font;

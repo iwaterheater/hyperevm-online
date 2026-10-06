@@ -252,12 +252,14 @@ function applyHash(ctx, animate) {
 
 function testHook(ctx) {
   const { viewport } = ctx;
-  // A ground point in client pixels. A point that is not on the canvas is brought there by moving the camera to it.
+  // A ground point - the point of the TERRAIN over (x, z) - in client pixels. A point that is not on the canvas is
+  // brought there by moving the camera to it. (A point behind a hill is on the canvas and still not what a click at
+  // its pixel meets: the script then has to turn the camera, as a user would.)
   const pixel = (x, z) => {
-    let p = viewport.project(x, 0, z);
+    let p = viewport.project(x, viewport.groundY(x, z), z);
     if (!p.visible) {
       viewport.setTarget(x, z, { animate: false });
-      p = viewport.project(x, 0, z);
+      p = viewport.project(x, viewport.groundY(x, z), z);
     }
     return p;
   };

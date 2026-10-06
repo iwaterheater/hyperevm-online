@@ -12,6 +12,7 @@ export const TOOLS = [
   { id: 'paste',   label: 'Paste',       layer: null,      hidden: true,  path: './tools/paste.js' },
   { id: 'scatter', label: 'Scatter',     layer: 'objects', hidden: false, path: './tools/scatter.js' },
   { id: 'paint',   label: 'Terrain',     layer: 'ground',  hidden: false, path: './tools/paint.js' },
+  { id: 'sculpt',  label: 'Sculpt',      layer: 'ground',  hidden: false, path: './tools/sculpt.js' },
   { id: 'spawn',   label: 'Spawn',       layer: 'spawns',  hidden: false, path: './tools/spawn.js' },
   { id: 'chest',   label: 'Chest',       layer: 'chests',  hidden: false, path: './tools/chest.js' },
   { id: 'npc',     label: 'NPC',         layer: 'npcs',    hidden: false, path: './tools/npc.js' },

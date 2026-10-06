@@ -144,6 +144,7 @@ The window is a 3D view of the island with the model palette on the left, panels
 | Place | `P` | Puts the model chosen in the palette under the cursor: one at a time, as a line (walls, fences: click the corners, `Enter` finishes) or as a ring (drag from the centre). Alt-click picks the model of an object on the map |
 | Scatter | `B` | A brush that scatters the models selected in the palette (⌘/Ctrl-click adds one, Shift-click a whole range of tiles) at a chosen density, only on the chosen ground types; a second stroke over the same spot adds nothing. Alt erases |
 | Terrain | `T` | Paints ground types with a soft or hard brush, lays roads along clicked points (optionally clearing the scenery in the way) and flood-fills an area or the selected region. Water and lava block walking |
+| Sculpt | `Y` | Shapes the hills. **Raise** and **Lower**: hold the button and the ground under the brush goes up (down) for as long as you hold it, also while the pointer rests; `Alt` does the opposite, `Shift` smooths. **Smooth** evens the ground out, **Flatten** levels it to the height it had where the stroke began, **Set height** to a typed height (a plateau, a pit; Alt-click takes the height under the cursor), **Ramp** lays a straight slope between the press and the release, as wide as the brush - a road up a hill. Options: radius, strength, a soft or hard edge, and "Max slope", which keeps a stroke from making a wall (Off allows cliffs). `[` `]` change the radius, `Shift`+`[` `]` the strength, `1`-`6` the mode; one press-drag-release is one undo step and `Esc` takes it back. Heights run from -1 to 60 |
 | Spawn | `M` | Monster camps: click for a camp with the settings of the options strip, or drag from its centre to its radius; drag the rim to resize. The dashed ring shows from how far away the camp's monsters notice a player |
 | Chest | `C` | Treasure chests: gold, the big golden kind, the time until one refills. A click on a chest - its pin or the chest itself - selects it |
 | NPC | `U` | Blacksmith, Sage, Trader and guards |
@@ -162,6 +163,8 @@ The window is a 3D view of the island with the model palette on the left, panels
 - **Issues** – what is wrong with the map. An error (a camp inside the town, too many NPCs) blocks saving; a warning (a chest inside a wall, a camp nobody can walk to, objects left standing in water after a pond was painted, no Sage on the map) does not. A click on a row selects what it is about - one item, both boss camps, every object in the water - and goes there.
 - **Minimap** – the island from above; click to move the camera, four camera bookmarks. It stays in view at the foot of the right column while the panels above it scroll; fold it to one line when you need the room.
 
+**Hills.** The ground has a height at every vertex of its grid, and everything follows it. Objects, chests, camps and NPCs stand on the ground under them - an object's `Y` in the Inspector is its height ABOVE that ground, so sculpting under a village lifts the village. The cursor points at the hill it is over (the status bar shows the height there as `h`), the brush ring, the grid, the camp discs and the region outlines lie on the slopes, the minimap shades the relief, and Issues warns when a chest, an NPC, the centre of a camp or the start point stands on a slope steeper than 45 degrees. A flat map is saved as before: the file gains a `heights` block only once there is a hill.
+
 The toolbar also switches overlays (grid, colliders, the threat rings of all camps, a tint that shows which region wins where) and the preview: neutral light, the game's own look (the light of the region under the camera, fog, shadows, no markers), or one of the region moods.
 
 ### Keys worth knowing
@@ -171,7 +174,7 @@ The toolbar also switches overlays (grid, colliders, the threat rings of all cam
 | Right mouse button (drag) / wheel | Orbit / zoom towards the cursor |
 | `W` `A` `S` `D`, or Space + drag | Move the camera |
 | `F` / `H` / `O` | Frame the selection / go to the start point / look straight down |
-| `Q` `E`, `[` `]`, arrows | Turn, scale, nudge the selection (or the model about to be placed) |
+| `Q` `E`, `[` `]`, arrows | Turn, scale, nudge the selection (or the model about to be placed). With a brush (Terrain, Sculpt, Scatter) `[` `]` change its radius |
 | `G` | Snapping on and off (holding ⌘/Ctrl while dragging inverts it) |
 | ⌘/Ctrl + `Z`, `Shift`+`Z` | Undo, redo – a drag, a brush stroke, a paste or a typed value is one step each |
 | ⌘/Ctrl + `C` `X` `V` `D` | Copy, cut, paste (the copy hangs on the cursor until you click), duplicate |

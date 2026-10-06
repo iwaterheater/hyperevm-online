@@ -20,8 +20,8 @@ const KINDS = {
 const GEAR = /^(1H_|2H_|Knife|Throwable|Mug|Spellbook|.*_Shield)/;
 
 // `label(text, color, height)` builds a text sprite; `npcs` is the list of the map: { kind, x, z, ry }.
-// The map view registers them as obstacles.
-export async function createNpcs(scene, label, npcs) {
+// The map view registers them as obstacles. `heightAt(x, z)` is the height of the ground they stand on.
+export async function createNpcs(scene, label, npcs, heightAt = () => 0) {
   const loader = new GLTFLoader();
   const models = {};
   await Promise.all([...new Set(npcs.map((n) => KINDS[n.kind].model))].map(async (name) => {
@@ -43,7 +43,7 @@ export async function createNpcs(scene, label, npcs) {
     body.rotation.y = ry;
     body.add(model);
     root.add(body);
-    root.position.set(x, 0, z);
+    root.position.set(x, heightAt(x, z), z);
 
     const title = label(def.name, '#ffe9a6', 0.42);
     title.position.y = 3.1;

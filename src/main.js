@@ -5,7 +5,7 @@ import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton
 import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
 import { createComposer } from './postfx.js';
-import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss } from './map/format.js';
+import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, hotbar, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
@@ -113,6 +113,20 @@ addEventListener('resize', () => {
 const world = createWorld(scene, map);
 world.ready.catch(console.error);
 
+// The world has hills, the server does not: positions on the wire are x and z. Whatever stands, flies or is aimed here
+// keeps its own height ABOVE the ground and adds groundY() where it is drawn; on a flat map that is 0 everywhere.
+const groundY = world.heightAt;
+
+// Lays a flat marker (a ring made in the XY plane) on the ground around a point: `lift` above it and tilted like the
+// slope within `reach` units, so that on a hillside one half neither floats nor is buried. Flat ground: straight up.
+const FACING = new THREE.Vector3(0, 0, 1), slope = new THREE.Vector3();
+function layOnGround(mesh, x, z, reach, lift) {
+  const e = groundY(x + reach, z), w = groundY(x - reach, z), s = groundY(x, z + reach), n = groundY(x, z - reach);
+  slope.set((w - e) / (2 * reach), 1, (n - s) / (2 * reach)).normalize();
+  mesh.quaternion.setFromUnitVectors(FACING, slope);
+  mesh.position.set(x, Math.max(groundY(x, z), (e + w + s + n) / 4) + lift, z);   // a hollow must not swallow the centre
+}
+
 // ---------------------------------------------------------------- labels & bars
 
 function textSprite(text, color = '#d5f5ee', height = 0.5) {
@@ -140,7 +154,7 @@ function textSprite(text, color = '#d5f5ee', height = 0.5) {
 }
 
 let npcs = null;
-createNpcs(scene, textSprite, map.npcs).then((n) => { npcs = n; }, (err) => console.error('Townsfolk failed to load', err));
+createNpcs(scene, textSprite, map.npcs, groundY).then((n) => { npcs = n; }, (err) => console.error('Townsfolk failed to load', err));
 
 function disposeSprite(s) {
   s.removeFromParent();
@@ -234,7 +248,7 @@ const chestViews = [];   // index-aligned with map.chests; filled when the model
       model.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       const root = new THREE.Group();
       root.add(model);
-      root.position.set(c.x, 0, c.z);
+      root.position.set(c.x, groundY(c.x, c.z), c.z);
       root.rotation.y = c.ry;
       root.scale.setScalar(c.big ? 2 : 1.3);
       scene.add(root);
@@ -256,8 +270,10 @@ const dummy = new THREE.Object3D(), tmpColor = new THREE.Color();
 let pNext = 0;
 for (let i = 0; i < PMAX; i++) pMesh.setColorAt(i, tmpColor.set(0xffffff));
 
+// `y` is the height above the ground at x, z.
 function burst(x, y, z, hex, n, speed = 6) {
   tmpColor.set(hex).multiplyScalar(2.2);
+  y += groundY(x, z);
   for (let i = 0; i < n; i++) {
     const d = pData[pNext];
     d.p.set(x, y, z);
@@ -276,7 +292,8 @@ function updateParticles(dt) {
       d.life -= dt;
       d.v.y -= 18 * dt;
       d.p.addScaledVector(d.v, dt);
-      if (d.p.y < 0.08) { d.p.y = 0.08; d.v.y *= -0.4; }
+      const floor = groundY(d.p.x, d.p.z) + 0.08;   // sparks bounce off the hillside they land on
+      if (d.p.y < floor) { d.p.y = floor; d.v.y *= -0.4; }
       dummy.position.copy(d.p);
       dummy.scale.setScalar(Math.max(0, d.life / d.max));
     } else {
@@ -294,8 +311,7 @@ function spawnRing(x, z, maxR, hex) {
   const mesh = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
     color: glow(hex, 1.8), transparent: true, side: THREE.DoubleSide, depthWrite: false,
   }));
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(x, 0.1, z);
+  layOnGround(mesh, x, z, maxR / 2, 0.1);
   scene.add(mesh);
   rings.push({ mesh, t: 0, maxR });
 }
@@ -392,7 +408,7 @@ const me = makeAvatar();
 me.x = joinAt ? joinAt[0] : map.start.x;
 me.z = joinAt ? joinAt[1] : map.start.z;
 if (joinAt) world.snapMood(me.x, me.z);
-camera.position.set(me.x, 1.2, me.z + 0.4);   // the opening shot starts close to the cat and pulls back
+camera.position.set(me.x, groundY(me.x, me.z) + 1.2, me.z + 0.4);   // the opening shot starts close to the cat and pulls back
 const stats = { hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, sp: 0, level: 1, gold: 0, weapon: 1, cls: 'fighter', skills: {}, buffs: [], dead: false };
 // every derived stat of this character (P.Atk, Atk.Spd, Speed...), recomputed whenever the server state changes
 let sheet = statsOf('fighter', 1);
@@ -403,7 +419,6 @@ const local = {
 
 // ring on the ground under the selected monster: yellow when selected, red while attacking it
 const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
-targetRing.rotation.x = -Math.PI / 2;
 targetRing.visible = false;
 scene.add(targetRing);
 
@@ -415,16 +430,17 @@ const chopGeo = new THREE.PlaneGeometry(REACH, 0.4).translate(REACH / 2 + 0.6, 0
 function spawnSlash(x, z, dx, dz, kind) {
   const mesh = new THREE.Mesh(kind === 2 ? chopGeo : slashGeo, new THREE.MeshBasicMaterial({ color: glow(0xffffff, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
   mesh.rotation.set(-Math.PI / 2, 0, Math.atan2(-dz, dx));
-  mesh.position.set(x, 1.0, z);
+  mesh.position.set(x, groundY(x, z) + 1.0, z);
   scene.add(mesh);
   slashes.push({ mesh, t: 0, kind, yaw: mesh.rotation.z });
 }
 
-// numbers that float up over a monster when this player damages it, or over the cat when it is healed
+// numbers that float up over a monster when this player damages it, or over the cat when it is healed;
+// `y` is the height above the ground at x, z
 const floaters = [];
 function floatText(x, y, z, text, color, big) {
   const sprite = textSprite(text, color, big ? 0.9 : 0.62);
-  sprite.position.set(x + (Math.random() - 0.5) * 0.8, y, z);
+  sprite.position.set(x + (Math.random() - 0.5) * 0.8, groundY(x, z) + y, z);
   sprite.material.depthTest = false;
   sprite.renderOrder = 5;
   scene.add(sprite);
@@ -433,7 +449,6 @@ function floatText(x, y, z, text, color, big) {
 
 // preview of where an area skill will land while it is being cast
 const aoeMarker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
-aoeMarker.rotation.x = -Math.PI / 2;
 aoeMarker.visible = false;
 scene.add(aoeMarker);
 
@@ -616,7 +631,7 @@ function onSnapshot(s) {
     });
 
   syncViews(gemViews, s.g,
-    ([, x, z]) => { const g = gemPool.get(); g.mesh.position.set(x, 0.55, z); return g; },
+    ([, x, z]) => { const g = gemPool.get(); g.ground = groundY(x, z); g.mesh.position.set(x, g.ground + 0.55, z); return g; },
     () => {},
     (g) => gemPool.release(g));
 
@@ -629,7 +644,8 @@ function onSnapshot(s) {
 // a bolt that homes in on a monster; purely visual, the server decides the damage
 function spawnBolt(x, z, id, fx) {
   const b = bulletPool.get();
-  b.mesh.position.set(x, 1.1, z);
+  b.h = 1.1;   // its height above the ground it flies over
+  b.mesh.position.set(x, groundY(x, z) + b.h, z);
   b.mesh.material = FX[fx] || bulletMat;
   b.mesh.scale.setScalar(fx === 'arrow' ? 0.16 : 0.32);
   b.id = id;
@@ -639,7 +655,7 @@ function spawnBolt(x, z, id, fx) {
 
 function spawnProjectile(list, pool, x, z, dx, dz, speed, life) {
   const b = pool.get();
-  b.mesh.position.set(x, 1, z);
+  b.mesh.position.set(x, groundY(x, z) + 1, z);
   b.vx = dx * speed; b.vz = dz * speed; b.life = life;
   list.push(b);
 }
@@ -673,13 +689,12 @@ function onEvent(ev) {
         if (tv) burst(tv.x, tv.top, tv.z, 0xc9a6ff, 22, 4);
       } else if (k.kind === 'ground') {
         const marker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
-        marker.rotation.x = -Math.PI / 2;
-        marker.position.set(ev.x, 0.08, ev.z);
+        layOnGround(marker, ev.x, ev.z, k.radius / 2, 0.08);
         marker.scale.setScalar(k.radius);
         const star = new THREE.Mesh(sphereGeo, k.phys ? arrowMat : fireMat);
         star.scale.setScalar(k.phys ? 0.4 : 0.7);
         scene.add(marker, star);
-        meteors.push({ marker, star, t: 0, d: k.delay, x: ev.x, z: ev.z });
+        meteors.push({ marker, star, t: 0, d: k.delay, x: ev.x, y: groundY(ev.x, ev.z), z: ev.z });
         sfx(900, k.delay, 'sawtooth', 0.04, -700);
       } else if (k.kind === 'heal' || k.kind === 'buff' || k.kind === 'taunt' || k.kind === 'revive') {
         const color = { heal: 0x8ee68e, buff: 0xffd76a, taunt: 0xff5a5a, revive: 0xffffff }[k.kind];
@@ -809,7 +824,7 @@ function pickMob(clientX, clientY) {
   let best = 0, bestD = Infinity;
   for (const [id, v] of mobViews) {
     if (!v.root.visible || v.killed) continue;
-    pickV.set(v.x, v.top * 0.5, v.z);
+    pickV.set(v.x, groundY(v.x, v.z) + v.top * 0.5, v.z);
     const pixelsPerUnit = innerHeight / (0.89 * camera.position.distanceTo(pickV));   // 0.89 = 2 * tan(fov / 2)
     pickV.project(camera);
     if (pickV.z > 1) continue;
@@ -962,9 +977,8 @@ function startDash() {
 // ---------------------------------------------------------------- update
 
 const raycaster = new THREE.Raycaster();
-const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const aimPoint = new THREE.Vector3();
-const camTarget = new THREE.Vector3(me.x, 0.45, me.z - 6), camGoal = new THREE.Vector3(), lookGoal = new THREE.Vector3();
+const camTarget = new THREE.Vector3(me.x, groundY(me.x, me.z) + 0.45, me.z - 6), camGoal = new THREE.Vector3(), lookGoal = new THREE.Vector3();
 const prev = { x: 0, z: 0 };   // where the cat stood before it moved this frame
 
 const NEEDS_TARGET = ['strike', 'shot', 'bolt', 'sleep'];
@@ -1005,8 +1019,10 @@ function updateLocal(dt) {
   if (stats.dead) { me.speed = 0; me.castT = -1; me.sitting = false; attacking = false; fresh.clear(); return; }
   const cls = CLASSES[stats.cls];
 
+  // where area skills will land: the terrain under the cursor (the last such point while the cursor is on the sky)
   raycaster.setFromCamera(mouse, camera);
-  raycaster.ray.intersectPlane(groundPlane, aimPoint);   // where area skills will land
+  const aimed = rayGround(map, raycaster.ray.origin, raycaster.ray.direction, camera.far);
+  if (aimed) aimPoint.set(aimed.x, aimed.y, aimed.z);
 
   // WASD moves relative to the camera
   const k = (a, b) => (keys.has(a) || keys.has(b) ? 1 : 0);
@@ -1048,6 +1064,9 @@ function updateLocal(dt) {
   if (d > max) { me.x *= max / d; me.z *= max / d; }
   world.collide(me, 0.4, prev);
 
+  // me.y is the height above the ground. On its feet the cat simply follows the ground; in the air it keeps its real
+  // height while the ground rises or falls under it, so a jump at a slope lands sooner and one off a ledge later.
+  if (me.y > 0 || local.vy > 0) me.y += groundY(prev.x, prev.z) - groundY(me.x, me.z);
   local.vy -= 30 * dt;
   me.y += local.vy * dt;
   if (me.y <= 0) { me.y = 0; local.vy = 0; local.jumps = 0; }
@@ -1099,7 +1118,7 @@ function updateLocal(dt) {
     if (s.kind === 'ground') {
       const [gx, gz] = groundPoint(s.range);
       aoeMarker.visible = true;
-      aoeMarker.position.set(gx, 0.08, gz);
+      layOnGround(aoeMarker, gx, gz, s.radius / 2, 0.08);
       aoeMarker.scale.setScalar(s.radius);
     } else if (NEEDS_TARGET.includes(s.kind) && !tv) {
       me.castT = -1;   // the target is gone: the spell fizzles
@@ -1141,8 +1160,8 @@ function updateAvatar(a, dt, isMe) {
     if (a.castT >= 0 && (a.castT += dt) >= a.castDur) a.castT = -1;
     a.bar.set(a.hp / a.maxHp, !a.dead && a.hp < a.maxHp);
   }
-  a.root.position.set(a.x, 0, a.z);
-  a.cat.group.position.y = a.y;
+  a.root.position.set(a.x, groundY(a.x, a.z), a.z);   // the label and the bar stand on the ground with it
+  a.cat.group.position.y = a.y;                       // the jump: the height above that ground
   a.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
   a.cat.group.rotation.y = a.yaw - cam.yaw;
   if (a.swingT >= 0 && (a.swingT += dt / 0.4) >= 1) a.swingT = -1;
@@ -1165,7 +1184,7 @@ function updateViews(dt) {
     if (dx * dx + dz * dz > 0.0004) v.yaw = lerpAngle(v.yaw, Math.atan2(dx, dz), k);
     v.x += dx * k; v.z += dz * k;
     v.age += dt;
-    v.root.position.set(v.x, 0, v.z);
+    v.root.position.set(v.x, groundY(v.x, v.z), v.z);
     v.root.scale.setScalar(Math.min(1, v.age / 0.4));
     v.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
     v.skeleton.group.rotation.y = v.yaw - cam.yaw;
@@ -1183,7 +1202,7 @@ function updateViews(dt) {
     const c = corpses[j];
     c.t += dt;
     c.v.skeleton.update(dt, time, false);
-    if (c.t > 1.8) c.v.root.position.y = -(c.t - 1.8) * 1.5 * c.v.skeleton.group.scale.y;
+    if (c.t > 1.8) c.v.root.position.y = groundY(c.v.x, c.v.z) - (c.t - 1.8) * 1.5 * c.v.skeleton.group.scale.y;
     if (c.t > 3) { removeMobView(c.v); corpses.splice(j, 1); }
   }
 
@@ -1195,7 +1214,7 @@ function updateViews(dt) {
   let i = 0;
   for (const g of gemViews.values()) {
     g.mesh.rotation.y += dt * 3;
-    g.mesh.position.y = 0.55 + Math.sin(time * 4 + i++) * 0.12;
+    g.mesh.position.y = g.ground + 0.55 + Math.sin(time * 4 + i++) * 0.12;
   }
 
   // projectiles are simulated locally for looks; the server decides the damage
@@ -1204,9 +1223,11 @@ function updateViews(dt) {
     let done = !v;
     if (v) {
       const dx = v.x - m.x, dz = v.z - m.z, d = Math.hypot(dx, dz) || 0.001, step = b.speed * dt;
-      m.y += (v.top * 0.5 - m.y) * Math.min(1, dt * 8);
+      // it follows the lie of the land, so a rise between the two is flown over, not through
+      b.h += (v.top * 0.5 - b.h) * Math.min(1, dt * 8);
       if (d <= step + v.def.r * 0.6) { done = true; burst(v.x, v.top * 0.5, v.z, b.mesh.material.color.getHex(), 6, 5); }
       else { m.x += dx / d * step; m.z += dz / d * step; }
+      m.y = groundY(m.x, m.z) + b.h;
     }
     if (done) bulletPool.release(b);
     return !done;
@@ -1215,13 +1236,14 @@ function updateViews(dt) {
   const tv = mobViews.get(targetId);
   targetRing.visible = !!tv;
   if (tv) {
-    targetRing.position.set(tv.x, 0.07, tv.z);
     targetRing.scale.setScalar(tv.skeleton.group.scale.y * 0.75 + 0.35);
+    layOnGround(targetRing, tv.x, tv.z, targetRing.scale.x / 2, 0.07);
     targetRing.material.color.setHex(attacking ? 0xff4d5e : 0xffd76a);
   }
   orbs = orbs.filter((o) => {
     const m = o.mesh.position;
     m.x += o.vx * dt; m.z += o.vz * dt;
+    m.y = groundY(m.x, m.z) + 1;   // it skims the ground: the server lets it hit whoever is not jumping
     o.life -= dt;
     const dead = o.life <= 0 || isSafe(map, m.x, m.z) || (Math.hypot(m.x - me.x, m.z - me.z) < 0.7 && me.y < 1.4);
     if (dead) { burst(m.x, 1, m.z, 0xff3b6b, 4, 3); orbPool.release(o); }
@@ -1249,7 +1271,7 @@ function updateViews(dt) {
   meteors = meteors.filter((m) => {
     m.t += dt;
     const k = Math.min(1, m.t / m.d);
-    m.star.position.set(m.x + (1 - k) * 7, (1 - k) * 22 + 0.5, m.z - (1 - k) * 4);
+    m.star.position.set(m.x + (1 - k) * 7, m.y + (1 - k) * 22 + 0.5, m.z - (1 - k) * 4);
     m.marker.material.opacity = 0.4 + 0.5 * Math.abs(Math.sin(m.t * 25));
     if (k < 1) return true;
     scene.remove(m.marker, m.star);
@@ -1507,14 +1529,16 @@ function drawMinimap() {
   g.restore();
 }
 
+const CAM_CLEAR = 0.6;   // the camera stays at least this high above the ground under it
 function updateCamera(dt) {
+  const ground = groundY(me.x, me.z);   // the orbit follows the ground the cat stands on, not its jumps
   if (state === 'playing') {
     const flat = Math.cos(cam.pitch) * cam.dist;
-    lookGoal.set(me.x, 1.2, me.z);
-    camGoal.set(me.x + Math.sin(cam.yaw) * flat, 1.2 + Math.sin(cam.pitch) * cam.dist, me.z + Math.cos(cam.yaw) * flat);
+    lookGoal.set(me.x, ground + 1.2, me.z);
+    camGoal.set(me.x + Math.sin(cam.yaw) * flat, ground + 1.2 + Math.sin(cam.pitch) * cam.dist, me.z + Math.cos(cam.yaw) * flat);
   } else {
-    camGoal.set(me.x, 1.2, me.z + 6.4);
-    lookGoal.set(me.x, 0.45, me.z);
+    camGoal.set(me.x, ground + 1.2, me.z + 6.4);
+    lookGoal.set(me.x, ground + 0.45, me.z);
   }
   const k = 1 - Math.exp(-(state === 'playing' ? 12 : 5) * dt);
   camera.position.lerp(camGoal, k);
@@ -1522,6 +1546,8 @@ function updateCamera(dt) {
   shake = Math.max(0, shake - dt * 2.5);
   camera.position.x += (Math.random() - 0.5) * shake * 0.5;
   camera.position.y += (Math.random() - 0.5) * shake * 0.5;
+  // a hill behind the cat lifts the camera over itself instead of swallowing it
+  camera.position.y = Math.max(camera.position.y, groundY(camera.position.x, camera.position.z) + CAM_CLEAR);
   camera.lookAt(camTarget);
 }
 

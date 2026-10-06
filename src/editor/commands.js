@@ -1,4 +1,4 @@
-// Commands: the ONLY code that writes to the map. Nothing else assigns to an item or to ground.cells.
+// Commands: the ONLY code that writes to the map. Nothing else assigns to an item, to ground.cells or to ground.heights.
 // Pure - no DOM, no three. A command is built here and run by the store (store.exec):
 //
 //   Command = { label, bytes, do(map) -> Change, undo(map) -> Change, merge?(next) -> boolean, unchanged?(map) -> boolean }
@@ -18,7 +18,7 @@
 //   - Change lists name only what really changed; a command that changed nothing returns an empty Change and the store
 //     forgets it.
 import { MOB_KEYS, MOB_TYPES } from '../shared.js';
-import { COLLECTION, GROUND_TYPES, MOODS, NPC_KINDS, maxRadius, quantizeItem, resizeGround } from '../map/format.js';
+import { COLLECTION, GROUND_TYPES, MOODS, NPC_KINDS, clampHeight, maxRadius, quantizeItem, resizeGround } from '../map/format.js';
 import { emptyChange } from './store.js';
 
 // ---------------------------------------------------------------- items: fields, kinds, values
@@ -827,6 +827,140 @@ export function paint(indices, type) {
   return new Paint(indices, type);
 }
 
+// ---------------------------------------------------------------- heights
+
+// The vertices one sculpt stroke moved: index and the height each one had BEFORE the stroke. A stroke writes the same
+// vertices again on every frame, so a vertex is recorded once (`slot` finds it) and only its first `before` is kept.
+class Relief {
+  constructor() {
+    this.n = 0;
+    this.index = new Int32Array(256);
+    this.before = new Float32Array(256);
+    this.after = null;       // what each vertex held when the stroke was undone; all a redo needs
+    this.slot = new Map();   // vertex index -> its place in the two lists
+    this.made = null;        // the heights array this stroke had to create (a ground that came without one)
+  }
+
+  // Remembers the height the vertex has now, unless the stroke has moved it before.
+  keep(index, before) {
+    if (this.slot.has(index)) return;
+    if (this.n === this.index.length) {
+      const index2 = new Int32Array(this.n * 2), before2 = new Float32Array(this.n * 2);
+      index2.set(this.index);
+      before2.set(this.before);
+      this.index = index2;
+      this.before = before2;
+    }
+    this.slot.set(index, this.n);
+    this.index[this.n] = index;
+    this.before[this.n++] = before;
+  }
+}
+
+class Heights {
+  constructor(indices, values, label) {
+    if (!indices || typeof indices.length !== 'number') fail('heights', 'vertex indices (an Int32Array or an array)');
+    const one = typeof values === 'number';
+    if (!one && (!values || values.length !== indices.length)) fail('heights', 'one height per index, or one height for all');
+    this.indices = Int32Array.from(indices);      // copies: brushes reuse their buffers
+    this.values = new Float32Array(indices.length);
+    for (let k = 0; k < indices.length; k++) {
+      const v = one ? values : values[k];
+      if (!finite(v)) fail(`heights: values[${k}]`, 'a finite number');
+      this.values[k] = clampHeight(v);            // on the 0.1 grid and inside LIMITS.height: what the file can hold
+    }
+    this.label = String(label);
+    this.stroke = new Relief();
+  }
+
+  get bytes() { return 64 + 28 * this.stroke.n; }
+
+  do(map) {
+    const ground = map.ground, stroke = this.stroke, size = ground.size, change = emptyChange();
+    let ix0 = size, iz0 = size, ix1 = -1, iz1 = -1;
+    const grow = (i) => {
+      const ix = i % size, iz = (i - ix) / size;
+      if (ix < ix0) ix0 = ix;
+      if (ix > ix1) ix1 = ix;
+      if (iz < iz0) iz0 = iz;
+      if (iz > iz1) iz1 = iz;
+    };
+    if (!ground.heights && (this.indices || stroke.after)) {
+      // a ground without heights is flat: the first stroke gives it the array (undo takes it away again)
+      stroke.made ??= new Float32Array(ground.cells.length);
+      ground.heights = stroke.made;
+    }
+    const heights = ground.heights;
+    if (this.indices) {                           // the first time
+      const list = this.indices, values = this.values;
+      this.indices = this.values = null;
+      for (let k = 0; k < list.length; k++) {
+        const i = list[k];
+        if (i < 0 || i >= heights.length || heights[i] === values[k]) continue;   // off the grid, or there already
+        stroke.keep(i, heights[i]);
+        heights[i] = values[k];
+        grow(i);
+      }
+    } else if (stroke.after) {                    // a redo
+      for (let k = 0; k < stroke.n; k++) {
+        const i = stroke.index[k];
+        if (heights[i] === stroke.after[k]) continue;
+        heights[i] = stroke.after[k];
+        grow(i);
+      }
+    }
+    if (ix1 >= 0) change.ground = { ix0, iz0, ix1, iz1, relief: true };
+    return change;
+  }
+
+  undo(map) {
+    const ground = map.ground, heights = ground.heights, stroke = this.stroke, size = ground.size, change = emptyChange();
+    if (!heights) return change;
+    let ix0 = size, iz0 = size, ix1 = -1, iz1 = -1;
+    if (!stroke.after || stroke.after.length !== stroke.n) stroke.after = new Float32Array(stroke.n);
+    for (let k = 0; k < stroke.n; k++) stroke.after[k] = heights[stroke.index[k]];
+    for (let k = 0; k < stroke.n; k++) {
+      const i = stroke.index[k];
+      if (heights[i] === stroke.before[k]) continue;
+      heights[i] = stroke.before[k];
+      const ix = i % size, iz = (i - ix) / size;
+      if (ix < ix0) ix0 = ix;
+      if (ix > ix1) ix1 = ix;
+      if (iz < iz0) iz0 = iz;
+      if (iz > iz1) iz1 = iz;
+    }
+    if (stroke.made && heights === stroke.made) delete ground.heights;   // the ground is as it was found: without the array
+    if (ix1 >= 0) change.ground = { ix0, iz0, ix1, iz1, relief: true };
+    return change;
+  }
+
+  // The store offers `next` BEFORE it runs it: from now on next writes into this command's stroke, and this command
+  // undoes and redoes the whole of it (the first `before` of a vertex wins, its latest height applies).
+  merge(next) {
+    if (!(next instanceof Heights) || !next.indices) return false;
+    next.stroke = this.stroke;
+    return true;
+  }
+
+  // A stroke that raised and lowered its way back: every vertex holds the height it had before.
+  unchanged(map) {
+    const heights = map.ground.heights, stroke = this.stroke;
+    if (!heights) return true;
+    for (let k = 0; k < stroke.n; k++) if (heights[stroke.index[k]] !== stroke.before[k]) return false;
+    return true;
+  }
+}
+
+// indices: Int32Array | number[] into ground.heights; values: one height per index (Float32Array | number[]), or one
+// number for all of them. A height is written on the 0.1 grid and clamped to LIMITS.height (clampHeight); vertices that
+// hold their value already are skipped. Change.ground is the inclusive rectangle of the vertices that moved, with
+// `relief: true` - what tells a listener that the SHAPE of the ground changed, not its paint.
+// Merges with a following heights() inside a store group: a stroke that writes the same vertices sixty times a second
+// is one command with one record per vertex.
+export function heights(indices, values, label = 'Sculpt') {
+  return new Heights(indices, values, label);
+}
+
 // ---------------------------------------------------------------- setProps
 
 const PROPS = ['name', 'radius', 'foliage', 'fallback'];
@@ -870,7 +1004,7 @@ class Props {
     return 'Edit the map';
   }
 
-  get bytes() { return 128 + (this.after && this.after.ground ? this.after.ground.cells.length : 0); }
+  get bytes() { return 128 + (this.after && this.after.ground ? this.after.ground.cells.length * (this.after.ground.heights ? 5 : 1) : 0); }
 
   // The spec asks for the radius to be clamped "before the command is built" - but a command is built without a map.
   // So it happens here, the first time the command meets the map it is for.
@@ -935,9 +1069,11 @@ function union(changes) {
     if (ch.props.includes('ground')) rect = null;       // a rectangle of the old grid means nothing on the new one
     if (ch.ground) {
       const g = ch.ground;
+      const relief = !!(rect?.relief || g.relief);
       rect = rect
         ? { ix0: Math.min(rect.ix0, g.ix0), iz0: Math.min(rect.iz0, g.iz0), ix1: Math.max(rect.ix1, g.ix1), iz1: Math.max(rect.iz1, g.iz1) }
         : { ix0: g.ix0, iz0: g.iz0, ix1: g.ix1, iz1: g.iz1 };
+      if (relief) rect.relief = true;       // the shape of the ground moved somewhere inside the rectangle
     }
     for (const list of LISTS) {
       const { added, removed, updated } = sets[list];

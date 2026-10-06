@@ -95,7 +95,7 @@ export default function create(ctx) {
     const reach = LIMITS.regionReach * groundHalf(store.map.ground);
     return Math.abs(x) <= reach && Math.abs(z) <= reach;
   };
-  const pxTo = (p, ev) => { const s = viewport.project(p[0], 0, p[1]); return Math.hypot(s.x - ev.clientX, s.y - ev.clientY); };
+  const pxTo = (p, ev) => { const s = viewport.project(p[0], viewport.groundY(p[0], p[1]), p[1]); return Math.hypot(s.x - ev.clientX, s.y - ev.clientY); };
 
   function setCursor(next) {
     // '' hands the cursor back to the viewport (a handle, a locked layer, the crosshair of a path)
@@ -453,9 +453,10 @@ export default function create(ctx) {
     activate() {
       const group = new THREE.Group();
       group.name = 'region-tool';
-      const path = createLine(LINE_COLOR), closing = createLine(LINE_COLOR, { width: 1.5, opacity: 0.4 });
-      const rubber = createLine(LINE_COLOR, { width: 1.5, opacity: 0.75 });
-      const dots = createDots(0xffffff), first = createDots(CLOSE_COLOR, { size: 18 }), knob = createDots(ACTIVE_COLOR, { size: 15 });
+      const height = viewport.groundY;   // the preview lies on the hills, like the outline it becomes
+      const path = createLine(LINE_COLOR, { height }), closing = createLine(LINE_COLOR, { width: 1.5, opacity: 0.4, height });
+      const rubber = createLine(LINE_COLOR, { width: 1.5, opacity: 0.75, height });
+      const dots = createDots(0xffffff, { height }), first = createDots(CLOSE_COLOR, { size: 18, height }), knob = createDots(ACTIVE_COLOR, { size: 15, height });
       group.add(closing.object, path.object, rubber.object, dots.object, first.object, knob.object);
       viewport.overlay.add(group);
       visuals = { group, path, closing, rubber, dots, first, knob };

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { MOB_KEYS } from '../src/shared.js';
 import {
   COLLECTION, GROUND_INDEX, GROUND_TYPES, LIMITS, MOODS, NPC_KINDS, cellIndex, cellXZ, decodeItem, emptyMap, encodeItem, groundAt,
-  groundHalf, maxRadius, normalize, qAngle, qPos, qScale, regionAt, serialize, stringifyMap, toDeg, toRad, validate,
+  groundHalf, heightAt as heightOf, maxRadius, normalize, qAngle, qPos, qScale, regionAt, serialize, stringifyMap, toDeg, toRad, validate,
 } from '../src/map/format.js';
 import { createStore, isEmptyChange } from '../src/editor/store.js';
 import * as cmd from '../src/editor/commands.js';
@@ -942,6 +942,154 @@ test('paint: the brush may reuse its buffer; a merged stroke keeps the first `be
   assert.equal(one.merge(cmd.setProps({ name: 'x' })), false);
   one.undo(map);
   assert.equal(text(map), before);
+});
+
+// ---------------------------------------------------------------- heights
+
+test('heights: written on the 0.1 grid and inside LIMITS.height; Change.ground is the rectangle that moved, marked as relief', () => {
+  const { map, store } = world();
+  const before = text(map), g = map.ground, at = (x, z) => cellIndex(g, x, z);
+  const { ix, iz } = cellXZ(g, at(10, 20));
+  const a = at(10, 20), b = at(12, 20), c = at(14, 22);
+  const change = store.exec(cmd.heights([a, b, c, a], [1.234, 100, -700, 1.26]));
+  assert.deepEqual(change.ground, { ix0: ix, iz0: iz, ix1: ix + 2, iz1: iz + 1, relief: true });
+  assert.equal(g.heights[a], Math.fround(1.3), 'on the 0.1 grid; of an index given twice the later value wins');
+  assert.equal(g.heights[b], LIMITS.height[1], 'clamped to the highest ground a map can have');
+  assert.equal(g.heights[c], LIMITS.height[0], 'and to the lowest');
+  assert.equal(store.undoLabel, 'Sculpt');
+  assert.deepEqual(errors(map), []);
+  assert.notEqual(raw(map), before);
+  assert.ok(serialize(map).ground.heights, 'a hilly ground is written to the file');
+
+  // a height that is there already changes nothing, and neither does an index off the grid
+  assert.ok(isEmptyChange(store.exec(cmd.heights([a, b], [1.3, 60]))));
+  assert.ok(isEmptyChange(store.exec(cmd.heights([-1, g.size * g.size], 5))));
+  assert.equal(store.undoLabel, 'Sculpt');
+  // one number for every index, and a label of its own
+  const flat = store.exec(cmd.heights(Int32Array.from([a, b, c]), 3, 'Flatten'));
+  assert.deepEqual(flat.ground, { ix0: ix, iz0: iz, ix1: ix + 2, iz1: iz + 1, relief: true });
+  assert.deepEqual([g.heights[a], g.heights[b], g.heights[c]], [3, 3, 3]);
+  assert.equal(store.undoLabel, 'Flatten');
+
+  store.undo();
+  assert.deepEqual([g.heights[a], g.heights[b], g.heights[c]], [Math.fround(1.3), 60, LIMITS.height[0]]);
+  store.undo();
+  assert.equal(text(map), before, 'byte-identical after undo');
+  assert.equal(serialize(map).ground.heights, undefined, 'a flat ground carries no heights in the file');
+  store.redo();
+  store.redo();
+  assert.deepEqual([g.heights[a], g.heights[b], g.heights[c]], [3, 3, 3]);
+  while (store.undo() !== null);
+  assert.equal(text(map), before);
+
+  assert.throws(() => cmd.heights(null, 1), TypeError);
+  assert.throws(() => cmd.heights([0, 1], [1]), TypeError, 'one height per index');
+  assert.throws(() => cmd.heights([0], [NaN]), TypeError, 'a height with no file form');
+  assert.throws(() => cmd.heights([0], Infinity), TypeError);
+});
+
+test('heights: a stroke inside a group is ONE undo step that keeps the first `before` of every vertex', () => {
+  const { map, store } = world();
+  const before = text(map), g = map.ground, a = cellIndex(g, 0, 40), b = a + 1, c = a + 2;
+  const buffer = new Int32Array([a, b]), values = new Float32Array([0.5, 0.5]);
+  const first = cmd.heights(buffer, values);
+  buffer.fill(c);                                   // the brush moves on before the command runs
+  values.fill(9);
+  store.begin('Raise');
+  store.exec(first);
+  assert.deepEqual([g.heights[a], g.heights[b], g.heights[c]], [0.5, 0.5, 0]);
+  // sixty frames of a held brush: the same vertices, a little higher each time
+  for (let f = 1; f <= 60; f++) store.exec(cmd.heights([a, b, c], [0.5 + f * 0.1, 0.5 + f * 0.05, f * 0.1]));
+  assert.equal(store.commit(), true);
+  const done = raw(map);
+  assert.deepEqual([g.heights[a], g.heights[b], g.heights[c]], [6.5, 3.5, 6]);
+  assert.equal(store.undoLabel, 'Raise');
+
+  let changes = 0;
+  const off = store.on('change', () => changes++);
+  assert.equal(store.undo(), 'Raise');
+  off();
+  assert.equal(changes, 1, 'sixty-one commands, one step');
+  assert.equal(text(map), before, 'every vertex is back at the height it had before the stroke');
+  assert.equal(store.canUndo, false);
+  store.redo();
+  assert.equal(raw(map), done);
+  store.undo();
+  assert.equal(text(map), before);
+
+  const one = cmd.heights([a], 1), two = cmd.heights([a, b], 2);
+  one.do(map);
+  assert.equal(one.merge(two), true);
+  two.do(map);
+  assert.ok(one.bytes < 64 + 100, 'a vertex is recorded once, however often the stroke writes it');
+  assert.equal(one.merge(cmd.paint([a], 1)), false);
+  assert.equal(one.merge(cmd.setProps({ name: 'x' })), false);
+  one.undo(map);
+  assert.equal(text(map), before);
+});
+
+test('heights: a stroke that changes nothing leaves no step, and neither does one that ends where it began', () => {
+  const { map, store } = world();
+  const before = text(map), g = map.ground, a = cellIndex(g, 20, 20);
+  store.begin('Smooth');
+  for (let f = 0; f < 10; f++) assert.ok(isEmptyChange(store.exec(cmd.heights([a, a + 1], 0))), 'flat ground smoothed stays flat');
+  assert.equal(store.commit(), false);
+  assert.equal(store.canUndo, false);
+  assert.equal(store.dirty, false);
+
+  store.begin('Raise');
+  store.exec(cmd.heights([a], 2));
+  store.exec(cmd.heights([a], 0.04));               // 0.04 is 0 on the grid: back where it started
+  assert.equal(g.heights[a], 0);
+  assert.equal(store.commit(), false, 'up and down again: nothing to undo');
+  assert.equal(store.canUndo, false);
+
+  store.begin('Raise');
+  store.exec(cmd.heights([a], 2));
+  assert.equal(store.cancel(), true);
+  assert.equal(text(map), before, 'Esc takes the stroke back');
+  assert.equal(store.canUndo, false);
+});
+
+test('heights: whatever replaces the ground keeps the hills, and a ground without the array gets one for the stroke only', () => {
+  const map = emptyMap(), store = createStore();
+  store.load(map);
+  const before = text(map), ground = map.ground, mid = cellIndex(ground, 0, 0), rim = cellIndex(ground, 200, 0);
+  store.exec(cmd.heights([mid, rim], [12, 4]));
+  assert.equal(heightOf(map, 0, 0), 12);
+  // a larger island: the grid grows around the old one and the hills stay where they are
+  assert.deepEqual(store.exec(cmd.setProps({ radius: 300 })).props, ['radius', 'ground']);
+  assert.notEqual(map.ground, ground);
+  assert.equal(map.ground.heights.length, map.ground.cells.length);
+  assert.equal(heightOf(map, 0, 0), 12);
+  assert.equal(heightOf(map, 200, 0), 4);
+  store.exec(cmd.heights([cellIndex(map.ground, 290, 0)], 7));
+  assert.equal(heightOf(map, 290, 0), 7);
+  assert.deepEqual(errors(map), []);
+  const again = normalize(JSON.parse(text(map)));
+  assert.equal(heightOf(again, 290, 0), 7, 'the file brings the hills back');
+  assert.equal(heightOf(again, 0, 0), 12);
+  // a batch reports the union of its rectangles and still says that the relief moved
+  const both = store.exec(cmd.batch('Paint and raise', [cmd.paint([0], GROUND_INDEX.snow), cmd.heights([5], 1)]));
+  assert.deepEqual(both.ground, { ix0: 0, iz0: 0, ix1: 5, iz1: 0, relief: true });
+  assert.equal(store.exec(cmd.paint([1], GROUND_INDEX.snow)).ground.relief, undefined, 'paint alone moves no ground');
+  while (store.undo() !== null);
+  assert.equal(map.ground, ground);
+  assert.equal(text(map), before);
+
+  // a runtime map of before the relief: no heights array at all
+  const old = emptyMap();
+  delete old.ground.heights;
+  const st = createStore();
+  st.load(old);
+  const flat = text(old);
+  st.exec(cmd.heights([cellIndex(old.ground, 10, 10)], 3));
+  assert.equal(heightOf(old, 10, 10), 3);
+  st.undo();
+  assert.equal(old.ground.heights, undefined, 'undo leaves the ground as it was found');
+  assert.equal(text(old), flat);
+  st.redo();
+  assert.equal(heightOf(old, 10, 10), 3);
 });
 
 // ---------------------------------------------------------------- setProps

@@ -32,6 +32,7 @@ export const BINDINGS = [
   row('global', 'KeyP', 'tool.place', 'Place tool'),
   row('global', 'KeyB', 'tool.scatter', 'Scatter brush'),
   row('global', 'KeyT', 'tool.paint', 'Terrain paint'),
+  row('global', 'KeyY', 'tool.sculpt', 'Sculpt tool: hills and valleys (Y is up)'),
   row('global', 'KeyM', 'tool.spawn', 'Spawn tool'),
   row('global', 'KeyC', 'tool.chest', 'Chest tool'),
   row('global', 'KeyU', 'tool.npc', 'NPC tool'),
@@ -112,12 +113,12 @@ export const BINDINGS = [
   row('ghost', 'Backspace', 'path.back', 'Place, Line: nothing left to take back (the selection is not deleted)'),
   row('ghost', 'Delete', 'path.back', 'Place, Line: nothing left to take back (the selection is not deleted)'),
 
-  // ---- brush: Terrain brush and fill, Scatter
+  // ---- brush: Terrain brush and fill, Sculpt, Scatter
   row('brush', 'BracketLeft', 'brush.smaller', 'Smaller brush'),
   row('brush', 'BracketRight', 'brush.larger', 'Larger brush'),
-  row('brush', 'Shift+BracketLeft', 'brush.optDown', 'Scatter: lower density. Terrain: soft edge'),
-  row('brush', 'Shift+BracketRight', 'brush.optUp', 'Scatter: higher density. Terrain: hard edge'),
-  ...digits(9).map((n) => row('brush', `Digit${n}`, `brush.type.${n}`, `Terrain: ground type ${n}`)),
+  row('brush', 'Shift+BracketLeft', 'brush.optDown', 'Scatter: lower density. Terrain: soft edge. Sculpt: less strength'),
+  row('brush', 'Shift+BracketRight', 'brush.optUp', 'Scatter: higher density. Terrain: hard edge. Sculpt: more strength'),
+  ...digits(9).map((n) => row('brush', `Digit${n}`, `brush.type.${n}`, `Terrain: ground type ${n}. Sculpt: mode ${n}`)),
   // a Road of the Terrain tool before its first point: as for a Line above
   row('brush', 'Backspace', 'path.back', 'Terrain, Road: nothing left to take back (the selection is not deleted)'),
   row('brush', 'Delete', 'path.back', 'Terrain, Road: nothing left to take back (the selection is not deleted)'),

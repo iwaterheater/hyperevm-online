@@ -51,7 +51,7 @@ const SAFE_COLOR = '#7fe8d6';
 // The *Margin values are how far inside `radius` a start disc, a spawn disc, a chest or an NPC must stay.
 export const LIMITS = {
   name: [1, 64], regionName: [1, 48], radius: [40, 600],
-  groundCells: [1, 2, 4], groundSize: [33, 513], groundTypes: 52, groundMargin: 20,
+  groundCells: [1, 2, 4], groundSize: [33, 513], groundTypes: 52, groundMargin: 20, height: [-12, 60],
   startR: [0, 40], startMargin: 2,
   regions: 64, regionR: [1, 1200], regionReach: 2, polyPoints: [3, 64], polyArea: 1, level: [1, 99],
   objects: 50000, objectsWarn: 20000, objectY: [-20, 100], scale: [0.05, 20], colFactor: 4, colCircles: 8, colExtent: 50,
@@ -143,8 +143,10 @@ export function groundAt(map, x, z) {
   const g = map.ground;
   return GROUND_TYPES[g.cells[groundIx(g, z) * g.size + groundIx(g, x)]];
 }
+// Nobody walks on a blocking ground type - nor where the ground lies deeper under the water than a cat can wade:
+// a pit dug below the waterline is a lake.
 export function isBlocked(map, x, z) {
-  return groundAt(map, x, z)?.block === true;
+  return groundAt(map, x, z)?.block === true || (!!map.ground.heights && heightAt(map, x, z) < WATER_LEVEL - WADE);
 }
 
 // The same ground when it already reaches radius + 20; otherwise a NEW, larger one (same cell, smallest odd size that does):
@@ -153,12 +155,114 @@ export function resizeGround(ground, radius) {
   const need = radius + LIMITS.groundMargin;
   if (groundHalf(ground) >= need) return ground;
   const { cell, size: old } = ground, size = 2 * Math.ceil(need / cell) + 1, shift = (size - old) / 2;
-  const cells = new Uint8Array(size * size);
+  const cells = new Uint8Array(size * size), heights = new Float32Array(size * size);
   for (let iz = 0; iz < size; iz++) {
     const row = Math.max(0, Math.min(old - 1, iz - shift)) * old;
-    for (let ix = 0; ix < size; ix++) cells[iz * size + ix] = ground.cells[row + Math.max(0, Math.min(old - 1, ix - shift))];
+    for (let ix = 0; ix < size; ix++) {
+      const from = row + Math.max(0, Math.min(old - 1, ix - shift));
+      cells[iz * size + ix] = ground.cells[from];
+      if (ground.heights) heights[iz * size + ix] = ground.heights[from];
+    }
   }
-  return { cell, size, cells };
+  return { cell, size, cells, heights };
+}
+
+// The sea stands at this height everywhere: around the island, and in every hollow that reaches below it.
+export const WATER_LEVEL = -1.2;
+const WADE = 0.5;   // how deep under the water the ground may lie and still be walked on
+
+// ---- relief: one height per ground vertex, in world units on a 0.1 grid. The surface between the vertices is that of
+// the terrain mesh (two triangles per cell, split along the diagonal from (ix, iz + 1) to (ix + 1, iz)), so whatever
+// stands on heightAt() stands on what is drawn. A ground without `heights` is flat.
+export const qHeight = (v) => { const q = Math.round(v * 10) / 10; return q === 0 ? 0 : q; };
+export const clampHeight = (v) => qHeight(Math.max(LIMITS.height[0], Math.min(LIMITS.height[1], v)));
+
+export function heightAt(map, x, z) {
+  const g = map.ground, h = g.heights;
+  if (!h) return 0;
+  const last = g.size - 1, mid = last / 2;
+  const gx = Math.max(0, Math.min(last, x / g.cell + mid)), gz = Math.max(0, Math.min(last, z / g.cell + mid));
+  const ix = Math.min(last - 1, Math.floor(gx)), iz = Math.min(last - 1, Math.floor(gz)), fx = gx - ix, fz = gz - iz;
+  const i = iz * g.size + ix, a = h[i], d = h[i + 1], b = h[i + g.size], c = h[i + g.size + 1];
+  return fx + fz <= 1 ? a + fx * (d - a) + fz * (b - a) : c + (1 - fx) * (b - c) + (1 - fz) * (d - c);
+}
+
+// Where a ray meets the ground: { x, y, z } | null. origin and dir are { x, y, z }; dir need not be normalised.
+// Marches no further than `far` world units; a ray that starts under the ground answers with its start.
+export function rayGround(map, origin, dir, far = 4000) {
+  const len = Math.hypot(dir.x, dir.y, dir.z);
+  if (!(len > 0)) return null;
+  const dx = dir.x / len, dy = dir.y / len, dz = dir.z / len;
+  const above = (t) => origin.y + dy * t - heightAt(map, origin.x + dx * t, origin.z + dz * t);
+  const point = (t) => ({ x: origin.x + dx * t, y: heightAt(map, origin.x + dx * t, origin.z + dz * t), z: origin.z + dz * t });
+  if (!map.ground.heights) {                     // flat: the plane y = 0
+    if (!(dy < 0) || origin.y < 0) return origin.y <= 0 && dy <= 0 ? point(0) : null;
+    const t = origin.y / -dy;
+    return t <= far ? point(t) : null;
+  }
+  if (above(0) <= 0) return point(0);
+  // nothing is higher than the limit: skip the empty air above it, then walk in steps shorter than a cell
+  let t = 0;
+  if (origin.y > LIMITS.height[1]) {
+    if (!(dy < 0)) return null;
+    t = (origin.y - LIMITS.height[1]) / -dy;
+  }
+  const step = map.ground.cell * 0.5;
+  for (let prev = t; t <= far; prev = t, t += step) {
+    if (above(t) > 0) continue;
+    let lo = prev, hi = t;                       // the crossing lies between the last two samples
+    for (let k = 0; k < 24; k++) {
+      const m = (lo + hi) / 2;
+      if (above(m) > 0) lo = m; else hi = m;
+    }
+    return point(hi);
+  }
+  return null;
+}
+
+// A height row of a file: comma-separated tenths of a unit, a run written as value*count ("0*120,5,7,12*3,...").
+export function encodeHeights(heights, size) {
+  if (!heights || !heights.some((h) => h !== 0)) return undefined;   // a flat ground carries no key at all
+  const rows = [];
+  for (let iz = 0; iz < size; iz++) {
+    const out = [];
+    for (let ix = 0; ix < size;) {
+      const v = Math.round(heights[iz * size + ix] * 10);
+      let n = 1;
+      while (ix + n < size && Math.round(heights[iz * size + ix + n] * 10) === v) n++;
+      out.push(n > 1 ? `${v === 0 ? 0 : v}*${n}` : `${v === 0 ? 0 : v}`);
+      ix += n;
+    }
+    rows.push(out.join(','));
+  }
+  return rows;
+}
+
+const HEIGHT_ROW_RE = /^-?\d{1,4}(\*\d{1,3})?(,-?\d{1,4}(\*\d{1,3})?)*$/;
+// -> Float32Array(size * size). Throws a MapError listing what is wrong with the rows. `rows` undefined = flat.
+export function decodeHeights(rows, size) {
+  const heights = new Float32Array(sizeOk(size) ? size * size : 0), issues = [];
+  const fail = (code, path, message) => { if (issues.length < LIMITS.issues) issues.push({ level: 'error', code, path, message }); };
+  if (rows === undefined || !sizeOk(size)) return heights;
+  if (!Array.isArray(rows)) fail('type', 'ground.heights', 'Expected an array.');
+  else if (rows.length !== size) fail('ground-heights', 'ground.heights', `Expected ${size} rows, one per grid row, but found ${rows.length}.`);
+  else {
+    for (let iz = 0; iz < size; iz++) {
+      const row = rows[iz], path = `ground.heights[${iz}]`;
+      if (typeof row !== 'string') { fail('type', path, 'Expected a string.'); continue; }
+      if (row.length > size * 6 || !HEIGHT_ROW_RE.test(row)) { fail('ground-heights', path, 'A height row is a list such as "0*40,5,12*3": tenths of a unit, a run as value*count.'); continue; }
+      let ix = 0;
+      for (const token of row.split(',')) {
+        const star = token.indexOf('*'), v = Number(star < 0 ? token : token.slice(0, star)) / 10, n = star < 0 ? 1 : Number(token.slice(star + 1));
+        if (n < 1 || ix + n > size) { ix = size + 1; break; }
+        heights.fill(v, iz * size + ix, iz * size + ix + n);
+        ix += n;
+      }
+      if (ix !== size) fail('ground-heights', path, `The runs of a height row must add up to ${size} values.`);
+    }
+  }
+  if (issues.length) throw new MapError(issues);
+  return heights;
 }
 
 const sizeOk = (size) => Number.isInteger(size) && size % 2 === 1 && size >= LIMITS.groundSize[0] && size <= LIMITS.groundSize[1];
@@ -525,7 +629,7 @@ const FILE_KEYS = {
   poly: ['type', 'points'],
   fallback: ['name', 'levels', 'mood'],
   start: XZR,
-  ground: ['cell', 'size', 'types', 'rows'],
+  ground: ['cell', 'size', 'types', 'rows', 'heights'],
 };
 const SHAPES = ['circle', 'poly'];
 const MISSING = 'This key is required.';
@@ -713,14 +817,16 @@ function decodeGround(d, raw) {
   if (!d.obj(raw, 'ground', FILE_KEYS.ground)) return null;
   const cell = d.num(raw, 'cell', 'ground'), size = d.num(raw, 'size', 'ground');
   if (Number.isFinite(cell) && !LIMITS.groundCells.includes(cell)) d.fail('ground-cell', 'ground.cell', CELL_MESSAGE);
-  let cells = null;
+  let cells = null, heights = null;
   if (Number.isFinite(size)) {
-    try { cells = decodeRows(raw.types, raw.rows, size); } catch (e) {
-      if (!(e instanceof MapError)) throw e;
-      for (const issue of e.issues) d.fail(issue.code, issue.path, issue.message);
+    for (const read of [() => { cells = decodeRows(raw.types, raw.rows, size); }, () => { heights = decodeHeights(raw.heights, size); }]) {
+      try { read(); } catch (e) {
+        if (!(e instanceof MapError)) throw e;
+        for (const issue of e.issues) d.fail(issue.code, issue.path, issue.message);
+      }
     }
   }
-  return { cell, size, cells };
+  return { cell, size, cells, heights };
 }
 
 const DECODERS = { object: decodeObject, spawn: decodeSpawn, chest: decodeChest, npc: decodeNpc, region: decodeRegion };
@@ -946,6 +1052,16 @@ function check(map, models, strictModels) {
     const cell = cellXZ(ground, i);
     error('ground-types', `ground.rows[${cell.iz}]`, 'A ground cell holds no known ground type.', { x: cell.x, z: cell.z });
     break;
+  }
+  if (ground.heights) {
+    if (gridOk && ground.heights.length !== ground.cells.length) error('ground-heights', 'ground.heights', 'The ground needs one height per vertex.');
+    for (let i = 0; gridOk && i < ground.heights.length; i++) {
+      const h = ground.heights[i];
+      if (h >= L.height[0] && h <= L.height[1]) continue;
+      const cell = cellXZ(ground, i);
+      error('ground-heights', `ground.heights[${cell.iz}]`, `A ground height must be from ${span(L.height)}.`, { x: cell.x, z: cell.z });
+      break;
+    }
   }
   if (!(half >= radius + L.groundMargin)) {
     error('ground-cover', 'ground',
@@ -1211,6 +1327,7 @@ export function encodeItem(kind, item) {
 export function serialize(map, { check = true } = {}) {
   if (check) throwOnErrors(validate(map));
   const { start, fallback, ground } = map, objects = [], byModel = new Map();
+  const hilly = encodeHeights(ground.heights, ground.size);   // undefined for a flat ground: the file then has no such key
   // objects are stable-sorted by model id, which groups each model's lines; every other list keeps its order
   for (const o of map.objects) {
     const list = byModel.get(o.m);
@@ -1231,7 +1348,7 @@ export function serialize(map, { check = true } = {}) {
     spawns: map.spawns.map((s) => encodeItem('spawn', s)),
     chests: map.chests.map((c) => encodeItem('chest', c)),
     npcs: map.npcs.map((n) => encodeItem('npc', n)),
-    ground: { cell: ground.cell, size: ground.size, ...encodeRows(ground.cells, ground.size) },
+    ground: { cell: ground.cell, size: ground.size, ...encodeRows(ground.cells, ground.size), ...(hilly ? { heights: hilly } : {}) },
     objects,
   };
 }
@@ -1262,11 +1379,13 @@ export function stringifyMap(file) {
     const v = file[k], key = `  ${JSON.stringify(k)}`;
     if (v === undefined) continue;
     if (k === 'ground' && isObj(v)) {
-      const rest = Object.keys(v).filter((g) => v[g] !== undefined && g !== 'rows');
+      const rest = Object.keys(v).filter((g) => v[g] !== undefined && g !== 'rows' && g !== 'heights');
       const lines = [...FILE_KEYS.ground.filter((g) => rest.includes(g)), ...rest.filter((g) => !FILE_KEYS.ground.includes(g))]
         .map((g) => `    ${JSON.stringify(g)}: ${inline(v[g], [])}`);
       if (Array.isArray(v.rows)) lines.push(block('    "rows"', '[', v.rows.map((row) => `      ${inline(row, [])}`), '    ]'));
       else if (v.rows !== undefined) lines.push(`    "rows": ${inline(v.rows, [])}`);
+      if (Array.isArray(v.heights)) lines.push(block('    "heights"', '[', v.heights.map((row) => `      ${inline(row, [])}`), '    ]'));
+      else if (v.heights !== undefined) lines.push(`    "heights": ${inline(v.heights, [])}`);
       entries.push(block(key, '{', lines, '  }'));
     } else if (Array.isArray(v) && LISTS.includes(k)) {
       entries.push(block(key, '[', v.map((item) => `    ${inline(item, ORDER[k])}`), '  ]'));
@@ -1283,7 +1402,7 @@ export function emptyMap({ radius = 260 } = {}) {
   const cell = 2, most = Math.min(LIMITS.radius[1], maxRadius({ cell }));
   const r = Math.max(LIMITS.radius[0], Math.min(most, Math.round(Number.isFinite(radius) ? radius : 260)));
   const size = 2 * Math.ceil((r + LIMITS.groundMargin) / cell) + 1;
-  const ground = { cell, size, cells: new Uint8Array(size * size) };
+  const ground = { cell, size, cells: new Uint8Array(size * size), heights: new Float32Array(size * size) };
   for (let iz = 0; iz < size; iz++) {
     for (let ix = 0; ix < size; ix++) {
       const shore = Math.hypot(groundX(ground, ix), groundX(ground, iz)) > r - 2;

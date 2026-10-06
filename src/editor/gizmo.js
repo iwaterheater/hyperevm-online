@@ -78,7 +78,8 @@ export function createGizmo(ctx) {
   let drag = null;              // the drag in progress
   let hot = -1;                 // the handle under the cursor
   // where the handles stand right now and how large a pixel is there (set by layout(), used by pick())
-  const at = { x: 0, z: 0 };
+  // (y: the height of the ground under the pivot - the handles lie on the hill the selection stands on)
+  const at = { x: 0, y: 0, z: 0 };
   let angle = 0, k = 1;
   const A = { x: 0, y: 0 }, B = { x: 0, y: 0 };
 
@@ -132,14 +133,15 @@ export function createGizmo(ctx) {
     }
     at.x = where.x;
     at.z = where.z;
+    at.y = ctx.view?.heightAt?.(at.x, at.z) ?? 0;
     angle = drag ? drag.angle : axesAngle();
-    const depth = -V.set(at.x, 0, at.z).applyMatrix4(camera.matrixWorldInverse).z;
+    const depth = -V.set(at.x, at.y, at.z).applyMatrix4(camera.matrixWorldInverse).z;
     if (!(depth > camera.near)) {   // behind the camera
       root.visible = false;
       return false;
     }
     k = 2 * depth * Math.tan(camera.fov * DEG / 2) / (ctx.viewport.dom.clientHeight || 1);
-    root.position.set(at.x, 0, at.z);
+    root.position.set(at.x, at.y, at.z);
     root.rotation.y = angle;
     root.scale.setScalar(k);
     for (let i = 0; i < parts.length; i++) parts[i].visible = drag ? i === drag.index || i === 2 : i !== 5 || hasObjects;
@@ -150,7 +152,7 @@ export function createGizmo(ctx) {
   // a point of the gizmo (pixels in its own frame) -> client pixels; false when it lies behind the camera
   function toScreen(rect, lx, ly, lz, out) {
     const c = Math.cos(angle), s = Math.sin(angle);
-    V.set(at.x + k * (lx * c + lz * s), k * ly, at.z + k * (-lx * s + lz * c)).project(ctx.viewport.camera);
+    V.set(at.x + k * (lx * c + lz * s), at.y + k * ly, at.z + k * (-lx * s + lz * c)).project(ctx.viewport.camera);
     out.x = rect.left + (V.x + 1) / 2 * rect.width;
     out.y = rect.top + (1 - V.y) / 2 * rect.height;
     return V.z > -1 && V.z < 1;

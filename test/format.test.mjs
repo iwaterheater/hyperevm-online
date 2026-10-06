@@ -93,10 +93,11 @@ function lcg(seed = 1337) {
 test('the export list is exactly the one of the spec', () => {
   assert.deepEqual(Object.keys(format).sort(), [
     'COLLECTION', 'FORMAT_VERSION', 'GROUND_ALIASES', 'GROUND_INDEX', 'GROUND_SYMBOLS', 'GROUND_TYPES', 'KINDS', 'LAYERS', 'LAYER_OF',
-    'LIMITS', 'MOODS', 'MapError', 'NPC_KINDS', 'NPC_RADIUS',
-    'cellHash', 'cellIndex', 'cellXZ', 'decodeItem', 'decodeRows', 'emptyMap', 'encodeItem', 'encodeRows', 'groundAt', 'groundHalf',
-    'groundIx', 'groundX', 'groupItems', 'hasBoss', 'inShape', 'isBlocked', 'isSafe', 'maxRadius', 'migrate', 'moodAt', 'nearNpc',
-    'normalize', 'npcsOf', 'pickLevel', 'pickType', 'pushOutOfSafe', 'qAngle', 'qPos', 'qScale', 'quantizeItem', 'regionAt',
+    'LIMITS', 'MOODS', 'MapError', 'NPC_KINDS', 'NPC_RADIUS', 'WATER_LEVEL',
+    'cellHash', 'cellIndex', 'cellXZ', 'clampHeight', 'decodeHeights', 'decodeItem', 'decodeRows', 'emptyMap', 'encodeHeights', 'encodeItem',
+    'encodeRows', 'groundAt', 'groundHalf',
+    'groundIx', 'groundX', 'groupItems', 'hasBoss', 'heightAt', 'inShape', 'isBlocked', 'isSafe', 'maxRadius', 'migrate', 'moodAt', 'nearNpc',
+    'normalize', 'npcsOf', 'pickLevel', 'pickType', 'pushOutOfSafe', 'qAngle', 'qHeight', 'qPos', 'qScale', 'quantizeItem', 'rayGround', 'regionAt',
     'regionColor', 'regionIndex', 'regionLabel', 'resizeGround', 'serialize', 'shapeBounds', 'shapeCentre', 'spawnCount', 'spawnHome',
     'startPoint', 'stringifyMap', 'toDeg', 'toRad', 'validate',
   ]);
@@ -297,7 +298,8 @@ test('normalize fills defaults, converts degrees and builds the cells', () => {
   assert.deepEqual(map.objects[2].col, [{ x: 0, z: 0, r: 0.73 }]);
   assert.equal(map.objects[3].col, 'box');
   assert.equal(map.objects[4].col, 0.5);
-  assert.deepEqual(Object.keys(map.ground), ['cell', 'size', 'cells']);
+  assert.deepEqual(Object.keys(map.ground), ['cell', 'size', 'cells', 'heights']);
+  assert.ok(map.ground.heights instanceof Float32Array && map.ground.heights.length === 121 * 121 && map.ground.heights.every((h) => h === 0));
   assert.ok(map.ground.cells instanceof Uint8Array);
   assert.equal(map.ground.cells.length, 121 * 121);
   assert.equal(groundAt(map, 0, 0).id, 'paving');
@@ -1742,4 +1744,78 @@ test('pickLevel, spawnCount, hasBoss, groupItems', () => {
   assert.deepEqual(groupItems(map, 'town').map((e) => e.kind), ['npc', 'npc']);
   assert.deepEqual(groupItems(map, 'nobody'), []);
   assert.deepEqual(groupItems(map, null), [], 'no group is not a group');
+});
+
+// ---------------------------------------------------------------- relief
+
+test('heights: a flat ground writes no key; hills round-trip on the 0.1 grid, run-length encoded', () => {
+  const map = format.emptyMap({ radius: 40 }), g = map.ground, mid = (g.size - 1) / 2;
+  assert.equal(format.serialize(map).ground.heights, undefined);
+  assert.ok(!format.stringifyMap(format.serialize(map)).includes('heights'));
+  g.heights[mid * g.size + mid] = 5;
+  g.heights[mid * g.size + mid + 1] = 2.5;
+  g.heights[(mid + 1) * g.size + mid] = -0.7;
+  const file = format.serialize(map), text = format.stringifyMap(file);
+  assert.equal(file.ground.heights.length, g.size);
+  assert.equal(file.ground.heights[0], `0*${g.size}`);
+  assert.equal(file.ground.heights[mid], `0*${mid},50,25,0*${mid - 1}`);
+  const back = format.normalize(JSON.parse(text));
+  assert.deepEqual(Array.from(back.ground.heights), Array.from(g.heights));
+  assert.equal(format.stringifyMap(format.serialize(back)), text);
+});
+
+test('heights: decode errors and the range check', () => {
+  const file = format.serialize(format.emptyMap({ radius: 40 })), size = file.ground.size;
+  const codesOf = (heights) => {
+    try { format.normalize({ ...file, ground: { ...file.ground, heights } }); return []; } catch (e) { return e.issues.map((i) => i.code); }
+  };
+  assert.deepEqual(codesOf(Array(size).fill(`0*${size}`)), []);
+  assert.deepEqual(codesOf(Array(size - 1).fill(`0*${size}`)), ['ground-heights']);
+  assert.deepEqual(codesOf(Array(size).fill(`0*${size - 1}`)).slice(0, 1), ['ground-heights']);
+  assert.deepEqual(codesOf(Array(size).fill('abc')).slice(0, 1), ['ground-heights']);
+  assert.deepEqual(codesOf('flat'), ['type']);
+  assert.deepEqual(codesOf(Array(size).fill(`9999*${size}`)), ['ground-heights']);   // 999.9 units: out of range
+  assert.equal(format.clampHeight(1000), format.LIMITS.height[1]);
+  assert.equal(format.clampHeight(-50), format.LIMITS.height[0]);
+  assert.equal(format.qHeight(1.26), 1.3);
+});
+
+test('heightAt follows the two triangles of a ground cell; rayGround lands on that surface', () => {
+  const map = format.emptyMap({ radius: 40 }), g = map.ground, mid = (g.size - 1) / 2, at = (ix, iz) => (mid + iz) * g.size + mid + ix;
+  assert.equal(format.heightAt({ ground: { ...g, heights: undefined } }, 3, 4), 0);
+  g.heights[at(0, 0)] = 4;                                  // one peak at the origin, cell 2
+  assert.equal(format.heightAt(map, 0, 0), 4);
+  assert.equal(format.heightAt(map, 1, 0), 2);
+  assert.equal(format.heightAt(map, 0, -1), 2);
+  assert.equal(format.heightAt(map, 2, 0), 0);
+  assert.equal(format.heightAt(map, 1, 1), 0);              // on the diagonal from (0, 1) to (1, 0): both ends are 0
+  assert.equal(format.heightAt(map, 0.5, 0.5), 2);          // inside the triangle that holds the peak
+  assert.equal(format.heightAt(map, 1000, 1000), 0);        // clamped to the edge of the grid
+  const down = format.rayGround(map, { x: 0, y: 50, z: 0 }, { x: 0, y: -1, z: 0 });
+  assert.deepEqual([down.x, down.y, down.z], [0, 4, 0]);
+  const slant = format.rayGround(map, { x: -20, y: 10, z: 0.4 }, { x: 2, y: -1, z: 0 });
+  assert.ok(Math.abs(slant.y - format.heightAt(map, slant.x, slant.z)) < 1e-3 && Math.abs(slant.y - (10 - (slant.x + 20) / 2)) < 1e-3);
+  assert.equal(format.rayGround(map, { x: 0, y: 50, z: 0 }, { x: 0, y: 1, z: 0 }), null);
+  const flat = format.emptyMap({ radius: 40 });
+  flat.ground.heights = undefined;
+  assert.deepEqual(format.rayGround(flat, { x: 1, y: 10, z: 2 }, { x: 0, y: -2, z: 0 }), { x: 1, y: 0, z: 2 });
+});
+
+test('resizeGround carries the heights along', () => {
+  const map = format.emptyMap({ radius: 40 }), g = map.ground;
+  g.heights.fill(3);
+  const big = format.resizeGround(g, 80);
+  assert.ok(big !== g && big.heights.length === big.size * big.size && big.heights.every((h) => h === 3));
+});
+
+test('a pit below the waterline is a lake: deep water blocks, a shallow shore does not', () => {
+  const map = format.emptyMap({ radius: 40 }), g = map.ground, mid = (g.size - 1) / 2;
+  assert.equal(format.isBlocked(map, 0, 0), false);
+  for (let iz = -3; iz <= 3; iz++) for (let ix = -3; ix <= 3; ix++) g.heights[(mid + iz) * g.size + mid + ix] = -4;
+  assert.equal(format.isBlocked(map, 0, 0), true);
+  assert.equal(format.isBlocked(map, 20, 0), false);
+  g.heights.fill(format.WATER_LEVEL - 0.3);                 // ankle deep everywhere
+  assert.equal(format.isBlocked(map, 0, 0), false);
+  assert.equal(format.clampHeight(-100), format.LIMITS.height[0]);
+  assert.ok(format.LIMITS.height[0] < format.WATER_LEVEL);
 });

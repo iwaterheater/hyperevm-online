@@ -15,7 +15,7 @@
 #status .issues.warnings { color: var(--warn); }
 
 /* ---- under the cursor. Fixed widths: the bar must not twitch while the pointer moves */
-#status .cursor { width: 126px; white-space: pre; }
+#status .cursor { width: 178px; white-space: pre; }   /* x, z and the height of the ground: 'x -260.0  z -260.0  h 60.0' */
 #status .ground { width: 84px; overflow: hidden; text-overflow: ellipsis; }
 #status .ground.block { color: var(--warn); }
 

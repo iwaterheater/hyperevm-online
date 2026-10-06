@@ -166,8 +166,10 @@ export default function mount(el, ctx) {
         refresh();
       },
     });
+    const node = row(label, field);
+    if (typeof f.title === 'string') node.title = f.title;   // what the number means, where the label cannot say it
     return {
-      field, node: row(label, field),
+      field, node,
       refresh() { const { value, mixed } = read(f.key, kind === 'map' ? undefined : get); field.set(value, mixed); },
       disable(on) { field.setDisabled(on); },
     };

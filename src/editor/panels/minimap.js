@@ -31,6 +31,7 @@ const rgbOf = (n) => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 // one colour per ground type: the middle of the two the terrain blends
 const GROUND_RGB = GROUND_TYPES.map((t) => mix(rgbOf(t.a), rgbOf(t.b), 0.5));
+const SHADE = 0.35;      // how strongly a slope is lit or shaded: a 45 degree slope by about a third
 const SEA_RGB = rgbOf(SEA), UNKNOWN_RGB = [255, 0, 255];
 
 // The monster type that names a camp: the highest weight, ties in MOB_KEYS order.
@@ -89,10 +90,12 @@ export default function mount(el, ctx) {
   // ---------------------------------------------------------------- ground
 
   // Repaints the INCLUSIVE vertex rectangle of the ground picture. Beyond the map radius the ground sinks into the
-  // sea: it is shown under water, so paint that strays out there is still seen.
+  // sea: it is shown under water, so paint that strays out there is still seen. Hills are shaded lightly, as if lit
+  // from the north-west: a slope that faces the light is brighter, one that faces away darker.
   function paintGround(ix0, iz0, ix1, iz1) {
-    const map = store.map, g = map.ground, size = g.size, c = (size - 1) / 2, r2 = map.radius * map.radius, data = image.data;
-    ix0 = Math.max(0, ix0); iz0 = Math.max(0, iz0); ix1 = Math.min(size - 1, ix1); iz1 = Math.min(size - 1, iz1);
+    const map = store.map, g = map.ground, size = g.size, last = size - 1, c = last / 2, r2 = map.radius * map.radius, data = image.data;
+    const heights = g.heights && g.heights.length === g.cells.length ? g.heights : null;
+    ix0 = Math.max(0, ix0); iz0 = Math.max(0, iz0); ix1 = Math.min(last, ix1); iz1 = Math.min(last, iz1);
     if (ix1 < ix0 || iz1 < iz0) return;
     for (let iz = iz0; iz <= iz1; iz++) {
       const z = (iz - c) * g.cell;
@@ -100,7 +103,14 @@ export default function mount(el, ctx) {
         const x = (ix - c) * g.cell, k = iz * size + ix;
         let rgb = GROUND_RGB[g.cells[k]] ?? UNKNOWN_RGB;
         if (x * x + z * z > r2) rgb = mix(rgb, SEA_RGB, 0.82);
-        data[k * 4] = rgb[0]; data[k * 4 + 1] = rgb[1]; data[k * 4 + 2] = rgb[2]; data[k * 4 + 3] = 255;
+        let shade = 1;
+        if (heights) {
+          // how much the ground rises towards the south-east, per world unit (the difference across the vertex)
+          const rise = (heights[iz * size + Math.min(last, ix + 1)] - heights[iz * size + Math.max(0, ix - 1)]
+            + heights[Math.min(last, iz + 1) * size + ix] - heights[Math.max(0, iz - 1) * size + ix]) / (2 * g.cell);
+          shade = Math.max(0.62, Math.min(1.3, 1 + rise * SHADE));
+        }
+        data[k * 4] = rgb[0] * shade; data[k * 4 + 1] = rgb[1] * shade; data[k * 4 + 2] = rgb[2] * shade; data[k * 4 + 3] = 255;
       }
     }
     baseCtx.putImageData(image, 0, 0, ix0, iz0, ix1 - ix0 + 1, iz1 - iz0 + 1);
@@ -382,7 +392,11 @@ export default function mount(el, ctx) {
     const map = store.map;
     if (!map) return;
     if (change.props.includes('ground') || change.props.includes('radius') || baseFor !== map.ground) baseFor = null;
-    else if (change.ground && image) paintGround(change.ground.ix0, change.ground.iz0, change.ground.ix1, change.ground.iz1);
+    // (the shade of a vertex is read off its neighbours: where heights moved, the rim around the rectangle is due too)
+    else if (change.ground && image) {
+      const rim = change.ground.relief ? 1 : 0;
+      paintGround(change.ground.ix0 - rim, change.ground.iz0 - rim, change.ground.ix1 + rim, change.ground.iz1 + rim);
+    }
     if (change.added.objects.length || change.removed.objects.length || change.updated.objects.length || baseFor === null) touchDots();
     drawSoon();
   });

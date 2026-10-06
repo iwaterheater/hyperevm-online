@@ -197,7 +197,8 @@ export default function create(ctx) {
     ctx.markers.setGhost(job.ghost);
     const a = ensureOutline().geometry.attributes.position, p = a.array, R = job.reach, y = 0.06;
     let o = 0;
-    const seg = (x0, z0, x1, z1) => { p[o++] = x0; p[o++] = y; p[o++] = z0; p[o++] = x1; p[o++] = y; p[o++] = z1; };
+    const h = ctx.viewport.groundY;   // both ends of a segment stand on the ground: the outline lies on the hill it is over
+    const seg = (x0, z0, x1, z1) => { p[o++] = x0; p[o++] = h(x0, z0) + y; p[o++] = z0; p[o++] = x1; p[o++] = h(x1, z1) + y; p[o++] = z1; };
     for (let i = 0; i < 64; i++) {
       const a0 = i / 64 * Math.PI * 2, a1 = (i + 1) / 64 * Math.PI * 2;
       seg(x + Math.cos(a0) * R, z + Math.sin(a0) * R, x + Math.cos(a1) * R, z + Math.sin(a1) * R);

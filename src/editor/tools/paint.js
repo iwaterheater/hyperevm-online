@@ -46,6 +46,7 @@ const RADIUS = [1, 40], WIDTH = [2, 12];
 const MIN_REACH = 0.7072;
 const POINT_GAP = 0.01;           // a road point closer than this to the previous one is dropped (a double-click)
 const RUNS_MAX = 16384;           // preview quads; a run is a row of neighbouring vertices
+const RUN_CELLS = 16;             // ... of at most this many: a quad is cut once per vertex and bends over a hill
 const BLOCK = GROUND_TYPES.map((t) => t.block === true);
 // like every ground overlay of the editor: tested against the scene, never written, pulled towards the eye
 const GROUND_OVERLAY = { depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false };
@@ -360,8 +361,9 @@ export default function create(ctx) {
 
   function ensurePreview() {
     if (cells) return;
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, ...GROUND_OVERLAY });
-    cells = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), material, 256);
+    // the quads are laid out on y = 0 and their material lifts every vertex onto the ground (the drape)
+    const material = ctx.viewport.drape.apply(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, ...GROUND_OVERLAY }));
+    cells = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1, RUN_CELLS, 2).rotateX(-Math.PI / 2), material, 256);
     cells.frustumCulled = false;   // spread over the map
     cells.renderOrder = 2;
     cells.count = 0;
@@ -376,7 +378,7 @@ export default function create(ctx) {
   }
 
   // Shows `indices` (ascending, as raster.js returns them) as translucent quads in the colour of the type; null hides.
-  // Neighbours in a row share one quad, so a fill of half the island is a few hundred instances.
+  // Neighbours in a row share one quad (up to RUN_CELLS of them), so a fill of half the island is a few thousand instances.
   function showCells(indices, type) {
     if (!indices || !indices.length || !active) {
       if (cells?.visible) { cells.visible = false; ctx.viewport.invalidate(); }
@@ -389,7 +391,7 @@ export default function create(ctx) {
     for (let k = 0; k < indices.length && runs.length < RUNS_MAX * 3;) {
       const first = indices[k];
       let n = 1;
-      while (k + n < indices.length && indices[k + n] === first + n && (first + n) % size !== 0) n++;
+      while (n < RUN_CELLS && k + n < indices.length && indices[k + n] === first + n && (first + n) % size !== 0) n++;
       runs.push(first % size, Math.floor(first / size), n);
       k += n;
     }
@@ -433,7 +435,7 @@ export default function create(ctx) {
       line.geometry.dispose();
       line.geometry = dots.geometry = new THREE.BufferGeometry().setAttribute('position', attr);
     }
-    points.forEach((p, i) => attr.setXYZ(i, p[0], 0.05, p[1]));
+    points.forEach((p, i) => attr.setXYZ(i, p[0], ctx.viewport.groundY(p[0], p[1]) + 0.05, p[1]));
     attr.needsUpdate = true;
     line.geometry.setDrawRange(0, points.length);   // the dots share the geometry: the rubber-band end shows one too
     line.visible = points.length > 1;
