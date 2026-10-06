@@ -1,1 +1,33 @@
-/* Stub (step 3): the styles of the inspector panel are written in step 4E. Every selector starts with #inspector. */
+/* The Inspector panel (panels/inspector.js). Every selector starts with #inspector; the fields themselves are the
+   .ui-* widgets of base.css. */
+
+#inspector { --label-w: 96px; }   /* wide enough for "Skeleton Warrior" and "Respawn (s)" */
+
+/* ---- header: what is selected */
+#inspector .head { margin-bottom: 6px; }
+#inspector .title { display: flex; align-items: baseline; gap: 8px; min-height: 20px; }
+#inspector .what { flex: none; font-size: 13px; font-weight: 600; white-space: nowrap; }
+#inspector .label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#inspector .locked { margin-top: 2px; color: var(--warn); }
+
+/* the breakdown of a selection: one row per kind, one per model */
+#inspector .breakdown { max-height: 134px; margin: 4px 0; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+#inspector .breakdown .ui-item { flex: none; min-height: 20px; border-radius: 0; }   /* the list scrolls: no row is squeezed */
+#inspector .breakdown .name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#inspector .breakdown .kind .name { font-weight: 600; }
+#inspector .breakdown .count { flex: none; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* ---- the form */
+#inspector .fields { display: flex; flex-direction: column; gap: 2px; }
+#inspector .collider, #inspector .weights { display: flex; flex-direction: column; gap: 2px; }
+#inspector .weights { margin: 3px 0; padding: 4px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+#inspector .caption { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 18px; color: var(--dim); font-weight: 600; }
+#inspector .caption .ui-hint { font-weight: 400; }
+#inspector .catalog { padding-left: calc(var(--label-w) + var(--gap)); }
+#inspector .top { align-items: start; }
+#inspector .top .ui-label { padding-top: 3px; }
+#inspector .computed { padding: 3px 0; color: var(--dim); font-size: 11px; line-height: 1.45; white-space: pre-line; overflow-wrap: anywhere; }
+#inspector .ui-check + .ui-field, #inspector .ui-field + .ui-check { margin-left: 2px; }
+
+/* ---- footer of the map's own form */
+#inspector .summary { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); white-space: pre-line; }

@@ -1,1 +1,57 @@
-/* Stub (step 3): the styles of the regions panel are written in step 4D. Every selector starts with #regions. */
+/* The Regions panel (panels/regions.js). Every selector starts with #regions; colours come from the variables of
+   base.css. The colour of a region chip is data and is set inline by the panel. */
+
+/* ---- head: the count, the tint switch, the two "draw" buttons */
+#regions .head { display: flex; align-items: center; gap: 4px; margin-bottom: var(--gap); }
+#regions .count { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--dim); white-space: nowrap; text-overflow: ellipsis; }
+#regions .head .ui-button { height: 22px; padding: 0 7px; }
+
+/* ---- the list: the winning region at the top, the fallback last. It scrolls by itself, so 64 regions do not push
+        the rest of the column away. */
+#regions .list {
+  position: relative; max-height: 246px; overflow-x: hidden; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+#regions .row { gap: 5px; min-height: 24px; padding: 0 3px 0 0; border-radius: 0; cursor: default; }
+#regions .row + .row { border-top: 1px solid color-mix(in srgb, var(--line) 45%, transparent); }
+#regions .row.fallback { color: var(--dim); }
+#regions .row.fallback.selected { color: var(--text); }
+#regions .grip { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 24px; color: var(--dim); cursor: grab; }
+#regions .row:hover .grip { color: var(--text); }
+#regions .row.fallback .grip { visibility: hidden; }
+#regions .name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#regions .mood { flex: 0 1 auto; max-width: 62px; overflow: hidden; color: var(--dim); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+#regions .mood.inherited { font-style: italic; }
+#regions .row .ui-badge { height: 14px; padding: 0 5px; }
+#regions .row .ui-button { width: 20px; height: 20px; padding: 0; color: var(--dim); }
+#regions .row .ui-button:hover { color: var(--text); }
+#regions .row .ui-button[aria-pressed="true"] { color: var(--accent); }
+/* a hidden region is not drawn, a locked one does not answer a click: both read as "set aside" in the list */
+#regions .row.is-hidden .name, #regions .row.is-hidden .ui-swatch, #regions .row.is-hidden .mood { opacity: .45; }
+#regions .row.is-locked .name { font-style: italic; }
+
+#regions .icon { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+#regions .icon-grip { stroke-width: 2; }
+
+/* ---- dragging a row */
+#regions .list.reordering .row, #regions .list.reordering .grip { cursor: grabbing; }
+#regions .row.dragging { opacity: .4; }
+#regions .drop { position: absolute; z-index: 1; left: 0; right: 0; height: 2px; background: var(--accent); pointer-events: none; }
+
+#regions .hint { margin-top: 4px; }
+
+/* ---- the form of the selected regions (or of the fallback) */
+#regions .detail { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+#regions .detail-title { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+#regions .note { margin: 2px 0 4px; color: var(--warn); font-size: 11px; }
+#regions .detail .ui-row { --label-w: 52px; }
+#regions .detail .ui-pair { flex: 1 1 0; }
+#regions .swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 0; }
+#regions .chip { width: 18px; height: 18px; padding: 0; border-radius: 3px; }
+#regions .chip.auto { width: auto; padding: 0 6px; border-width: 2px; font-size: 10px; }
+#regions .chip.active { outline: 2px solid var(--text); outline-offset: 1px; }
+#regions .swatches .ui-color { flex: none; }
+#regions .swatches .ui-color-input { width: 28px; height: 18px; }
+#regions .info { margin-top: 4px; }
+#regions .actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+#regions .ui-empty { margin-top: 4px; }

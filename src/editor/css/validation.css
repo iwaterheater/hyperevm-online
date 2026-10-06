@@ -1,1 +1,33 @@
-/* Stub (step 3): the styles of the validation (Issues) panel are written in step 4E. Every selector starts with #validation. */
+/* The Issues panel (panels/validation.js). Every selector starts with #validation. */
+
+#validation .head { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+#validation .badges { display: flex; gap: 4px; }
+#validation .state { font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#validation .head .ui-button { height: 20px; padding: 0 6px; color: var(--dim); font-size: 11px; }
+#validation .head .ui-button:hover { color: var(--text); }
+#validation .note { margin: 2px 0 4px; color: var(--danger); }
+
+/* ---- one block per issue code */
+#validation .groups { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+#validation .group { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+#validation .group.error { border-color: color-mix(in srgb, var(--danger) 60%, var(--line)); }
+#validation .summary { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 6px; cursor: pointer; list-style: none; background: var(--panel-2); }
+#validation .summary::-webkit-details-marker { display: none; }
+#validation .summary::before {
+  content: ''; flex: none; width: 0; height: 0;
+  border: 4px solid transparent; border-right-width: 0; border-left: 5px solid var(--dim);
+  transition: transform .1s;
+}
+#validation .group[open] > .summary::before { transform: rotate(90deg); }
+#validation .code { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); }
+#validation .group.error .code { color: var(--danger); }
+
+/* ---- one row per issue: the sentence, and where in the file it is */
+#validation .ui-list { max-height: 264px; overflow-y: auto; }
+/* flex: none - the list is a column flexbox with a maximum height, and a row must scroll, not be squeezed */
+#validation .row { flex: none; display: block; min-height: 0; padding: 3px 6px 4px; border-radius: 0; border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+#validation .row.plain { cursor: default; }
+#validation .row.plain:hover { background: transparent; }
+#validation .message { display: block; overflow-wrap: anywhere; }
+#validation .path { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--dim); font-size: 10px; }
+#validation .more { flex: none; align-self: flex-start; margin: 4px 6px; height: 20px; font-size: 11px; }

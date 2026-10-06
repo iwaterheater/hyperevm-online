@@ -1,1 +1,23 @@
-/* Stub (step 3): the styles of the help sheet panel are written in step 4E. Every selector starts with #help. */
+/* The hotkey sheet (panels/help.js). Every selector starts with #help; base.css places the sheet over the page. */
+
+#help .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+#help .heading { flex: none; font-size: 15px; }
+#help .close { align-self: center; margin-left: auto; font-size: 16px; }
+
+/* the groups flow into two columns and are never cut in two */
+#help .sheet { columns: 2; column-gap: 32px; }
+#help .group { break-inside: avoid; margin-bottom: 16px; }
+#help .title { margin-bottom: 4px; padding-bottom: 3px; border-bottom: 1px solid var(--line); color: var(--accent); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+#help .note { margin-bottom: 5px; }
+
+/* keys on the left, what they do on the right */
+#help .keys { display: grid; grid-template-columns: fit-content(46%) minmax(0, 1fr); gap: 4px 12px; align-items: baseline; }
+#help .chords { display: flex; flex-wrap: wrap; gap: 3px; }
+#help .what { color: var(--text); }
+#help .input { color: var(--text); font-weight: 600; }
+#help .typed { color: var(--text); white-space: pre; }
+#help .ui-kbd { font-size: 11px; line-height: 16px; padding: 0 5px; color: var(--text); }
+
+@media (max-width: 900px) {
+  #help .sheet { columns: 1; }
+}

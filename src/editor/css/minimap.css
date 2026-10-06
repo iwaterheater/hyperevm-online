@@ -1,1 +1,15 @@
-/* Stub (step 3): the styles of the minimap panel are written in step 4E. Every selector starts with #minimap. */
+/* The minimap panel (panels/minimap.js). Every selector starts with #minimap. */
+
+/* the canvas is as wide as the panel and square; its pixel size follows in script */
+#minimap .frame { overflow: hidden; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+#minimap .map { width: 100%; height: auto; aspect-ratio: 1 / 1; cursor: crosshair; touch-action: none; }
+
+#minimap .bar { display: flex; align-items: center; gap: 2px; margin-top: 6px; }
+#minimap .marks { margin-right: auto; }
+#minimap .mark { width: 24px; height: 22px; padding: 0; color: var(--dim); }
+#minimap .mark.set { color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+#minimap .bar .flat { height: 22px; padding: 0 7px; color: var(--dim); }
+#minimap .bar .flat:hover, #minimap .bar .flat.active { color: var(--text); }
+
+#minimap .foot { margin-top: 4px; min-height: 14px; color: var(--dim); }
+#minimap .coords { font-size: 10px; white-space: pre; }

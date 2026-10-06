@@ -1,1 +1,78 @@
-/* Stub (step 3): the styles of the spawns panel are written in step 4C. Every selector starts with #spawns. */
+/* The Spawns panel (#spawns): the table of monster camps, its totals, the Populate form and the editor that opens
+ * beside a row. Every selector starts with #spawns; colours come from the variables of base.css - the colours of the
+ * monster types and of the regions are data and are set inline by the panel. */
+
+#spawns .root { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+
+/* ---- filter */
+#spawns .bar { display: flex; gap: 4px; min-width: 0; }
+#spawns .search { flex: 1 1 0; min-width: 0; }
+#spawns .region-pick { flex: 0 0 96px; width: 96px; }
+#spawns .note { padding: 3px 6px; border-left: 2px solid var(--warn); color: var(--warn); background: var(--panel-2); border-radius: var(--radius); }
+
+/* ---- table: fixed columns so that a number that changes never moves its neighbours */
+#spawns .wrap { max-height: 232px; overflow-x: hidden; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+#spawns .ui-table { table-layout: fixed; }
+#spawns .c { padding: 2px 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; }
+#spawns .head { padding: 3px; cursor: pointer; user-select: none; }
+#spawns .head:hover { color: var(--text); }
+#spawns .head.sorted { color: var(--accent); }
+#spawns .arrow { margin-left: 1px; font-size: 7px; }
+#spawns .c.types { width: 48px; }
+#spawns .c.lvl { width: 40px; }
+#spawns .c.count { width: 20px; }
+#spawns .c.r { width: 30px; }
+#spawns .c.respawn { width: 38px; }
+#spawns .c.lvl, #spawns .c.count, #spawns .c.r, #spawns .c.respawn { text-align: right; }
+#spawns .row { cursor: pointer; }
+#spawns .row.selected > .c:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+#spawns .row.editing > .c { background: color-mix(in srgb, var(--warn) 16%, var(--panel)); }
+#spawns .chip { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; vertical-align: baseline; }
+#spawns .name { color: var(--text); }
+#spawns .w { margin-right: 3px; font-weight: 700; }
+#spawns .root:not(.locked) .c.edit { cursor: text; }
+#spawns .root:not(.locked) .c.edit:hover { box-shadow: inset 0 0 0 1px var(--line); background: var(--bg); }
+#spawns .locked .row { cursor: default; }
+#spawns .locked .c, #spawns .locked .name { color: var(--dim); }
+
+/* ---- footer */
+#spawns .foot { display: flex; align-items: center; gap: var(--gap); min-width: 0; }
+#spawns .sum { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+#spawns .total { font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#spawns .total.heavy { color: var(--warn); }
+#spawns .total.over { color: var(--danger); }
+#spawns .picked:empty { display: none; }
+
+/* ---- monsters by region */
+#spawns .totals { display: flex; flex-direction: column; gap: 1px; }
+#spawns .zone { padding: 2px 4px; border-radius: var(--radius); cursor: pointer; }
+#spawns .zone:hover { background: var(--panel-2); }
+#spawns .zone.on { background: color-mix(in srgb, var(--accent) 24%, var(--panel)); }
+#spawns .zone.none { color: var(--dim); }
+#spawns .zone-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
+#spawns .zone-name { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#spawns .zone-n, #spawns .zone-lv { flex: none; font-variant-numeric: tabular-nums; }
+#spawns .zone-lv { min-width: 58px; color: var(--dim); text-align: right; }
+#spawns .zone-kinds { display: flex; flex-wrap: wrap; gap: 0 8px; padding-left: 19px; color: var(--dim); font-size: 11px; }
+#spawns .dot { display: inline-block; width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; }
+
+/* ---- populate */
+#spawns .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); margin-top: 2px; }
+#spawns .small { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+#spawns .small .ui-label { font-size: 11px; }
+#spawns .what { margin-top: 4px; }
+#spawns .go { display: flex; align-items: center; gap: var(--gap); margin-top: 4px; min-width: 0; }
+#spawns .why { flex: 1 1 0; min-width: 0; color: var(--warn); }
+#spawns .help { margin-top: 2px; }
+
+/* ---- the editor beside a row (a popover in the top layer: it is placed with left / top by the panel) */
+#spawns .card { --label-w: 124px; width: 264px; padding: 8px 10px 10px; }
+#spawns .card.inline { position: static; width: auto; }
+#spawns .top { display: flex; align-items: center; gap: var(--gap); }
+#spawns .title { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+#spawns .close { color: var(--dim); }
+#spawns .sub { margin: 2px 0 6px; white-space: normal; }
+#spawns .weight .ui-swatch { width: 10px; height: 10px; margin-right: 6px; border-radius: 50%; vertical-align: baseline; }
+#spawns .share { flex: none; width: 30px; color: var(--dim); text-align: right; font-variant-numeric: tabular-nums; }
+#spawns .only { height: var(--ctl, 22px); padding: 0 4px; color: var(--dim); font-size: 11px; }
+#spawns .only:hover { color: var(--text); }

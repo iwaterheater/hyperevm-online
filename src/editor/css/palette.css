@@ -1,1 +1,108 @@
-/* Stub (step 3): the styles of the palette panel are written in step 4A. Every selector starts with #palette. */
+/* The palette (#palette, the left column): the Models and Stamps tabs, the model tiles, the large hover preview.
+ * Every selector starts with #palette; colours come from the variables of base.css.
+ * base.css gives #palette its place in the column, a padding and a scrollbar: here the tabs and the search box stay
+ * where they are and only the list scrolls. */
+
+#palette { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+
+#palette .ui-tabs { flex: none; padding: 2px 8px 0; }
+#palette .ui-tab .n { color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+#palette .pane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+#palette .bar { flex: none; display: flex; align-items: center; gap: var(--gap); padding: 8px 8px 6px; }
+#palette .bar.end { justify-content: flex-end; padding: 6px 8px; border-top: 1px solid var(--line); }
+#palette .bar .ui-input { flex: 1 1 auto; }
+#palette .bar .count { flex: none; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+#palette .picked, #palette .clip {
+  flex: none; display: flex; align-items: center; gap: var(--gap); margin: 0 8px 6px; padding: 3px 3px 3px 8px;
+  border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); font-size: 11px;
+}
+#palette .clip { background: var(--panel-2); color: var(--dim); }
+#palette .what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#palette .picked .ui-button, #palette .clip .ui-button { height: 20px; padding: 0 7px; }
+#palette .scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 8px 8px; }
+#palette .foot { flex: none; padding: 5px 8px 6px; border-top: 1px solid var(--line); line-height: 1.3; }
+
+/* ---------------------------------------------------------------- the list of models */
+
+#palette .section + .section { margin-top: 10px; }
+#palette .pack {
+  position: sticky; top: 0; z-index: 2; margin: 0 -8px; padding: 5px 8px 4px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+  color: var(--text); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+}
+#palette .cat { display: flex; align-items: baseline; gap: 6px; margin: 8px 0 4px; color: var(--dim); font-size: 11px; font-weight: 600; }
+#palette .cat .n { font-weight: 400; font-variant-numeric: tabular-nums; }
+#palette .shortcuts + .section { margin-top: 10px; }
+#palette .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 6px; }
+#palette .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; }
+
+#palette .tile, #palette .chip { position: relative; min-width: 0; cursor: pointer; }
+#palette .thumb {
+  position: relative; display: grid; place-items: center; aspect-ratio: 1; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--cat, var(--panel-2));
+}
+#palette .thumb .name {
+  max-height: 100%; padding: 3px; overflow: hidden; color: var(--text);
+  font-size: 9.5px; line-height: 1.15; text-align: center; overflow-wrap: anywhere;
+}
+#palette .chip .name { padding: 1px; font-size: 7.5px; line-height: 1.1; }
+#palette .thumb.ready .name { display: none; }
+#palette .shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+#palette .caption {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 2px; min-height: 24px;
+  color: var(--dim); font-size: 10px; line-height: 1.2; text-align: center; overflow-wrap: anywhere;
+}
+#palette .tile:hover .thumb, #palette .chip:hover .thumb { border-color: color-mix(in srgb, var(--line) 40%, var(--text)); }
+#palette .tile:hover .caption { color: var(--text); }
+#palette .selected .thumb { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#palette .selected .caption { color: var(--text); }
+/* the first of the selection is what Place uses: it wears the accent as a filled corner */
+#palette .primary .thumb::after {
+  content: ''; position: absolute; left: 0; top: 0; border: 6px solid transparent;
+  border-left-color: var(--accent); border-top-color: var(--accent);
+}
+
+#palette .star {
+  position: absolute; top: 1px; right: 1px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  color: var(--dim); background: color-mix(in srgb, var(--bg) 70%, transparent); font-size: 11px; line-height: 1; opacity: 0;
+}
+#palette .tile:hover .star { opacity: 1; }
+#palette .star:hover { color: var(--text); }
+#palette .star.on { opacity: 1; color: var(--warn); }
+
+/* the colour of a category: what a tile shows until its thumbnail is drawn, and what stays behind the model after */
+#palette [data-cat="buildings"] { --cat: color-mix(in srgb, var(--warn) 30%, var(--panel)); }
+#palette [data-cat="walls"]     { --cat: color-mix(in srgb, var(--dim) 36%, var(--panel)); }
+#palette [data-cat="trees"]     { --cat: color-mix(in srgb, var(--ok) 30%, var(--panel)); }
+#palette [data-cat="rocks"]     { --cat: color-mix(in srgb, var(--text) 22%, var(--panel)); }
+#palette [data-cat="props"]     { --cat: color-mix(in srgb, var(--accent) 28%, var(--panel)); }
+#palette [data-cat="graves"]    { --cat: color-mix(in srgb, color-mix(in srgb, var(--danger) 45%, var(--accent)) 30%, var(--panel)); }
+#palette [data-cat="lights"]    { --cat: color-mix(in srgb, color-mix(in srgb, var(--warn) 55%, var(--danger)) 34%, var(--panel)); }
+#palette [data-cat="ruins"]     { --cat: color-mix(in srgb, var(--danger) 24%, var(--panel)); }
+#palette [data-cat="foliage"]   { --cat: color-mix(in srgb, color-mix(in srgb, var(--ok) 60%, var(--warn)) 34%, var(--panel)); }
+#palette [data-cat="special"]   { --cat: color-mix(in srgb, color-mix(in srgb, var(--accent) 50%, var(--ok)) 32%, var(--panel)); }
+#palette [data-cat="none"]      { --cat: var(--panel-2); }
+
+/* ---------------------------------------------------------------- the large preview */
+
+/* fixed: it stands beside the column, over the viewport, and the column's overflow does not clip it */
+#palette .preview {
+  position: fixed; z-index: 55; width: 238px; padding: 8px; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 10px 32px color-mix(in srgb, var(--bg) 80%, transparent);
+}
+#palette .preview .view { width: 220px; height: 220px; margin-bottom: 6px; border-radius: var(--radius); background: var(--cat, var(--panel-2)); }
+#palette .preview .title { font-size: 13px; font-weight: 600; }
+#palette .preview .id { margin-bottom: 4px; color: var(--dim); overflow-wrap: anywhere; }
+#palette .preview .fact { line-height: 1.45; }
+
+/* ---------------------------------------------------------------- stamps */
+
+#palette .list { gap: 1px; }
+#palette .stamp { min-height: 26px; padding-right: 2px; }
+#palette .stamp .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#palette .stamp .n { flex: none; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+#palette .stamp .ui-button { width: 22px; height: 22px; color: var(--dim); }
+#palette .stamp .ui-button:hover { color: var(--text); }
+#palette .stamp .ui-button.danger:hover { color: var(--danger); }
+#palette .ui-empty { padding: 10px 2px; line-height: 1.4; }

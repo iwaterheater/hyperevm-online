@@ -1,1 +1,68 @@
-/* Stub (step 3): the styles of the layers panel are written in step 4E. Every selector starts with #layers. */
+/* The Layers panel (panels/layers.js). Every selector starts with #layers. */
+
+/* ---- one row per layer: eye, lock, name, count */
+#layers .layers { display: flex; flex-direction: column; margin-bottom: 6px; }
+#layers .layer { display: flex; align-items: center; gap: 2px; min-height: 24px; padding: 0 4px 0 0; border-radius: var(--radius); }
+#layers .layer:hover { background: var(--panel-2); }
+#layers .layer .name { flex: 1 1 auto; min-width: 0; margin-left: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#layers .layer.hidden .name { color: var(--dim); text-decoration: line-through; }
+#layers .layer.locked .name { color: var(--warn); }
+#layers .count { flex: none; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#layers .nolock { flex: none; width: 22px; }
+
+/* ---- the eye and the lock: drawn as masks, so they take their colour from the theme */
+#layers .icon { width: 22px; height: 22px; }
+#layers .glyph {
+  width: 14px; height: 14px; background: var(--text);
+  -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat;
+}
+#layers .eye .glyph {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='1.9' fill='black' stroke='none'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='1.9' fill='black' stroke='none'/%3E%3C/svg%3E");
+}
+#layers .eye.off .glyph {
+  background: var(--dim); opacity: .7;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8z'/%3E%3Cpath d='M3 13.5L13 2.5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8z'/%3E%3Cpath d='M3 13.5L13 2.5'/%3E%3C/svg%3E");
+}
+#layers .lock .glyph {
+  background: var(--warn);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='7.5' width='9' height='6' rx='1' fill='black'/%3E%3Cpath d='M5.5 7.5V5.3a2.5 2.5 0 0 1 5 0v2.2'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='7.5' width='9' height='6' rx='1' fill='black'/%3E%3Cpath d='M5.5 7.5V5.3a2.5 2.5 0 0 1 5 0v2.2'/%3E%3C/svg%3E");
+}
+#layers .lock.off .glyph {
+  background: var(--dim); opacity: .45;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='7.5' width='9' height='6' rx='1'/%3E%3Cpath d='M5.5 7.5V5.3a2.5 2.5 0 0 1 4.6-1.3'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='7.5' width='9' height='6' rx='1'/%3E%3Cpath d='M5.5 7.5V5.3a2.5 2.5 0 0 1 4.6-1.3'/%3E%3C/svg%3E");
+}
+#layers .layer:hover .lock.off .glyph, #layers .icon:hover .glyph { opacity: 1; }
+
+/* ---- models and groups */
+#layers .extra { margin-left: auto; color: var(--warn); font-size: 11px; font-weight: 400; }
+#layers .tools { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+#layers .tools:empty { display: none; }
+#layers .filter { flex: 1 1 auto; }
+#layers .scroll { max-height: 218px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+#layers .scroll .ui-empty { padding: 6px 8px; }
+/* the lists are column flexboxes with a maximum height: their rows scroll, they are never squeezed */
+#layers .model, #layers .replace, #layers .group, #layers .scroll .ui-empty { flex: none; }
+
+#layers .model { gap: 2px; min-height: 24px; padding: 0 4px 0 0; border-radius: 0; }
+#layers .model .name { flex: 1 1 auto; min-width: 0; margin-left: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#layers .model .pack { color: var(--dim); }
+#layers .model .count { margin: 0 4px; }
+#layers .model.hidden .name { color: var(--dim); text-decoration: line-through; }
+#layers .model.unused { cursor: default; }
+#layers .swap { height: 20px; padding: 0 6px; color: var(--dim); font-size: 11px; }
+#layers .swap:hover, #layers .swap.active { color: var(--text); }
+/* the "replace with" editor under a model row: the choice on one line, the two buttons on the next */
+#layers .replace { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; padding: 4px 6px; background: var(--panel-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+#layers .replace .ui-select { flex: 1 1 200px; }
+#layers .replace .ui-button { height: 22px; padding: 0 7px; }
+
+#layers .group { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 1px 4px; }
+#layers .group + .group { border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+#layers .group .ui-input { flex: 1 1 auto; }
+#layers .group .count { min-width: 26px; text-align: right; }
+#layers .group .ui-button { height: 20px; padding: 0 6px; color: var(--dim); font-size: 11px; }
+#layers .group .ui-button:hover { color: var(--text); }

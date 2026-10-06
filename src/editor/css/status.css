@@ -1,1 +1,45 @@
-/* Stub (step 3): the styles of the status bar panel are written in step 4E. Every selector starts with #status. */
+/* The status bar (panels/status.js). Every selector starts with #status; base.css gives the bar its height, its
+   gap and its dim colour. */
+
+#status .cell { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---- save state, revision, issues */
+#status .ui-dot { visibility: hidden; }
+#status .ui-dot.on { visibility: visible; }
+#status .save { gap: 5px; }
+#status .state { color: var(--text); }
+#status .save.dirty .state, #status .save.readonly .state { color: var(--warn); }
+#status .rev { font-size: 10px; }
+#status .issues { height: 18px; padding: 0 6px; color: var(--dim); font-size: 11px; }
+#status .issues.errors { color: var(--danger); }
+#status .issues.warnings { color: var(--warn); }
+
+/* ---- under the cursor. Fixed widths: the bar must not twitch while the pointer moves */
+#status .cursor { width: 126px; white-space: pre; }
+#status .ground { width: 84px; overflow: hidden; text-overflow: ellipsis; }
+#status .ground.block { color: var(--warn); }
+
+/* ---- what gives way. The selection label shrinks first (the Inspector says the same in full); the status text keeps
+   its room: tool hints and progress arrive there. Narrower windows drop the totals, then the revision. */
+#status .region, #status .selection, #status .totals, #status .text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#status .region { flex: 0 0 auto; max-width: 190px; }
+#status .selection { flex: 0 1 auto; min-width: 80px; max-width: 260px; color: var(--text); }
+#status .totals { flex: 0 0 auto; }
+#status .text { flex: 1 0 150px; color: var(--text); }
+
+@media (max-width: 1400px) {
+  #status .totals { display: none; }
+}
+@media (max-width: 1240px) {
+  #status .rev { display: none; }
+  #status .text { flex-basis: 90px; }
+}
+
+/* ---- snap, frame numbers, help */
+#status .snap { gap: 3px; }
+#status .snap .ui-button { height: 18px; padding: 0 6px; color: var(--dim); font-size: 11px; }
+#status .snap .ui-button.active { color: var(--text); background: color-mix(in srgb, var(--accent) 24%, var(--panel)); border-color: var(--accent); }
+#status .snap .ui-select { width: 54px; height: 18px; padding-left: 5px; font-size: 11px; }
+#status .perf { width: 184px; justify-content: flex-end; font-size: 10px; white-space: pre; }
+#status .help { width: 18px; height: 18px; color: var(--dim); font-weight: 700; border: 1px solid var(--line); border-radius: 50%; }
+#status .help:hover { color: var(--text); }

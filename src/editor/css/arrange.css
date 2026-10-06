@@ -1,1 +1,18 @@
-/* Stub (step 3): the styles of the arrange panel are written in step 4F. Every selector starts with #arrange. */
+/* The Arrange panel (#arrange): rows of buttons that act on the selection, and the fields of Array.
+ * Every selector starts with #arrange; colours come from the variables of base.css. */
+
+#arrange .ui-row { --label-w: 70px; }
+#arrange .summary { margin-bottom: 6px; white-space: normal; }
+#arrange .summary.warn { color: var(--warn); }
+
+/* a row of buttons fills its row: three equal parts for Min / Centre / Max, two for Along X / Along Z */
+#arrange .ui-group { flex: 1 1 auto; display: flex; min-width: 0; }
+#arrange .ui-group > .ui-button { flex: 1 1 0; min-width: 0; padding: 0 4px; }
+#arrange .wide { flex: 1 1 auto; }
+
+/* the scale range: two short fields, a dash between them, the button after them */
+#arrange .ui-dash { flex: none; color: var(--dim); }
+
+#arrange .ui-section { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+#arrange .actions { display: flex; margin-top: 6px; }
+#arrange .note { min-height: 15px; margin-top: 4px; white-space: normal; }
