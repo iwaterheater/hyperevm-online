@@ -3549,3 +3549,63 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => { const dt = clock.getDelta(); controls.update(); view.update(clock.elapsedTime, dt, controls.target); renderer.render(scene, camera); });
 </script>
 ```
+
+---
+
+## Appendix D. Amendments after step 3 (binding; they override the sections they name)
+
+Step 3 (editor-core) is built and frozen. Where the code and the sections above disagree, THE CODE OF STEP 3 IS THE
+CONTRACT: read the module before calling it. The differences that matter to steps 4 and 5:
+
+1. **Number fields (§9.13, §10.11).** `+5`, `*1.2`, `/2`, `-=5` and `+-5` are relative everywhere; `=-5` is always
+   absolute. A bare `-5` is relative only in a field whose `min >= 0`; in a field that may be negative (x, y, z,
+   angles) it is the number −5. A relative entry in a MIXED field arrives as `onCommit(NaN, { relative })`. The Help
+   sheet (4E) documents this rule. Fields return `{ el, input, set, value, focus, setDisabled }`.
+2. **Store (§10.5) and commands (§10.6).** A command whose Change is empty leaves no undo step, emits nothing and keeps
+   redo; `store.exec` returns the Change. `commit()` pushes nothing (and returns false) when the group is empty or
+   every command of it reports `unchanged(map) === true` — `transform`, `set` and `setEach` have that optional member.
+   `store.cancel()` restores the selection `begin()` found. `set` / `setEach` merge inside a group when items and
+   keys match. `canUndo` / `canRedo` are false while a group is open. Extras: `store.undoLabel`, `store.redoLabel`;
+   `select` / `commit` / `cancel` return booleans. Commands throw `TypeError` on values with no file form (NaN, an
+   unknown mood / NPC kind / mob type, unknown keys in `make`). Listeners of `ui.on` get `(value, previous)`.
+3. **`tools/common.js` (§10.10).** `dragMove(ctx, items, startHit, { label = null } = {})` and
+   `dragRadius(ctx, item, startHit, { label = null } = {})` return `{ active, move(hit, ev), end(), cancel() }`
+   (`active: false` = nothing to drag, no group opened). When a store group is ALREADY open the helper joins it:
+   `end()` commits and `cancel()` cancels the WHOLE group. A press-drag create is therefore one undo step:
+   `store.begin('Add spawn')`, `placeOnce` or `exec(cmd.add(…))`, `dragRadius(…)`. Additive exports: `editable`,
+   `expandPickable`, `describe`, `snapping`.
+4. **`tool.<id>` (§10.7)** is disabled (`actions.enabled` false, `actions.run` false) while the tool's layer is hidden
+   or locked; the keymap toasts `Layer locked: <layer>` / `Layer hidden: <layer>`. A caller that must switch
+   regardless uses `ui.set('tool', id)`. The edit actions `edit.delete`, `edit.duplicate`, `edit.selectAll`,
+   `edit.group`, `edit.ungroup` are registered by `tools/select.js`; `edit.undo`, `edit.redo`, `snap.toggle` and
+   `tool.<id>` by `main.js`; `view.*` by `viewport.registerActions()`; `file.save` by `net.install(ctx)`;
+   `edit.cancel` by the keymap. Nobody registers them again. `Mod+G` groups a single item too.
+5. **Fault isolation (§10.1 rule 6).** One page-wide reporter: `reportOnce(name, method, err)` exported by
+   `actions.js`, console line `[editor] <name> <method>() failed`.
+6. **Viewport (§10.8), additive:** `viewport.modal` (truthy while `grab` / `pickPoint` is open) and
+   `viewport.cancelModal()`; `viewport.input('down' | 'move' | 'up' | 'dblclick', clientX, clientY, { mod, shift, alt })`
+   (a synthetic pointer on the real input path, used by `__editor.click` / `drag`); `viewport.addPanel(panel, name)`
+   (main.js calls it for every mounted panel, so `panel.update(dt)` runs in `tick`); `viewport.hasBookmark(i)`,
+   `viewport.overhead`, `viewport.preview`. The viewport, not a tool, feeds the gizmo. In `'game'` preview markers and
+   the gizmo are neither drawn nor pickable. The colliders overlay follows the ground-overlay depth rule: shapes are
+   hidden under their own models and show fully once the Objects layer is hidden.
+7. **Markers (§10.9), additive:** results of `markers.pick` and entries of `markers.stack` carry `priority` (2 | 3 | 5)
+   and `part`; `markers.labelOf(item)`, `markers.kindOf(item)`. Labels never overlap (nearest the camera target
+   first, at most 200); far out a pin label that does not fit is dropped.
+8. **Toasts (§9.17, §10.4).** 3 s; an error and a toast that carries an action stay 6 s. An identical newest toast is
+   not stacked. The pointer over a toast pauses it.
+9. **Net (§10.13).** `createNet()`, then `net.install(ctx)` (sets `ui.readOnly`, registers `file.save`). Save omits
+   `X-Base-Rev` when no rev is known. An edit made while the POST is under way keeps the map dirty.
+10. **Page (§10.2, §10.3).** Only the seven right-column sections are framed; `#palette` is a bare section that fills
+    the left column. `ui.collapsed` (persisted) holds the frames' state. `window.__editor.ctx` exists;
+    `__editor.key()` returns whether the key was consumed. The `#at=x,z` hash is removed after use.
+11. **Unsaved-changes guard (§9.15)** belongs to owner F (`io.js`): the `•` in `document.title` and `beforeunload`
+    while `store.dirty`. The menubar already shows its own dot.
+12. **Keymap (§11).** It is the only key listener and also handles: Enter commits and blurs a single-line input,
+    ArrowUp / ArrowDown step a focused number field, an open `#modal` owns the keyboard, Escape closes an open
+    popover. `BINDINGS` rows carry `held`; additive export `chordLabel`. `dom.js` additionally exports `frame`,
+    `createToasts`, `createModal`, `leaveField`, `STEP_EVENT`, `COMMIT_EVENT`; `PANELS` rows carry `name`.
+13. **Acceptance through the built-in browser pane (§13.3, §14.2).** The pane is usually hidden: its window is 0 × 0
+    until a viewport size is emulated (`resize_window` 1440 × 900), otherwise every `__editor.click` lands on one
+    pixel; `requestAnimationFrame` is throttled, so frames are stepped with `__editor.tick(0.016)` and state is read
+    through the console, not from pixels.

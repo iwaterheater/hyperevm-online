@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyperCat Map Editor</title>
+<!-- an empty icon: without it the browser asks for /favicon.ico and logs the 404 in the console -->
+<link rel="icon" href="data:,">
+<!-- base.css first: it owns the reset, the variables, the page grid and the .ui-* widgets. Every other sheet styles
+     the inside of ONE panel container and is empty until its owner fills it. -->
+<link rel="stylesheet" href="./src/editor/css/base.css">
+<link rel="stylesheet" href="./src/editor/css/palette.css">
+<link rel="stylesheet" href="./src/editor/css/inspector.css">
+<link rel="stylesheet" href="./src/editor/css/arrange.css">
+<link rel="stylesheet" href="./src/editor/css/layers.css">
+<link rel="stylesheet" href="./src/editor/css/regions.css">
+<link rel="stylesheet" href="./src/editor/css/spawns.css">
+<link rel="stylesheet" href="./src/editor/css/validation.css">
+<link rel="stylesheet" href="./src/editor/css/minimap.css">
+<link rel="stylesheet" href="./src/editor/css/status.css">
+<link rel="stylesheet" href="./src/editor/css/help.css">
+<!-- the same import map as index.html, character for character: "npm run check" fails when the two differ -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header id="menubar"><div id="menu-file"></div><div id="menu-io"></div><div id="menu-play"></div></header>
+<nav id="toolbar"></nav>
+<div id="tooloptions"></div>
+<aside id="left"><section id="palette"></section></aside>
+<main id="viewport"></main>
+<aside id="right">
+  <section id="inspector"></section><section id="arrange"></section><section id="layers"></section>
+  <section id="regions"></section><section id="spawns"></section><section id="validation"></section>
+  <section id="minimap"></section>
+</aside>
+<footer id="status"></footer>
+<div id="help" hidden></div><div id="modal" hidden></div><div id="toasts"></div>
+<script type="module" src="./src/editor/main.js"></script>
+</body>
+</html>
