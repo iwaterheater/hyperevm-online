@@ -1,7 +1,5 @@
 // Constants, data tables and formulas shared by the server and the client.
 
-export const WORLD_R = 260;
-export const TOWN_R = 24;
 export const TICK = 1 / 15;
 export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its swing and the hit landing
 
@@ -216,34 +214,7 @@ export const upgradeCost = (weapon) => 40 * weapon;
 
 // ---------------------------------------------------------------- world
 
-// One seamless world: concentric zones around the town, harder the further out you go.
-export const ZONES = [
-  { r: TOWN_R, name: 'Hypercat Town' },
-  { r: 95, name: 'Green Meadows · Lv 1–4', lvl: [1, 4], mobs: 110, types: ['chaser', 'chaser', 'chaser', 'runner', 'runner'] },
-  { r: 175, name: 'Graveyard Wastes · Lv 5–9', lvl: [5, 9], mobs: 130, types: ['chaser', 'runner', 'shooter', 'shooter'] },
-  { r: WORLD_R, name: 'Cursed Lands · Lv 10–15', lvl: [10, 15], mobs: 150, types: ['chaser', 'runner', 'shooter', 'tank', 'tank'] },
-];
-export const zoneAt = (dist) => ZONES.find((z) => dist <= z.r) || ZONES[ZONES.length - 1];
-
-// Townsfolk with a job: the Blacksmith sells weapon upgrades, the Sage teaches skills and professions.
-export const BLACKSMITH = { x: -4.8, z: 11.5 };
-export const SAGE = { x: 4.2, z: -4.6 };
-export const SHOP_RANGE = 5.5;
-export const near = (p, npc) => Math.hypot(p.x - npc.x, p.z - npc.z) < SHOP_RANGE;
-
-export const BOSS = { x: 0, z: -228, lvl: 18 };
-export const FORT_R = 26;   // radius of the Skeleton King's fortress wall
-
-// Treasure chests: beside the four roads, richer the further from town, plus the King's hoard in the fortress.
-export const CHESTS = [];
-for (const [dx, dz] of [[1, 0], [0, 1], [-1, 0], [0, -1]]) {
-  let side = 1;
-  for (let r = 46; r < WORLD_R - 12; r += 24) {
-    side = -side;
-    const x = dx * r + dz * side * 4.6, z = dz * r + dx * side * 4.6;
-    if (Math.hypot(x - BOSS.x, z - BOSS.z) < FORT_R + 10) continue;
-    CHESTS.push({ x, z, gold: r < ZONES[1].r ? 12 : r < ZONES[2].r ? 40 : 90 });
-  }
-}
-CHESTS.push({ x: BOSS.x, z: BOSS.z - FORT_R + 6, gold: 400, big: true });
-export const CHEST_REACH = 1.9;
+// The world itself - regions, monster camps, chests, townsfolk, the start point - is data: map/world.json, read through
+// src/map/format.js. Only how far a player can reach is a rule of the game.
+export const SHOP_RANGE = 5.5;    // how close to the Blacksmith or the Sage a player has to stand to deal with them
+export const CHEST_REACH = 1.9;   // how close to a chest a player has to come to open it

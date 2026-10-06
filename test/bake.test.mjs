@@ -1,6 +1,7 @@
 // Invariants of a FRESH bake (tools/bake-map.mjs): the script runs as a child process and writes into a temp directory.
 // Nothing here reads the committed map/world.json: that file is edited by hand in the map editor, and a bake fact
 // asserted on it would fail for good after the first save.
+// The last section runs the other tool, tools/check-imports.mjs, on small projects built in the same temp directory.
 // Run: node --test test/bake.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -111,8 +112,20 @@ test('an identical target is not rewritten, a missing directory is created', () 
 });
 
 test('an unknown argument is an error, not a bake', () => {
-  for (const args of [['--owt', path.join(DIR, 'typo.json')], ['--out']]) assert.equal(bake(...args).status, 1);
-  assert.equal(fs.existsSync(path.join(DIR, 'typo.json')), false);
+  fs.mkdirSync(path.join(DIR, 'folder'));
+  // a typo; --out without a path, before another option (which would become a file named "--force"), given twice,
+  // naming a directory
+  const wrong = [['--owt', path.join(DIR, 'typo.json')], ['--out'], ['--out', ''], ['--out', '--force'], ['--force', '--out'],
+    ['--out', '-o.json'], ['--out', 'one.json', '--out', 'two.json'], ['--out', 'folder'], ['--out', 'folder', '--force']];
+  const before = fs.readdirSync(DIR).sort();
+  for (const args of wrong) {
+    const refused = bake(...args);
+    assert.equal(refused.status, 1, `bake ${args.join(' ')}`);
+    assert.match(refused.stderr, /^usage: node tools\/bake-map\.mjs \[--out <path>\] \[--force\]$/m, `bake ${args.join(' ')}`);
+    assert.doesNotMatch(refused.stderr, /^\s+at /m, `bake ${args.join(' ')} died with a stack trace`);
+  }
+  assert.deepEqual(fs.readdirSync(DIR).sort(), before, 'a refused command wrote a file');
+  assert.deepEqual(fs.readdirSync(path.join(DIR, 'folder')), []);
 });
 
 // ---------------------------------------------------------------- the file
@@ -206,18 +219,20 @@ test('391 monsters: camps in three zones and the boss', () => {
   assert.deepEqual(bosses[0], { types: { boss: 1 }, lvl: [18, 18], x: 0, z: -228, r: 0, count: 1, respawn: 90, g: 'fortress' });
   assert.equal(map.spawns.at(-1), bosses[0]);   // written last
   const ZONES = {
-    'Green Meadows': { mobs: 110, types: { chaser: 3, runner: 2 }, camp: 4 },
-    'Graveyard Wastes': { mobs: 130, types: { chaser: 1, runner: 1, shooter: 2 }, camp: 6 },
-    'Cursed Lands': { mobs: 150, types: { chaser: 1, runner: 1, shooter: 1, tank: 2 }, camp: 6 },
+    'Green Meadows': { mobs: 110, types: { chaser: 3, runner: 2 }, camp: [2, 4] },
+    'Graveyard Wastes': { mobs: 130, types: { chaser: 1, runner: 1, shooter: 2 }, camp: [3, 6] },
+    'Cursed Lands': { mobs: 150, types: { chaser: 1, runner: 1, shooter: 1, tank: 2 }, camp: [3, 6] },
   };
-  const mobs = {};
+  const mobs = {}, radius = {};
   for (const s of map.spawns.slice(0, -1)) {
     const region = regionAt(map, s.x, s.z), zone = ZONES[region.name];
     assert.ok(zone, `a camp stands in ${region.name}`);
     mobs[region.name] = (mobs[region.name] || 0) + s.count;
+    (radius[region.name] ??= {})[s.count] ??= s.r;
     assert.deepEqual(s.types, zone.types);
-    assert.ok(s.count >= 1 && s.count <= zone.camp);
-    assert.ok(s.r >= 10 && s.r <= 16);
+    // every camp, the one that takes what is left of its zone too: no lone monster on a narrow disc
+    assert.ok(s.count >= zone.camp[0] && s.count <= zone.camp[1], `a camp of ${s.count} in ${region.name}`);
+    assert.equal(s.r, radius[region.name][s.count], `camps of ${s.count} in ${region.name} differ in radius`);
     assert.ok(region.levels[0] <= s.lvl[0] && s.lvl[0] <= s.lvl[1] && s.lvl[1] <= region.levels[1]);
     assert.equal(s.respawn, 14);
     assert.equal(s.g, null);
@@ -227,6 +242,13 @@ test('391 monsters: camps in three zones and the boss', () => {
     assert.ok(Math.hypot(s.x, s.z + 228) >= 26 + 4 + s.r - 0.02);
   }
   assert.deepEqual(mobs, { 'Green Meadows': 110, 'Graveyard Wastes': 130, 'Cursed Lands': 150 });
+  // A camp is as wide as that many monsters used to occupy, within 10..16 units: that decides the radius in the
+  // meadows only. Further out every camp is 16 wide. Every size of the table occurs.
+  assert.deepEqual(radius, {
+    'Green Meadows': { 2: 11.68, 3: 14.3, 4: 16 },
+    'Graveyard Wastes': { 3: 16, 4: 16, 5: 16, 6: 16 },
+    'Cursed Lands': { 3: 16, 4: 16, 5: 16, 6: 16 },
+  });
   // the distance gradient survives: the meadows still have level-1 camps near the town
   assert.ok(map.spawns.some((s) => s.lvl[0] === 1) && map.spawns.some((s) => s.lvl[1] === 15));
 });
@@ -338,4 +360,100 @@ test('the fortress wall is closed except for its gate', () => {
   const gap = (a, b) => Math.hypot(a.x - b.x, a.z - b.z) - a.r - b.r;
   for (let i = 1; i < circles.length; i++) assert.ok(gap(circles[i - 1], circles[i]) < 0.8, 'a cat (0.8 units wide) fits through the ring wall');
   assert.ok(gap(circles.at(-1), circles[0]) > 10, 'the gate is shut');
+});
+
+// ---------------------------------------------------------------- the import check
+
+// tools/check-imports.mjs checks the project it lives in, so each case builds a small project around a copy of it.
+// The sources say IMPORT for the keyword: the real check reads this file too and must not take them for imports of its own.
+function project(name, files) {
+  const dir = path.join(DIR, name);
+  const write = (more) => {
+    for (const [file, text] of Object.entries(more)) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text.replaceAll('IMPORT', 'IMPORT'.toLowerCase()));
+    }
+  };
+  write(files);
+  fs.mkdirSync(path.join(dir, 'tools'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'tools', 'check-imports.mjs'), path.join(dir, 'tools', 'check-imports.mjs'));
+  const check = (...args) => spawnSync(process.execPath, [path.join(dir, 'tools', 'check-imports.mjs'), ...args], { cwd: dir, encoding: 'utf8' });
+  return { check, write };
+}
+const lines = (...list) => `${list.join('\n')}\n`;
+
+test('check-imports: a "/*" in a line comment does not hide the code after it', () => {
+  const { check } = project('hidden', {
+    'src/map/format.js': lines('export function normalize() {}'),
+    'src/editor/net.js': lines(
+      '// Loads and saves the map through /api/*.',
+      "IMPORT { normalize, noSuchExport } from '../map/format.js';",
+      "IMPORT { gone } from './does-not-exist.js';",
+      'export function load() { try { return normalize(gone, noSuchExport); } catch { /* offline */ return null; } }',
+    ),
+  });
+  for (const args of [[], ['src/editor/net.js'], ['src/editor']]) {
+    const run = check(...args);
+    assert.equal(run.status, 1, run.stdout);
+    assert.ok(run.stderr.includes("src/editor/net.js: 'noSuchExport' is not exported by ../map/format.js"), run.stderr);
+    assert.ok(run.stderr.includes('src/editor/net.js: imports missing file ./does-not-exist.js'), run.stderr);
+    assert.match(run.stderr, /^2 problem\(s\)/m);
+  }
+});
+
+test('check-imports: a "/*" or "//" in a comment or a string does not make exports disappear', () => {
+  const { check } = project('strings', {
+    'src/a.js': lines(
+      '// Run with the others: node --test test/*.test.mjs',
+      "export const GLOB = 'test/*.test.mjs';",
+      'export const API = "http://localhost:8801/api/*";',
+      'export const TEXT = `see ./docs/*.md // not a comment`;',
+      'export const first = 1; // the one and only /* still a line comment',
+      'export function second() { try { return first; } catch { /* ignore */ return 0; } }',
+      '/* export const gone = 1; */',
+    ),
+    'src/b.js': lines("IMPORT { GLOB, API, TEXT, first, second } from './a.js';", 'console.log(GLOB, API, TEXT, first, second());'),
+    'src/c.js': lines("IMPORT { gone } from './a.js';", 'console.log(gone);'),
+  });
+  const fine = check('src/a.js', 'src/b.js');
+  assert.equal(fine.status, 0, fine.stderr);
+  assert.match(fine.stdout, /^ok: 1 relative imports in 2 files/);
+  const run = check();
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /^src\/c\.js: 'gone' is not exported by \.\/a\.js\n\n1 problem\(s\)/, 'what is commented out is still not an export');
+});
+
+test('check-imports: html references in any case, with or without quotes', () => {
+  const { check, write } = project('pages', {
+    'src/main.js': lines('export const ready = true;'),
+    'src/base.css': lines('body { margin: 0; }'),
+    'index.html': lines('<!doctype html>', '<html><head>',
+      '<link rel=stylesheet href=./src/base.css>', '<LINK REL="stylesheet" HREF="./src/base.css?v=2">',
+      "<script type=module SRC='./src/main.js'></script>", '<a href="https://example.com/./x">elsewhere</a>',
+      '<!-- <script src="./src/old.js"></script> -->', '</head><body></body></html>'),
+  });
+  const fine = check();
+  assert.equal(fine.status, 0, fine.stderr);
+  assert.match(fine.stdout, /3 references in 1 html page\(s\)$/m);
+  write({ 'index.html': lines('<!doctype html>', '<html><head>',
+    '<link rel=stylesheet href=./src/none.css>', '<link rel="stylesheet" HREF="./src/gone.css">', "<script type=module Src='./src/lost.js'></script>",
+    '</head><body></body></html>') });
+  const run = check();
+  assert.equal(run.status, 1, run.stdout);
+  for (const ref of ['./src/none.css', './src/gone.css', './src/lost.js']) assert.ok(run.stderr.includes(`index.html: references missing file ${ref}`), run.stderr);
+  assert.match(run.stderr, /^3 problem\(s\)/m);
+});
+
+test('check-imports: the import maps of the two pages are compared as the browser reads them', () => {
+  const map = (version) => lines('<script type="importmap">',
+    `{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@${version}/build/three.module.js" } }`, '</script>');
+  const page = (...head) => lines('<!doctype html>', '<html><head>', ...head, '</head><body></body></html>');
+  const { check, write } = project('maps', { 'index.html': page(map('0.170.0')), 'editor.html': page(`<!-- ${map('0.170.0')} -->`, map('0.171.0')) });
+  const run = check();
+  assert.equal(run.status, 1, run.stdout);
+  assert.ok(run.stderr.includes('editor.html: its import map differs from the one in index.html'), run.stderr);
+  // the other way round: an old map left in a comment is not the page's map; quotes and layout do not matter
+  write({ 'editor.html': page(`<!-- ${map('0.171.0')} -->`, map('0.170.0').replace('"importmap"', 'importmap').replaceAll('{ ', '{\n  ')) });
+  const fine = check();
+  assert.equal(fine.status, 0, fine.stderr);
 });

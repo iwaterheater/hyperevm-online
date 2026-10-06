@@ -24,8 +24,14 @@ function walk(p, out = []) {
   return out;
 }
 
-// strips comments and string contents that could confuse the regexes (keeps import/export specifier strings intact enough)
-const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+// Strips comments, which could confuse the regexes below, in ONE pass from left to right. Strings and template literals
+// are matched first and kept, so a "/*" inside a string or a line comment (a glob, "/api/*") cannot open a block
+// comment that swallows the code after it. A "/" behind a backslash belongs to a regex literal and "://" to a URL.
+// (\x60 is the backtick: written out, it would open a template literal when this file checks itself.)
+const stripComments = (src) => src.replace(
+  /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\x60(?:\\.|[^\x60\\])*\x60)|(?<!\\)\/\*[\s\S]*?\*\/|(?<![\\:])\/\/[^\n]*/g,
+  (match, string) => string ?? '',
+);
 
 const exportCache = new Map();
 function exportsOf(file, seen = new Set()) {
@@ -114,12 +120,15 @@ for (const file of files) {
 
 // ---------------------------------------------------------------- html pages
 
-// every src / href that starts with "./" is a file of this project and must exist
+// a page as the browser reads it: what is commented out does not count
+const readPage = (page) => fs.readFileSync(page, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+
+// every src / href that starts with "./" is a file of this project and must exist;
+// html takes attribute names in any case and values without quotes
 let refs = 0;
 for (const page of pages) {
-  const html = fs.readFileSync(page, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
-  for (const m of html.matchAll(/\b(?:src|href)\s*=\s*(?:"(\.\/[^"]*)"|'(\.\/[^']*)')/g)) {
-    const ref = m[1] ?? m[2];
+  for (const m of readPage(page).matchAll(/\b(?:src|href)\s*=\s*(?:"(\.\/[^"]*)"|'(\.\/[^']*)'|(\.\/[^\s"'>]*))/gi)) {
+    const ref = m[1] ?? m[2] ?? m[3];
     refs++;
     const target = path.resolve(path.dirname(page), ref.split(/[?#]/)[0]);
     if (!fs.existsSync(target)) problems.push(`${rel(page)}: references missing file ${ref}`);
@@ -128,7 +137,7 @@ for (const page of pages) {
 
 // editor.html copies the import map of index.html verbatim; two versions of three.js in one project would not mix
 const importMap = (page) => {
-  const m = /<script\s[^>]*type\s*=\s*["']importmap["'][^>]*>([\s\S]*?)<\/script>/i.exec(fs.readFileSync(page, 'utf8'));
+  const m = /<script\s[^>]*type\s*=\s*(?:"importmap"|'importmap'|importmap(?=[\s>]))[^>]*>([\s\S]*?)<\/script>/i.exec(readPage(page));
   return m ? m[1].replace(/\s+/g, '') : '';
 };
 const bothPages = PAGES.every((p) => fs.existsSync(p)) && (!args.length || PAGES.some((p) => pages.includes(p)));

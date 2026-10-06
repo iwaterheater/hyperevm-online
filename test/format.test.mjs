@@ -203,6 +203,23 @@ test('degrees survive the trip through radians for every two-decimal value', () 
   }
 });
 
+test('qAngle wraps an angle of any size, so a file with an absurd one still round-trips', () => {
+  // beyond 2^53 hundredths of a degree a subtraction of whole turns loses digits; the remainder does not
+  const wrapped = (deg) => { const rad = qAngle(toRad(deg)); return rad > -Math.PI && rad <= Math.PI && qAngle(rad) === rad; };
+  for (const deg of [7964353832865299, -73578320771259410, 36000000180, -(2 ** 60), 1e300, -1e300]) assert.ok(wrapped(deg), `${deg} degrees`);
+  const rnd = lcg(3);
+  for (let i = 0; i < 20000; i++) {
+    const deg = (rnd() - 0.5) * 10 ** (3 + rnd() * 300);
+    if (!wrapped(deg)) assert.fail(`${deg} degrees came back as ${toDeg(qAngle(toRad(deg)))}`);
+  }
+  assert.equal(toDeg(qAngle(toRad(36000000180))), 180);
+  assert.equal(toDeg(qAngle(toRad(-36000000180))), 180);
+  const map = normalize(patched((f) => { f.objects[0].ry = 7964353832865299; f.chests[0].ry = -73578320771259410; f.npcs[1].ry = 1e300; }));
+  assert.deepEqual(validate(map), []);
+  for (const item of [map.objects[0], map.chests[0], map.npcs[1]]) assert.ok(item.ry > -Math.PI && item.ry <= Math.PI);
+  assert.deepEqual(normalize(serialize(map)), map);
+});
+
 test('quantizeItem works in place on every kind', () => {
   const o = { m: 'medieval/barrel', x: 1.234, y: 0.336, z: -5.678, rx: 0, ry: toRad(370.004), rz: toRad(-180), s: 1.23456, sy: 0.99951, col: 0.555, g: null };
   assert.equal(quantizeItem('object', o), o);
@@ -793,6 +810,20 @@ test('issues carry the path, the item and a place to look at', () => {
   assert.ok(Math.abs(issues[0].x - (40 + 60 + 52) / 3) < 1e-9);
   for (const i of issues) assert.match(i.message, /^[A-Z].*[.!]$/);
   assert.deepEqual(JSON.parse(JSON.stringify(issues)), issues, 'issues are plain data');
+
+  // x and z are a place to look at or they are absent: an outline without points has no centre, a lost item no
+  // position, and NaN would cross HTTP as null
+  const lost = sampleMap();
+  lost.regions[2].shape.points = [];
+  lost.objects[0].x = NaN;
+  lost.chests[0].z = undefined;
+  lost.spawns[0].x = Infinity;
+  const found = validate(lost), placeless = found.filter((i) => i.x === undefined);
+  assert.deepEqual(placeless.map((i) => [i.code, i.kind, i.index]), [['region-poly', 'region', 2], ['spawn-pos', 'spawn', 0],
+    ['chest-pos', 'chest', 0], ['object-pos', 'object', 0], ['region-outside', 'region', 2], ['spawn-unplaceable', 'spawn', 0]]);
+  for (const i of placeless) assert.deepEqual(Object.keys(i), ['level', 'code', 'path', 'message', 'kind', 'index'], i.code);
+  for (const i of found) if (i.x !== undefined && !(Number.isFinite(i.x) && Number.isFinite(i.z))) assert.fail(`${i.code} points at ${i.x}, ${i.z}`);
+  assert.deepEqual(JSON.parse(JSON.stringify(found)), found);
 });
 
 test('validate lists errors before warnings and never throws', () => {
@@ -974,6 +1005,26 @@ test('regions: circles, polygons, levels', () => {
   assert.deepEqual(errorCodes((m) => { m.fallback.levels = [1, 99]; m.regions[0].levels = [7, 7]; }), []);
 });
 
+test('a polygon is written as normalize would keep it, so the text of a valid map is always canonical', () => {
+  const m = sampleMap(), lake = [[40, 40], [60, 44], [52, 60]];
+  m.regions[2].shape.points = [[40, 40], [60, 44], [60, 44], [52, 60], [40, 40]];       // a repeated point and a closing one
+  assert.deepEqual(validate(m), [], 'such an outline is valid: it has three distinct points');
+  assert.deepEqual(serialize(m).regions[2].shape.points, lake);
+  assert.deepEqual(encodeItem('region', m.regions[2]).shape.points, lake);
+  assert.equal(m.regions[2].shape.points.length, 5, 'the map itself is not repaired');
+  const text = stringifyMap(serialize(m));
+  assert.ok(stringifyMap(serialize(normalize(JSON.parse(text)))) === text, 'the text does not come back byte for byte');
+  assert.ok(text === stringifyMap(sample()));
+  // the round trip differs from the map by that repair and by nothing else
+  const back = normalize(serialize(m));
+  m.regions[2].shape.points = lake;
+  assert.deepEqual(back, m);
+  // work in progress goes the same way: two points are still two points
+  m.regions[2].shape.points = [[40, 40], [40, 40], [60, 44], [40, 40]];
+  assert.deepEqual(serialize(m, { check: false }).regions[2].shape.points, [[40, 40], [60, 44]]);
+  assert.throws(() => serialize(m), MapError);
+});
+
 test('model-missing: an error with strictModels, else a warning, one per model', () => {
   const models = new Set(['medieval/tree_single_A', 'halloween/grave_A', 'halloween/pillar', 'medieval/rock_single_A', 'dungeon/torch_mounted']);
   const m = sampleMap();
@@ -1008,6 +1059,31 @@ test('warnings: regions, start and NPCs', () => {
   assert.deepEqual(warningCodes((m) => { m.regions[2].shape = { type: 'circle', x: 130, z: 0, r: 29 }; }), ['region-outside']);
   assert.deepEqual(warningCodes((m) => { m.regions[2].shape = { type: 'circle', x: 130, z: 0, r: 30 }; }), []);
   assert.deepEqual(warningCodes((m) => { m.regions[2].shape.points = [[150, 150], [170, 150], [160, 170]]; }), ['region-outside']);
+});
+
+test('region-self-intersect: an outline that passes through itself at a vertex crosses, one that touches itself does not', () => {
+  const crosses = (points) => warningCodes((m) => { m.regions[2].shape.points = points; }).includes('region-self-intersect');
+  // the same answer wherever the outline starts, whichever way it runs, and at any place on the 0.01 grid
+  const all = (points, expected, why) => {
+    for (let k = 0; k < points.length; k++) {
+      const turned = [...points.slice(k), ...points.slice(0, k)];
+      for (const list of [turned, [...turned].reverse(), turned.map(([x, z]) => [qPos(x * 0.07 + 1.13), qPos(z * 0.07 - 2.41)])]) {
+        assert.equal(crosses(list), expected, `${why}: ${JSON.stringify(list)}`);
+      }
+    }
+  };
+  // the vertex (10, 10) lies on the edge (0, 0) - (20, 20) and the outline goes on to the other side of it
+  all([[0, 0], [20, 20], [30, 0], [10, 10], [0, 40]], true, 'through an edge at a vertex');
+  all([[0, 0], [20, 20], [30, 0], [10, 10.01], [0, 40]], true, 'just short of the edge');
+  all([[0, 0], [20, 20], [30, 0], [10, 9.99], [0, 40]], true, 'just past the edge');
+  all([[0, 0], [20, 20], [30, 0], [10, 10], [20, -10]], false, 'the vertex touches the edge and turns back');
+  // two vertices on one spot
+  all([[0, 0], [5, 5], [10, 10], [10, 0], [5, 5], [0, 10]], true, 'two strands cross at a shared vertex');
+  all([[0, 0], [5, 5], [10, 0], [10, 10], [5, 5], [0, 10]], false, 'two triangles meet at a point');
+  all([[0, 0], [10, 0], [10, 10], [0, 10], [0, 0], [3, 3], [3, 7], [7, 7], [7, 3], [3, 3]], false, 'a hole reached over a bridge');
+  all([[0, 0], [10, 0], [10, 10], [0, 10]], false, 'a square');
+  all([[0, 0], [10, 0], [10, 10], [5, 10], [5, 0]], false, 'a vertex on an edge, coming from one side only');
+  all([[0, 0], [10, 10], [10, 0], [0, 10]], true, 'a bowtie');
 });
 
 test('warnings: spawns', () => {
@@ -1079,6 +1155,38 @@ test('warnings: objects', () => {
   assert.deepEqual(codes(validate(big)), ['many-objects']);
   big.objects.length = 20000;
   assert.deepEqual(validate(big), []);
+});
+
+test('object-duplicate: every pile is found, and a hostile pile costs no more than a spread-out map', () => {
+  const rock = sampleMap().objects[4], rnd = lcg(11);
+  const hundredths = (v) => Math.round(v * 100);
+  const near = (a, b) => a.m === b.m && Math.abs(hundredths(a.x) - hundredths(b.x)) <= 5 && Math.abs(hundredths(a.z) - hundredths(b.z)) <= 5;
+  // random piles of two models, from packed to loose, against the plain definition: an EARLIER object of the model within 0.05
+  for (let round = 0; round < 40; round++) {
+    const m = sampleMap(), span = [0.1, 0.3, 1, 3][round % 4];
+    m.objects = Array.from({ length: 300 }, () => ({ ...rock, m: `medieval/rock_single_${rnd() < 0.5 ? 'A' : 'B'}`,
+      x: qPos(-40 + (rnd() - 0.5) * span), z: qPos(-40 + (rnd() - 0.5) * span) }));
+    const issues = validate(m), twins = new Map(issues.map((i) => [i.index, Number(/objects\[(\d+)\]/.exec(i.message)[1])]));
+    assert.deepEqual(codes(issues), ['object-duplicate']);
+    m.objects.forEach((o, i) => {
+      const expected = m.objects.slice(0, i).some((earlier) => near(o, earlier)), twin = twins.get(i);
+      if (expected !== twins.has(i)) assert.fail(`objects[${i}] of round ${round} ${expected ? 'is not reported' : 'is reported for nothing'}`);
+      if (expected && !(twin < i && near(o, m.objects[twin]))) assert.fail(`objects[${i}] of round ${round} is said to sit on objects[${twin}]`);
+    });
+  }
+  // 25,000 objects on one spot beside 24,999 on another, in a file well under the size limit. A spot kept once per
+  // object, not once per place, made every later object walk the whole pile: seconds in which the server does nothing else.
+  const timed = (objects) => {
+    const m = sampleMap();
+    m.objects = objects;
+    const started = performance.now(), issues = validate(m);
+    return [performance.now() - started, issues.filter((i) => i.code === 'object-duplicate').length];
+  };
+  const at = (x) => ({ ...rock, x, z: 0 });
+  const [spread] = timed(Array.from({ length: 50000 }, (_, i) => ({ ...rock, x: (i % 240) - 120, z: Math.floor(i / 240) - 105 })));
+  const [pile, reported] = timed([at(0.04), ...Array.from({ length: 25000 }, () => at(0.05)), ...Array.from({ length: 24999 }, () => at(0.11))]);
+  assert.equal(reported, 49998);
+  assert.ok(pile < 10 * spread + 500, `the pile took ${Math.round(pile)} ms, 50,000 objects apart ${Math.round(spread)} ms`);
 });
 
 // ---------------------------------------------------------------- a blank map
@@ -1467,6 +1575,44 @@ test('pushOutOfSafe: two overlapping safe regions', () => {
     if (!moved) assert.deepEqual(q, start);
     if (!clear(q)) assert.fail(`${start.x}, ${start.z} ended at ${q.x}, ${q.z}`);
   }
+});
+
+test('pushOutOfSafe: safe regions that push a point back into each other still let it go', () => {
+  // how far (x, z) is from an upright rectangle; 0 inside
+  const rect = (x0, z0, x1, z1) => ({
+    shape: poly([x0, z0], [x1, z0], [x1, z1], [x0, z1]),
+    gap: (x, z) => Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(z0 - z, 0, z - z1)),
+  });
+  const disc = (x0, z0, r) => ({ shape: circle(x0, z0, r), gap: (x, z) => Math.max(0, Math.hypot(x - x0, z - z0) - r) });
+  // every point of a grid over the shapes ends `margin` clear of all of them, and a point that already was does not move
+  const sweep = (margin, ...safe) => {
+    const map = world(...safe.map((s, i) => region(`Safe ${i}`, s.shape, { safe: true })));
+    const clear = (p) => safe.every((s) => s.gap(p.x, p.z) >= margin - 1e-6) && !isSafe(map, p.x, p.z);
+    for (let x = -4; x <= 26; x += 0.5) {
+      for (let z = -14; z <= 14; z += 0.5) {
+        const p = { x, z }, moved = pushOutOfSafe(map, p, margin);
+        if (moved !== !clear({ x, z }) || !clear(p)) assert.fail(`${x}, ${z} ${moved ? 'was moved to' : 'was left at'} ${p.x}, ${p.z}`);
+        if (!moved && (p.x !== x || p.z !== z)) assert.fail(`${x}, ${z} moved although it was clear`);
+        if (pushOutOfSafe(map, p, margin)) assert.fail(`${x}, ${z} was moved twice`);
+      }
+    }
+    return map;
+  };
+  // two yards sharing the strip x 8..10: out of one means into the other, pass after pass
+  const yards = sweep(1.3, rect(0, 0, 10, 10), rect(8, 0, 18, 10));
+  const p = { x: 9, z: 5 };
+  assert.equal(pushOutOfSafe(yards, p, 1.3), true);
+  assert.equal(isSafe(yards, p.x, p.z), false, `${p.x}, ${p.z}`);
+  // two towns in a row: on the line of centres each pushes the point straight back at the other
+  const towns = sweep(1, disc(0, 0, 10), disc(12, 0, 10));
+  const q = { x: 1, z: 0 };
+  assert.equal(pushOutOfSafe(towns, q, 1), true);
+  assert.equal(isSafe(towns, q.x, q.z), false, `${q.x}, ${q.z}`);
+  // a lane 1 unit wide between two yards, too narrow for a margin of 1.3 on either side
+  sweep(1.3, rect(0, -5, 10, 5), rect(11, -5, 21, 5));
+  sweep(0.7, rect(0, -5, 10, 5), disc(13, 0, 4), rect(9, 2, 20, 9));
+  // a point that is no place at all is not a reason to search for ever
+  assert.equal(typeof pushOutOfSafe(towns, { x: NaN, z: 0 }, 1), 'boolean');
 });
 
 // ---------------------------------------------------------------- queries

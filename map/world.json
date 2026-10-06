@@ -72,8 +72,8 @@
     { "types": { "chaser": 1, "runner": 1, "shooter": 2 }, "lvl": [5, 7], "x": -107.43, "z": -58.18, "r": 16, "count": 3, "respawn": 14 },
     { "types": { "chaser": 1, "runner": 1, "shooter": 2 }, "lvl": [6, 7], "x": -126.5, "z": 9.37, "r": 16, "count": 4, "respawn": 14 },
     { "types": { "chaser": 1, "runner": 1, "shooter": 2 }, "lvl": [5, 7], "x": -37.31, "z": 109.59, "r": 16, "count": 6, "respawn": 14 },
-    { "types": { "chaser": 1, "runner": 1, "shooter": 2 }, "lvl": [6, 8], "x": 45.36, "z": -130.44, "r": 16, "count": 6, "respawn": 14 },
-    { "types": { "chaser": 1, "runner": 1, "shooter": 2 }, "lvl": [6, 7], "x": -25.44, "z": 122.07, "r": 12.23, "count": 1, "respawn": 14 },
+    { "types": { "chaser": 1, "runner": 1, "shooter": 2 }, "lvl": [6, 8], "x": 45.36, "z": -130.44, "r": 16, "count": 4, "respawn": 14 },
+    { "types": { "chaser": 1, "runner": 1, "shooter": 2 }, "lvl": [6, 7], "x": -25.72, "z": 123.44, "r": 16, "count": 3, "respawn": 14 },
     { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [10, 13], "x": 160.55, "z": -122.89, "r": 16, "count": 5, "respawn": 14 },
     { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [11, 13], "x": 203.16, "z": 67.63, "r": 16, "count": 6, "respawn": 14 },
     { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [13, 15], "x": -110.58, "z": 212.88, "r": 16, "count": 3, "respawn": 14 },
@@ -104,8 +104,8 @@
     { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [12, 14], "x": 63.18, "z": 211.61, "r": 16, "count": 6, "respawn": 14 },
     { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [11, 13], "x": 116.11, "z": 166.63, "r": 16, "count": 4, "respawn": 14 },
     { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [12, 15], "x": 219.19, "z": 80.4, "r": 16, "count": 5, "respawn": 14 },
-    { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [11, 13], "x": -148.4, "z": 151.06, "r": 16, "count": 5, "respawn": 14 },
-    { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [10, 12], "x": 190.55, "z": 59.63, "r": 16, "count": 2, "respawn": 14 },
+    { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [11, 13], "x": -148.4, "z": 151.06, "r": 16, "count": 4, "respawn": 14 },
+    { "types": { "chaser": 1, "runner": 1, "shooter": 1, "tank": 2 }, "lvl": [10, 12], "x": 190.55, "z": 59.63, "r": 16, "count": 3, "respawn": 14 },
     { "types": { "boss": 1 }, "lvl": [18, 18], "x": 0, "z": -228, "r": 0, "count": 1, "respawn": 90, "g": "fortress" }
   ],
   "chests": [

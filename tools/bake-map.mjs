@@ -385,7 +385,9 @@ for (let i = 1; i < ZONES.length; i++) {
     types[type] = (types[type] || 0) + 1;
   }
   for (let left = zone.mobs; left > 0;) {
-    const count = Math.min(left, cMin + Math.floor(rnd() * (cMax - cMin + 1)));
+    // a camp of cMin..cMax monsters; the roll gives way where it would leave fewer than cMin for the zone's last camp
+    let count = cMin + Math.floor(rnd() * (cMax - cMin + 1));
+    if (left - count < cMin) count = left <= cMax ? left : left - cMin;
     const rc = clamp(Math.sqrt(count * area / (Math.PI * zone.mobs)), 10, 16);
     const a = rnd() * Math.PI * 2, d = Math.sqrt((lo + rc) * (lo + rc) + rnd() * ((hi - rc) * (hi - rc) - (lo + rc) * (lo + rc)));
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
@@ -409,18 +411,22 @@ const map = {
 };
 const text = stringifyMap(serialize(map));   // serialize throws, listing what is wrong, if the bake broke a rule of the format
 
+function usage(problem) {
+  if (problem) console.error(problem);
+  console.error('usage: node tools/bake-map.mjs [--out <path>] [--force]');
+  process.exit(1);
+}
 let out = null, force = false;
 for (let args = process.argv.slice(2), i = 0; i < args.length; i++) {
   if (args[i] === '--force') force = true;
-  else if (args[i] === '--out' && i + 1 < args.length) out = args[++i];
-  else {
-    console.error('usage: node tools/bake-map.mjs [--out <path>] [--force]');
-    process.exit(1);
-  }
+  // --out takes one path, once. What follows it must not look like an option: "--out --force" would bake into a file named "--force".
+  else if (args[i] === '--out' && out === null && /^[^-]/.test(args[i + 1] ?? '')) out = args[++i];
+  else usage();
 }
 // the default is this repository's map wherever the script is run from; a path given with --out is taken as typed
 const target = out === null ? path.join(ROOT, 'map', 'world.json') : path.resolve(out);
 const name = out ?? 'map/world.json';
+if (fs.statSync(target, { throwIfNoEntry: false })?.isDirectory()) usage(`${name} is a directory; --out names the file to write`);
 if (fs.existsSync(target)) {
   if (fs.readFileSync(target).equals(Buffer.from(text))) {
     console.log(`${name} is already the baked world: nothing to write`);

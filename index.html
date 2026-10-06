@@ -103,6 +103,13 @@
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
     background: radial-gradient(transparent 40%, rgba(255, 60, 110, .55)); transition: opacity .25s; }
 
+  /* dev bar: only for whoever may edit the map. It sits above the band of the skill bar, which grows towards it */
+  #devbar { right: 16px; bottom: 150px; display: none; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; font-size: 13px;
+    white-space: nowrap; }
+  #devbar.on { display: flex; }
+  #devPos { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }   /* a region name may be 48 characters long */
+  #devbar button { padding: 6px 14px; font-size: 13px; box-shadow: none; }
+
   #chat { position: absolute; left: 16px; bottom: 150px; width: min(380px, 60vw); font-size: 13px; }
   #chatLog div { padding: 1px 0; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
   #chatLog .sys { color: var(--teal); opacity: .8; }
@@ -178,6 +185,7 @@
     <div id="bookList"></div>
   </div>
   <div id="shop"></div>
+  <div class="panel" id="devbar"><span id="devPos"></span><button id="editBtn">Edit here</button></div>
   <div id="hint">WASD — move · click / Tab — target · F — attack · 1–8 — skills · K — skill book · C — character · X — sit · RMB drag — camera · wheel — zoom · Space — jump · Enter — chat · B — Blacksmith</div>
 </div>
 <div id="flash"></div>
@@ -203,12 +211,12 @@
 
 <div class="overlay center hidden" id="dead">
   <h1>YOU <span>DIED</span></h1>
-  <p id="deadText">Respawning in town…</p>
+  <p id="deadText">Respawning…</p>
 </div>
 
 <div class="overlay center hidden" id="lost">
   <h1>CONNECTION <span>LOST</span></h1>
-  <p>The connection to the server was lost</p>
+  <p id="lostText">The connection to the server was lost</p>
   <br>
   <button id="reloadBtn">Reconnect</button>
 </div>

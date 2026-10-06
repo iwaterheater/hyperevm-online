@@ -1,25 +1,91 @@
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createCat } from './cat.js';
 import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
+import { createComposer } from './postfx.js';
+import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss } from './map/format.js';
 import {
-  WORLD_R, TOWN_R, ZONES, BOSS, BLACKSMITH, SAGE, near, CHESTS, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
-  professionsOf, SKILLS, skillsFor, hotbar, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost, zoneAt,
+  MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
+  professionsOf, SKILLS, skillsFor, hotbar, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
-const ZONE_COLORS = [TEAL, 0x6fbf55, 0xb59a6a, 0xff5a70];   // town, meadows, graveyard, cursed lands
 const REACH = 2.4;    // melee reach, for the size of the slash effect
 const glow = (hex, k = 2.5) => new THREE.Color(hex).multiplyScalar(k);
 const css = (hex) => `#${hex.toString(16).padStart(6, '0')}`;
+const r2 = (v) => Math.round(v * 100) / 100;
 const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------- map & session
+
+// Browser storage may be full, switched off or hold old data: every access is guarded, and what is read gets checked.
+// `area` is 'localStorage' or 'sessionStorage'; writing null removes the key.
+function readStore(area, key) {
+  try { return window[area].getItem(key); } catch { return null; }
+}
+function readJson(area, key) {
+  try { return JSON.parse(readStore(area, key)); } catch { return null; }
+}
+function writeStore(area, key, value) {
+  try {
+    if (value === null) window[area].removeItem(key);
+    else window[area].setItem(key, value);
+    return true;
+  } catch { return false; }
+}
+
+// Play mode (/?play=1) is how the map editor tries a map out: no menu, and a made-up character that the server grants
+// only to whoever may edit the map. The editor leaves its request in storage: { id, at: [x, z] | null, lvl, cls, god, speed }.
+const playMode = new URLSearchParams(location.search).get('play') === '1';
+function readPlay() {
+  const p = readJson('localStorage', 'hypercat-editor-play');
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return { id: 0, at: null, lvl: 1, cls: START_CLASSES[0], god: false, speed: 1 };
+  const at = Array.isArray(p.at) && p.at.length === 2 && p.at.every(Number.isFinite) ? [p.at[0], p.at[1]] : null;
+  return {
+    id: p.id, at, lvl: Number.isFinite(p.lvl) ? p.lvl : 1, cls: typeof p.cls === 'string' ? p.cls : START_CLASSES[0],
+    god: p.god === true, speed: p.speed === 2 ? 2 : 1,
+  };
+}
+const play = playMode ? readPlay() : null;
+
+// Before the page reloads itself for a saved map it leaves a note, { name, cls, x, z, at }, so that the cat comes back
+// to where it stood. The note is read once and believed for 20 seconds.
+function takeRejoin() {
+  const f = readJson('sessionStorage', 'hypercat-rejoin');
+  writeStore('sessionStorage', 'hypercat-rejoin', null);
+  const fresh = f && typeof f === 'object' && typeof f.name === 'string' && Number.isFinite(f.x) && Number.isFinite(f.z)
+    && Date.now() - f.at < 20000;
+  return fresh ? f : null;
+}
+// In play mode the note counts only while no new Play request has come since this tab last joined - then the reload
+// came from a save. A new request always lands where the editor asked, whichever of the two reaches the tab first.
+const note = takeRejoin();
+const rejoin = note && (!playMode || String(play.id) === readStore('sessionStorage', 'hypercat-play-id')) ? note : null;
+// where a join without the menu asks the server to put the cat; null = the start point
+const joinAt = rejoin ? [rejoin.x, rejoin.z] : play ? play.at : null;
+const autoJoin = playMode || !!rejoin;
+if (autoJoin) $('menu').classList.add('hidden');
+
+// The world is a data file: everything below is built from it.
+let map, mapRev, editorInfo = { enabled: false, canSave: false, tokenRequired: false };
+try {
+  const res = await fetch('/api/map', { cache: 'no-store' });
+  // the revision the server knows this map by; a proxy may weaken or drop the ETag, so the plain header comes first
+  mapRev = res.headers.get('X-Map-Rev') || (res.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
+  map = normalize(await res.json());
+  editorInfo = await fetch('/api/editor', { cache: 'no-store' }).then((r) => r.json()).catch(() => editorInfo);
+} catch (err) { showLoadFailure(); throw err; }   // the throw stops the module: there is no game without a map
+
+// A map that did not load must not leave a menu that looks alive.
+function showLoadFailure() {
+  $('menu').classList.add('hidden');
+  $('lostText').textContent = 'The map failed to load';
+  $('lost').classList.remove('hidden');
+  $('reloadBtn').addEventListener('click', () => location.reload());
+}
 
 // ---------------------------------------------------------------- renderer
 
@@ -34,12 +100,8 @@ document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 700);
-camera.position.set(0, 1.2, 6.4);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.4, 1.0));
-composer.addPass(new OutputPass());
+const composer = createComposer(renderer, scene, camera);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -48,8 +110,8 @@ addEventListener('resize', () => {
   composer.setSize(innerWidth, innerHeight);
 });
 
-const world = createWorld(scene);
-world.ready.catch((err) => console.error('Scenery models failed to load', err));
+const world = createWorld(scene, map);
+world.ready.catch(console.error);
 
 // ---------------------------------------------------------------- labels & bars
 
@@ -78,7 +140,7 @@ function textSprite(text, color = '#d5f5ee', height = 0.5) {
 }
 
 let npcs = null;
-createNpcs(scene, textSprite, world.block).then((n) => { npcs = n; }, (err) => console.error('Townsfolk failed to load', err));
+createNpcs(scene, textSprite, map.npcs).then((n) => { npcs = n; }, (err) => console.error('Townsfolk failed to load', err));
 
 function disposeSprite(s) {
   s.removeFromParent();
@@ -163,18 +225,17 @@ const gemPool = makePool(() => {
 
 // ---------------------------------------------------------------- chests & coins (KayKit Dungeon Remastered)
 
-const chestViews = [];   // index-aligned with CHESTS; filled when the models arrive
+const chestViews = [];   // index-aligned with map.chests; filled when the models arrive
 {
   const loader = new GLTFLoader();
   Promise.all(['chest', 'chest_gold', 'coin'].map((n) => loader.loadAsync(`./assets/dungeon/${n}.glb`))).then(([chest, gold, coin]) => {
-    CHESTS.forEach((c, i) => {
+    map.chests.forEach((c, i) => {
       const model = (c.big ? gold : chest).scene.clone(true);
       model.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       const root = new THREE.Group();
       root.add(model);
       root.position.set(c.x, 0, c.z);
-      // roadside chests face the road, the King's hoard faces the fortress gate
-      root.rotation.y = c.big ? 0 : Math.abs(c.x) < Math.abs(c.z) ? Math.atan2(-Math.sign(c.x), 0) : Math.atan2(0, -Math.sign(c.z));
+      root.rotation.y = c.ry;
       root.scale.setScalar(c.big ? 2 : 1.3);
       scene.add(root);
       chestViews[i] = { root, lid: model.getObjectByName(c.big ? 'chest_gold_lid' : 'chest_lid'), open: false };
@@ -318,14 +379,20 @@ function makeMobView(ti, lvl) {
 
 // ---------------------------------------------------------------- game state
 
-let state = 'menu';   // menu | connecting | playing | lost
+let state = 'menu';   // menu | connecting | playing | lost | reloading
 let ws = null, myId = 0, time = 0, shake = 0, online = 1;
+let joinName = '', testSpeed = 1;   // testSpeed: a play-test may run at double speed
 const names = new Map();
 const others = new Map(), mobViews = new Map(), gemViews = new Map();
 let bullets = [], orbs = [], meteors = [];
 
 const me = makeAvatar();
-me.z = 6;   // menu pose: on the plaza, in front of the fountain
+// Until the server places it the cat waits where it will appear: on the start point - the menu pose - or, when the page
+// joins by itself, on the spot it asks for.
+me.x = joinAt ? joinAt[0] : map.start.x;
+me.z = joinAt ? joinAt[1] : map.start.z;
+if (joinAt) world.snapMood(me.x, me.z);
+camera.position.set(me.x, 1.2, me.z + 0.4);   // the opening shot starts close to the cat and pulls back
 const stats = { hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, sp: 0, level: 1, gold: 0, weapon: 1, cls: 'fighter', skills: {}, buffs: [], dead: false };
 // every derived stat of this character (P.Atk, Atk.Spd, Speed...), recomputed whenever the server state changes
 let sheet = statsOf('fighter', 1);
@@ -407,12 +474,45 @@ function getToken() {
   } catch { return ''; }
 }
 
+// The editor token (only a server in token mode has one): kept for this tab, asked for once when a play-test needs it,
+// never put into a URL.
+function editorToken(ask) {
+  let token = readStore('sessionStorage', 'hypercat-editor-token') || '';
+  if (!token && ask) {
+    token = prompt('Editor token') || '';
+    if (token) writeStore('sessionStorage', 'hypercat-editor-token', token);
+  }
+  return token;
+}
+// Whoever may save the map gets the dev bar. With a token every visitor "can save", so there it takes the token itself.
+const mayEdit = () => !!(editorInfo.enabled && editorInfo.canSave
+  && (!editorInfo.tokenRequired || readStore('sessionStorage', 'hypercat-editor-token')));
+
+// The first message of a connection. `rev` names the map this page has drawn: the server lets nobody in with another one.
+function joinMessage() {
+  const msg = { t: 'join', name: joinName, cls: pickedClass, token: getToken(), rev: mapRev };
+  // a place of the client's choosing and a play-test character are honoured only for whoever may edit the map
+  if (playMode) msg.test = { at: joinAt, lvl: play.lvl, cls: play.cls, god: play.god, speed: play.speed };
+  else if (joinAt) msg.at = joinAt;
+  const token = editorInfo.tokenRequired ? editorToken(playMode) : '';
+  if (token) msg.editorToken = token;
+  return msg;
+}
+
+function showLost() {
+  state = 'lost';
+  $('lost').classList.remove('hidden');
+  $('menu').classList.add('hidden');
+  $('dead').classList.add('hidden');
+  $('hud').classList.remove('on');
+}
+
 async function connect() {
   if (state !== 'menu') return;
   if (!actx) { try { actx = new AudioContext(); } catch { /* no audio */ } }
   state = 'connecting';
-  const name = $('nameInput').value.trim() || 'Cat';
-  try { localStorage.setItem('hypercat-name', name); } catch { /* ignore */ }
+  joinName = $('nameInput').value.trim() || (playMode ? 'Tester' : 'Cat');
+  if (!playMode) writeStore('localStorage', 'hypercat-name', joinName);
   $('playBtn').textContent = 'Loading models…';
   try {
     await loadSkeletons();
@@ -420,26 +520,44 @@ async function connect() {
     console.error(err);
     state = 'menu';
     $('playBtn').textContent = 'Models failed to load — retry';
+    $('menu').classList.remove('hidden');   // a join without the menu had hidden it
     return;
   }
   $('playBtn').textContent = 'Connecting…';
+  const hello = joinMessage();
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
-  ws.onopen = () => send({ t: 'join', name, cls: pickedClass, token: getToken() });
+  ws.onopen = () => send(hello);
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
-  ws.onclose = () => {
-    state = 'lost';
-    $('lost').classList.remove('hidden');
-    $('menu').classList.add('hidden');
-    $('dead').classList.add('hidden');
-    $('hud').classList.remove('on');
-  };
+  ws.onclose = showLost;
+}
+
+// The server runs another map than the one this page has drawn - it was saved in the editor: load the page again and
+// come back to the same spot. Only reloads that never reached a join are counted (the join clears the list), three a
+// minute at most, so a page that keeps being handed the wrong map stops instead of reloading for ever.
+function reloadForMap() {
+  state = 'reloading';   // from here on every message is ignored
+  ws.onclose = null;
+  ws.close();
+  const t = Date.now(), list = readJson('sessionStorage', 'hypercat-reloads');
+  const recent = Array.isArray(list) ? list.filter((at) => t - at < 60000) : [];
+  if (recent.length >= 3 || !writeStore('sessionStorage', 'hypercat-reloads', JSON.stringify([...recent, t]))) { showLost(); return; }
+  writeStore('sessionStorage', 'hypercat-rejoin', JSON.stringify({ name: joinName, cls: pickedClass, x: r2(me.x), z: r2(me.z), at: t }));
+  location.reload();
 }
 
 function onMessage(msg) {
-  if (msg.t === 'w') {
+  if (state === 'reloading') return;
+  if (msg.t === 'map') {   // after a save, or instead of 'w' when this page joined with an old map
+    if (msg.rev !== mapRev) reloadForMap();
+  } else if (msg.t === 'w') {
     myId = msg.id;
     me.x = msg.x; me.z = msg.z;
+    testSpeed = msg.test?.speed === 2 ? 2 : 1;
+    world.snapMood(me.x, me.z);
     state = 'playing';
+    writeStore('sessionStorage', 'hypercat-reloads', null);
+    if (playMode) writeStore('sessionStorage', 'hypercat-play-id', String(play.id));
+    $('devbar').classList.toggle('on', !!msg.test || mayEdit());
     $('menu').classList.add('hidden');
     $('hud').classList.add('on');
     document.activeElement?.blur();
@@ -454,16 +572,16 @@ function onMessage(msg) {
   }
 }
 
-function syncViews(map, list, create, update, remove) {
+function syncViews(views, list, create, update, remove) {
   const seen = new Set();
   for (const row of list) {
     const id = row[0];
     seen.add(id);
-    let v = map.get(id);
-    if (!v) { v = create(row); map.set(id, v); }
+    let v = views.get(id);
+    if (!v) { v = create(row); views.set(id, v); }
     update(v, row);
   }
-  for (const [id, v] of map) if (!seen.has(id)) { remove(v); map.delete(id); }
+  for (const [id, v] of views) if (!seen.has(id)) { remove(v); views.delete(id); }
 }
 
 function onSnapshot(s) {
@@ -631,10 +749,11 @@ function onEvent(ev) {
       floatText(me.x, 3.3, me.z, `+${ev.n}`, '#8ee68e');
       break;
     case 'died':
-      $('deadText').textContent = `You lost ${ev.xp} experience. Respawning in town…`;
+      $('deadText').textContent = `You lost ${ev.xp} experience. Respawning…`;   // at the start point, wherever the map has it
       break;
     case 'open': {
-      const c = CHESTS[ev.i];
+      const c = map.chests[ev.i];
+      if (!c) break;
       burst(c.x, 1.2, c.z, 0xffd76a, c.big ? 60 : 24, 7);
       sfx(520, 0.25, 'triangle', 0.07, 520);
       break;
@@ -655,9 +774,12 @@ function onEvent(ev) {
       burst(me.x, me.y + 1, me.z, 0xff4d7a, 10, 6);
       sfx(140, 0.2, 'sawtooth', 0.09, -60);
       break;
-    case 'tp':
+    case 'tp': {
+      const far = Math.hypot(ev.x - me.x, ev.z - me.z) > 40;
       me.x = ev.x; me.z = ev.z; me.y = 0; local.vy = 0;
+      if (far) world.snapMood(me.x, me.z);   // a respawn across the map: no slow fade of the sky
       break;
+    }
   }
 }
 
@@ -792,6 +914,11 @@ renderer.domElement.addEventListener('wheel', (e) => {
 addEventListener('contextmenu', (e) => e.preventDefault());
 $('playBtn').addEventListener('click', connect);
 $('reloadBtn').addEventListener('click', () => location.reload());
+// the way back to the map editor: it opens, or moves its camera, at the spot where the cat stands
+$('editBtn').addEventListener('click', () => {
+  window.open(`/editor.html#at=${me.x.toFixed(1)},${me.z.toFixed(1)}`, 'hypercat-editor')?.focus();
+  $('editBtn').blur();
+});
 try { $('nameInput').value = localStorage.getItem('hypercat-name') || ''; } catch { /* ignore */ }
 
 // class picker in the menu; it only matters for characters that have no class yet
@@ -837,7 +964,8 @@ function startDash() {
 const raycaster = new THREE.Raycaster();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const aimPoint = new THREE.Vector3();
-const camTarget = new THREE.Vector3(0, 0.45, 0), camGoal = new THREE.Vector3(), lookGoal = new THREE.Vector3();
+const camTarget = new THREE.Vector3(me.x, 0.45, me.z - 6), camGoal = new THREE.Vector3(), lookGoal = new THREE.Vector3();
+const prev = { x: 0, z: 0 };   // where the cat stood before it moved this frame
 
 const NEEDS_TARGET = ['strike', 'shot', 'bolt', 'sleep'];
 
@@ -901,6 +1029,7 @@ function updateLocal(dt) {
   if (attacking && tv && !manual && !inReach && me.castT < 0) moveDir.set(tdx, tdz);
   const moving = moveDir.lengthSq() > 0;
 
+  prev.x = me.x; prev.z = me.z;
   if (local.dashT > 0) {
     local.dashT -= dt;
     me.x += local.dashDir.x * 32 * dt;
@@ -910,13 +1039,14 @@ function updateLocal(dt) {
   } else if (me.castT >= 0 || me.sitting) {
     me.speed = 0;   // rooted while casting or resting
   } else {
-    me.x += moveDir.x * sheet.move * dt;
-    me.z += moveDir.y * sheet.move * dt;
-    me.speed = moving ? sheet.move : 0;
+    const move = sheet.move * testSpeed;
+    me.x += moveDir.x * move * dt;
+    me.z += moveDir.y * move * dt;
+    me.speed = moving ? move : 0;
   }
-  const d = Math.hypot(me.x, me.z), max = WORLD_R - 1;
+  const d = Math.hypot(me.x, me.z), max = map.radius - 1;
   if (d > max) { me.x *= max / d; me.z *= max / d; }
-  world.collide(me);
+  world.collide(me, 0.4, prev);
 
   local.vy -= 30 * dt;
   me.y += local.vy * dt;
@@ -995,11 +1125,10 @@ function updateLocal(dt) {
   local.sendT -= dt;
   if (local.sendT <= 0) {
     local.sendT = 1 / 15;
-    const r = (v) => Math.round(v * 100) / 100;
-    send({ t: 'm', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(me.yaw), s: me.speed ? 1 : 0, st: me.sitting ? 1 : 0 });
+    send({ t: 'm', x: r2(me.x), y: r2(me.y), z: r2(me.z), yaw: r2(me.yaw), s: me.speed ? 1 : 0, st: me.sitting ? 1 : 0 });
   }
 
-  const zone = zoneAt(d).name;
+  const zone = regionLabel(regionAt(map, me.x, me.z));
   if (zone !== local.zone) { local.zone = zone; banner(zone); }
 }
 
@@ -1094,7 +1223,7 @@ function updateViews(dt) {
     const m = o.mesh.position;
     m.x += o.vx * dt; m.z += o.vz * dt;
     o.life -= dt;
-    const dead = o.life <= 0 || Math.hypot(m.x, m.z) < TOWN_R || (Math.hypot(m.x - me.x, m.z - me.z) < 0.7 && me.y < 1.4);
+    const dead = o.life <= 0 || isSafe(map, m.x, m.z) || (Math.hypot(m.x - me.x, m.z - me.z) < 0.7 && me.y < 1.4);
     if (dead) { burst(m.x, 1, m.z, 0xff3b6b, 4, 3); orbPool.release(o); }
     return !dead;
   });
@@ -1172,14 +1301,17 @@ function toggleBook() {
   $('book').classList.toggle('on', bookOpen);
 }
 
-// The skill book lists everything the class can learn. Buying is only possible next to the Sage.
+// The skill book lists everything the class can learn. Buying is only possible next to a Sage - and a map need not have one.
+const hasSage = npcsOf(map, 'sage').length > 0;
 function renderBook(atSage) {
   const key = [stats.cls, stats.level, stats.sp, atSage, JSON.stringify(stats.skills)].join('|');
   if (key === bookKey) return;
   bookKey = key;
   const cls = CLASSES[stats.cls];
   $('bookTitle').textContent = `${cls.name} skills`;
-  $('bookSub').textContent = `Skill points: ${stats.sp} · ${atSage ? 'The Sage will teach you what you can afford.' : 'Visit the Sage by the fountain in town to learn skills.'}`;
+  const where = atSage ? 'The Sage will teach you what you can afford.'
+    : hasSage ? 'Find a Sage to learn skills.' : 'There is no Sage in this world to learn skills from.';
+  $('bookSub').textContent = `Skill points: ${stats.sp} · ${where}`;
   const list = $('bookList');
   list.replaceChildren();
   const button = (label, enabled, onClick) => {
@@ -1302,19 +1434,22 @@ function updateHud() {
     $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
   }
 
-  const atSage = near(me, SAGE);
+  const atSage = nearNpc(map, me, 'sage');
   if (bookOpen) renderBook(atSage);
   const cost = upgradeCost(stats.weapon);
   const tip = bookOpen ? '' : atSage ? 'K — learn skills from the Sage'
-    : !near(me, BLACKSMITH) ? ''
+    : !nearNpc(map, me, 'blacksmith') ? ''
     : stats.gold >= cost ? `B — upgrade weapon for ${cost} gold` : `Weapon upgrade: ${cost} gold (you have ${stats.gold})`;
   $('shop').style.display = tip ? 'block' : 'none';
   $('shop').textContent = tip;
+
+  if ($('devbar').classList.contains('on')) $('devPos').textContent = `${me.x.toFixed(1)}, ${me.z.toFixed(1)} · ${regionAt(map, me.x, me.z).name}`;
 }
 
 // Radar: the surroundings of the player; far landmarks stick to the rim.
 const mapCtx = $('minimap').getContext('2d');
 const RADAR_R = 75;
+const SHORE = '#d9cb9a';   // the edge of the island: the sand of its beach
 function drawMinimap() {
   const g = mapCtx, C = 144, RIM = 136, S = RIM / RADAR_R;
   g.clearRect(0, 0, 288, 288);
@@ -1324,12 +1459,26 @@ function drawMinimap() {
   g.fillRect(0, 0, 288, 288);
 
   const ox = C - me.x * S, oz = C - me.z * S;   // world origin on the canvas
+  // the outline of a region: a circle, or a polygon that closes itself
+  const trace = (shape) => {
+    g.beginPath();
+    if (shape.type === 'circle') g.arc(ox + shape.x * S, oz + shape.z * S, shape.r * S, 0, 7);
+    else {
+      for (const [x, z] of shape.points) g.lineTo(ox + x * S, oz + z * S);
+      g.closePath();
+    }
+  };
+  g.fillStyle = 'rgba(127, 232, 214, .35)';   // safe ground
+  for (const region of map.regions) if (region.safe) { trace(region.shape); g.fill('evenodd'); }
   g.lineWidth = 3;
-  for (let i = 1; i < ZONES.length; i++) {
-    g.strokeStyle = css(ZONE_COLORS[Math.min(i + 1, ZONE_COLORS.length - 1)]);
-    g.globalAlpha = 0.5;
-    g.beginPath(); g.arc(ox, oz, ZONES[i].r * S, 0, 7); g.stroke();
+  g.globalAlpha = 0.5;
+  for (const region of map.regions) {
+    g.strokeStyle = regionColor(map, region);
+    trace(region.shape);
+    g.stroke();
   }
+  g.strokeStyle = SHORE;
+  g.beginPath(); g.arc(ox, oz, map.radius * S, 0, 7); g.stroke();
   g.globalAlpha = 1;
 
   const dot = (x, z, r, color, pin) => {
@@ -1342,13 +1491,14 @@ function drawMinimap() {
     g.fillStyle = color;
     g.beginPath(); g.arc(C + px, C + pz, r, 0, 7); g.fill();
   };
-  g.fillStyle = 'rgba(127, 232, 214, .35)';
-  g.beginPath(); g.arc(ox, oz, TOWN_R * S, 0, 7); g.fill();
   for (const v of mobViews.values()) dot(v.x, v.z, v.def.r * 4 + 2, css(v.def.color));
   for (const gem of gemViews.values()) dot(gem.mesh.position.x, gem.mesh.position.z, 3, '#ffd76a');
-  chestViews.forEach((v, i) => { if (!v.open) dot(CHESTS[i].x, CHESTS[i].z, CHESTS[i].big ? 8 : 5, '#ffb020'); });
-  dot(BOSS.x, BOSS.z, 8, '#ff2244', true);
-  dot(0, 0, 8, '#7fe8d6', true);          // town
+  chestViews.forEach((v, i) => {
+    const c = map.chests[i];
+    if (c && !v.open) dot(c.x, c.z, c.big ? 8 : 5, '#ffb020');
+  });
+  for (const spawn of map.spawns) if (hasBoss(spawn)) dot(spawn.x, spawn.z, 8, '#ff2244', true);
+  dot(map.start.x, map.start.z, 8, '#7fe8d6', true);          // town
   for (const a of others.values()) dot(a.x, a.z, 6, '#ffffff');
   g.fillStyle = '#ffffff';
   g.beginPath(); g.arc(C, C, 7, 0, 7); g.fill();
@@ -1380,7 +1530,7 @@ let mapT = 0;
 // One step of the client: simulation, HUD and rendering. Kept separate from the animation-frame loop so tests can drive it.
 function tick(dt) {
   time += dt;
-  world.update(time, me.x, me.z);
+  world.update(time, dt, me.x, me.z);
   npcs?.update(dt, me);
 
   if (state === 'playing') {
@@ -1406,4 +1556,15 @@ function frame() {
 frame();
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, world, cam, camera, tick, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
+
+// A play-test, and a page that has reloaded itself for a saved map, go straight in.
+if (autoJoin) {
+  if (rejoin && !playMode) {
+    $('nameInput').value = rejoin.name.slice(0, 16);
+    if (START_CLASSES.includes(rejoin.cls)) pickClass(rejoin.cls);
+  }
+  // no click and no key came before this join, and until one does the browser keeps the sound off
+  for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => actx?.resume(), { once: true });
+  connect();
+}

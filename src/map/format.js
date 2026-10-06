@@ -83,8 +83,9 @@ export const toRad = (deg) => deg * Math.PI / 180;
 
 // radians -> radians on the 0.01 degree grid, wrapped into (-PI, PI]. toDeg() of the result is exact.
 export function qAngle(rad) {
-  let c = Math.round(rad * 180 / Math.PI * 100);    // hundredths of a degree
-  c -= 36000 * Math.ceil((c - 18000) / 36000);
+  let c = Math.round(rad * 180 / Math.PI * 100) % 36000;    // hundredths of a degree; the remainder is exact for any angle
+  if (c > 18000) c -= 36000;
+  else if (c <= -18000) c += 36000;
   const d = c / 100;
   return d === 0 ? 0 : d * Math.PI / 180;
 }
@@ -255,6 +256,9 @@ export function cellHash(ix, iz, salt) {
 // ---------------------------------------------------------------- regions
 
 const EPS = 1e-9;
+// 16 points on the rim of a unit disc: a start or spawn disc is sampled at its centre and these, and a point that safe
+// regions cannot agree on looks for a way out along them
+const RIM = Array.from({ length: 16 }, (_, k) => [Math.cos(k * Math.PI / 8), Math.sin(k * Math.PI / 8)]);
 
 // Circles are edge-inclusive, polygons use the even-odd rule (either winding). Client, server and editor all call this.
 export function inShape(s, x, z) {
@@ -399,17 +403,39 @@ function pushOutOfShape(s, p, margin) {
   return true;
 }
 
+// true while a safe region holds the point (x, z) or comes closer to it than `margin`
+const probe = { x: 0, z: 0 };
+function heldBySafe(map, x, z, margin) {
+  for (const r of map.regions) {
+    if (!r.safe) continue;
+    probe.x = x; probe.z = z;
+    if (pushOutOfShape(r.shape, probe, margin)) return true;
+  }
+  return false;
+}
+
 // Ejects p from every safe region: the point ends `margin` outside each shape that held it or came closer than that.
 // Mutates p.x / p.z and returns whether it moved. Up to 4 passes, because leaving one region can enter the next.
 export function pushOutOfSafe(map, p, margin) {
-  let moved = false;
+  const x = p.x, z = p.z;
   for (let pass = 0; pass < 4; pass++) {
     let again = false;
     for (const r of map.regions) if (r.safe && pushOutOfShape(r.shape, p, margin)) again = true;
-    if (!again) break;
-    moved = true;
+    if (!again) return pass > 0;
   }
-  return moved;
+  if (!heldBySafe(map, p.x, p.z, margin)) return true;
+  // Four passes did not settle it: safe shapes that overlap, or that leave a gap narrower than the margin, push a point
+  // back into each other for ever. Look around where it started instead, on rings of doubling radius, for a spot that
+  // none of them holds. No region reaches further than a few thousand units, so there always is one.
+  for (let d = Math.max(margin, 0.5); d < 1e5; d *= 2) {
+    for (const [cos, sin] of RIM) {
+      if (heldBySafe(map, x + cos * d, z + sin * d, margin)) continue;
+      p.x = x + cos * d;
+      p.z = z + sin * d;
+      return true;
+    }
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------- queries
@@ -771,8 +797,6 @@ const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 const GROUP_MESSAGE = 'A group name is 1 to 32 letters, digits, "_", "." or "-", starting with a letter or a digit.';
 const DENSE_R = 65, DENSE_COUNT = 80;      // the server's view radius, and how many monsters one snapshot carries comfortably
 const OUTSIDE = 10;                        // an object this far beyond the radius is probably lost
-// 16 points on the rim of a unit disc: start and spawn discs are sampled at their centre and these
-const RIM = Array.from({ length: 16 }, (_, k) => [Math.cos(k * Math.PI / 8), Math.sin(k * Math.PI / 8)]);
 
 // every comparison is written so that NaN fails it; a string that looks like a number is not a number
 const num = (v) => (typeof v === 'number' ? v : NaN);
@@ -817,23 +841,45 @@ const polyArea = (points) => {
   return a / 2;
 };
 
-// true when two edges of the outline that do not share a vertex cross each other
+// True when the outline crosses itself: two edges that share no vertex cross, or the outline passes through one of its
+// other edges or vertices exactly at a vertex. Touching itself and running back along itself are not crossings.
 function selfIntersects(points) {
-  const n = points.length;
+  const n = points.length, q = points.map((p) => [Math.round(p[0] * 100), Math.round(p[1] * 100)]);   // whole hundredths: the products below are exact
   const side = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+  const dot = (a, b, c) => (b[0] - a[0]) * (c[0] - a[0]) + (b[1] - a[1]) * (c[1] - a[1]);
+  // which side of the path a -> v -> b the point c lies on: 1 left, -1 right, 0 on the path itself
+  const sideOfPath = (a, v, b, c) => {
+    const s = side(a, v, c), t = side(v, b, c);
+    return side(a, v, b) >= 0 ? (s > 0 && t > 0 ? 1 : s < 0 || t < 0 ? -1 : 0) : (s > 0 || t > 0 ? 1 : s < 0 && t < 0 ? -1 : 0);
+  };
   for (let i = 0; i < n; i++) {
-    const a = points[i], b = points[(i + 1) % n];
+    const a = q[i], b = q[(i + 1) % n];
     for (let j = i + 2; j < n; j++) {
       if (i === 0 && j === n - 1) continue;      // the closing edge is a neighbour of the first
-      const c = points[j], e = points[(j + 1) % n];
+      const c = q[j], e = q[(j + 1) % n];
       if (side(a, b, c) * side(a, b, e) < 0 && side(c, e, a) * side(c, e, b) < 0) return true;
+    }
+  }
+  // a vertex on another part of the outline: a crossing when its two neighbours end up on opposite sides of that part
+  for (let k = 0; k < n; k++) {
+    const v = q[k], before = q[(k + n - 1) % n], after = q[(k + 1) % n];
+    for (let i = 0; i < n; i++) {
+      const a = q[i], b = q[(i + 1) % n];
+      if (i === k || b === v) continue;          // its own two edges
+      if (a[0] === v[0] && a[1] === v[1]) {      // on another vertex; each such pair is looked at once
+        const c = q[(i + n - 1) % n];
+        if (i > k && sideOfPath(c, a, b, before) * sideOfPath(c, a, b, after) < 0) return true;
+      } else if (side(a, b, v) === 0 && dot(a, b, v) > 0 && dot(b, a, v) > 0) {      // inside the edge a - b
+        if (side(a, b, before) * side(a, b, after) < 0) return true;
+      }
     }
   }
   return false;
 }
 
 // Pairs [index, earlier index] of objects that repeat an earlier object's model within 0.05 units in x and z.
-// A hash grid per model over hundredths of a unit; a spot already taken is not stored twice, so the cost stays linear.
+// A hash grid per model over hundredths of a unit. A cell is 5 x 5 hundredths and keeps one object per spot, 25 at
+// most, so the cost stays linear whatever a file piles up in one place.
 function duplicateObjects(objects, n) {
   const out = [], grids = new Map(), cx = new Int32Array(n), cz = new Int32Array(n), next = new Int32Array(n);
   for (let i = 0; i < n; i++) {
@@ -850,9 +896,12 @@ function duplicateObjects(objects, n) {
       }
     }
     if (twin >= 0) out.push([i, twin]);
-    if (twin >= 0 && cx[twin] === x && cz[twin] === z) continue;
-    next[i] = grid.get(bx * 1048576 + bz) ?? -1;
-    grid.set(bx * 1048576 + bz, i);
+    const cell = bx * 1048576 + bz, first = grid.get(cell) ?? -1;
+    let same = twin >= 0 ? first : -1;           // without a twin the spot is certainly free
+    while (same >= 0 && (cx[same] !== x || cz[same] !== z)) same = next[same];
+    if (same >= 0) continue;                     // an earlier object already stands for this spot
+    next[i] = first;
+    grid.set(cell, i);
   }
   return out;
 }
@@ -874,7 +923,8 @@ function check(map, models, strictModels) {
   const L = LIMITS, errors = [], warnings = [];
   const error = (code, path, message, where) => errors.push({ level: 'error', code, path, message, ...where });
   const warn = (code, path, message, where) => warnings.push({ level: 'warning', code, path, message, ...where });
-  const on = (kind, index, p) => ({ kind, index, x: p.x, z: p.z });
+  // x / z only when the item has a place to look at: a polygon without points has none, and NaN turns into null on the wire
+  const on = (kind, index, p) => (Number.isFinite(p.x) && Number.isFinite(p.z) ? { kind, index, x: p.x, z: p.z } : { kind, index });
   const { radius, ground, start, fallback } = map, half = groundHalf(ground);
   let bad;
   for (const key of Object.values(COLLECTION)) if (!Array.isArray(map[key])) throw new TypeError(`"${key}" is not a list`);
@@ -1145,7 +1195,7 @@ export function encodeItem(kind, item) {
     if (item.color != null) f.color = item.color;
     f.shape = s.type === 'circle'
       ? { type: 'circle', x: qPos(s.x), z: qPos(s.z), r: qPos(s.r) }
-      : { type: 'poly', points: s.points.map((p) => [qPos(p[0]), qPos(p[1])]) };
+      : { type: 'poly', points: cleanPoints(s.points.map((p) => [qPos(p[0]), qPos(p[1])])) };   // as normalize would keep them
     return f;
   }
   throw new TypeError(`encodeItem: no such kind of item: ${kind}`);
