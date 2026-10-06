@@ -1,5 +1,5 @@
 import { h, button } from '../ui/dom.js';
-import { BINDINGS, chordLabel, hintFor } from '../keymap.js';
+import { BINDINGS, chordLabel, hintFor, keyText } from '../keymap.js';
 
 // The hotkey sheet (#help): every row of the keymap table, the pointer gestures and the rules of the number fields.
 // It is generated from BINDINGS, so a key that is rebound there is rebound here.
@@ -82,7 +82,7 @@ export default function mount(el, ctx) {
     return h('section', { class: 'group', dataset: { ctx: id } },
       h('h3', { class: 'title' }, title),
       note && h('p', { class: 'note ui-hint' }, note),
-      table(rows.map((r) => [r.chords.map((chord) => key(chord, id)), r.held ? `${r.label} (hold)` : r.label])));
+      table(rows.map((r) => [r.chords.map((chord) => key(chord, id)), keyText(r.held ? `${r.label} (hold)` : r.label)])));
   });
 
   el.setAttribute('role', 'dialog');
@@ -96,18 +96,22 @@ export default function mount(el, ctx) {
       sections,
       h('section', { class: 'group', dataset: { ctx: 'pointer' } },
         h('h3', { class: 'title' }, 'Mouse'),
-        table(POINTER.map(([input, effect]) => [h('span', { class: 'input' }, input), effect]))),
+        table(POINTER.map(([input, effect]) => [h('span', { class: 'input' }, keyText(input)), keyText(effect)]))),      // the keys as the caps above write them
       h('section', { class: 'group', dataset: { ctx: 'numbers' } },
         h('h3', { class: 'title' }, 'Number fields'),
         h('p', { class: 'note ui-hint' }, 'Inspector, tool options and panels: every number field reads what is typed the same way.'),
-        table(NUMBERS.map(([typed, effect]) => [h('span', { class: 'typed ui-mono' }, typed), effect])))),
+        table(NUMBERS.map(([typed, effect]) => [h('span', { class: 'typed ui-mono' }, keyText(typed)), keyText(effect)])))),
   );
 
   // Registered once; a second mount (there is none) would find it taken.
   if (!actions.has('help.toggle')) {
     actions.register('help.toggle', () => {
       el.hidden = !el.hidden;
-      if (!el.hidden) el.scrollTop = 0;
+      if (el.hidden) return;
+      el.scrollTop = 0;
+      // The sheet covers the page, and a popover - the editor card of the Spawns table, the Play options - floats above
+      // everything, the sheet included: it would stay open on top of it and take the first Escape.
+      try { for (const pop of document.querySelectorAll(':popover-open')) pop.hidePopover(); } catch { /* no popover API: nothing floats */ }
     });
   }
   return {};

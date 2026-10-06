@@ -14,15 +14,15 @@
 // It also registers the action 'region.levelsFromSpawns' (args: regions[]), which the inspector's button runs too;
 // the list may hold map.fallback, which is how this panel sets the levels of the fallback region the same way.
 import { LIMITS, MOODS, moodAt, regionColor, regionLabel, shapeCentre } from '../../map/format.js';
-import { h, row, button, textField, selectField, checkField, intRangeField, colorField, rafThrottle } from '../ui/dom.js';
-import { mod, hintFor } from '../keymap.js';
+import { h, row, button, textField, selectField, checkField, intRangeField, colorField, rafThrottle, safeColor } from '../ui/dom.js';
+import { mod, hintFor, keyText } from '../keymap.js';
+import { withEnd } from '../fields.js';
 import { editable } from '../tools/common.js';
 import { polygonArea } from '../tools/measure.js';
 
 const DRAG_PX = 4;             // a press that travels less is a click on the row
 const SCROLL_EDGE = 18;        // px from the edge of the list where a drag scrolls it
 const BUSY = 'Finish the current edit first';
-const HEX = /^#[0-9a-f]{6}$/i;
 // Colours for regions that should stand out from the three mood colours: the palette of the chips. Data, not styling.
 const PRESETS = ['#6fbf55', '#b59a6a', '#ff5a70', '#7fe8d6', '#3a8fb0', '#4d7cff', '#a98bff', '#ff8a3d', '#e0c04a', '#c9d2da'];
 
@@ -50,7 +50,6 @@ function icon(name) {
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const trim = (v) => String(Number(v.toFixed(2)));
 const levelsText = (l) => (l ? (l[0] === l[1] ? `Lv ${l[0]}` : `Lv ${l[0]}–${l[1]}`) : 'no levels');
-const safeColor = (color) => (typeof color === 'string' && HEX.test(color) ? color : 'transparent');
 
 // ---------------------------------------------------------------- pure helpers
 
@@ -110,7 +109,7 @@ export default function mount(el, ctx) {
   };
   const keyHint = hintFor('tool.region');
   const drawCircle = button('+ Circle', drawWith('circle'), { title: `Draw a circle region: drag from the centre to the radius${keyHint ? ` (Region tool, ${keyHint})` : ''}` });
-  const drawPoly = button('+ Polygon', drawWith('poly'), { title: 'Draw a polygon region: click its points, Enter closes it' });
+  const drawPoly = button('+ Polygon', drawWith('poly'), { title: keyText('Draw a polygon region: click its points, Enter closes it') });
   const head = h('div', { class: 'head' }, count, tint, drawCircle, drawPoly);
 
   // ---- the list
@@ -139,6 +138,11 @@ export default function mount(el, ctx) {
       MOODS[mood]?.name ?? mood);
   };
 
+  // The level range has a cell of its own that never shrinks: it is what differs from row to row, so a long name is
+  // cut before it is (and the mood text before the name).
+  // (Always there, empty for a region without levels: it is also what pushes the rest of the row to the right.)
+  const levelCell = (region) => h('span', { class: 'lv', title: region.levels ? 'The level range on the banner of the region' : null }, region.levels ? levelsText(region.levels) : '');
+
   function regionRow(map, region, index) {
     const selected = !fallbackOpen && store.selection.has(region);
     const hidden = ui.itemFlag(region, 'hidden'), locked = ui.itemFlag(region, 'locked');
@@ -149,7 +153,8 @@ export default function mount(el, ctx) {
     },
     h('span', { class: 'grip' }, icon('grip')),
     h('span', { class: 'ui-swatch', style: { background: safeColor(regionColor(map, region)) } }),
-    h('span', { class: 'name' }, regionLabel(region)),       // a text node: names come from the map
+    h('span', { class: 'name' }, region.name),                // a text node: names come from the map
+    levelCell(region),
     region.safe && h('span', { class: 'ui-badge ok', title: 'Safe: fast regeneration, monsters keep out' }, 'safe'),
     moodCell(map, region),
     flagButton(region, 'hidden', hidden, ['eye', 'eyeOff'], ['Hide the outline of this region', 'Show this region']),
@@ -167,7 +172,8 @@ export default function mount(el, ctx) {
     },
     h('span', { class: 'grip' }),
     h('span', { class: 'ui-swatch', style: { background: safeColor(regionColor(map, f)) } }),
-    h('span', { class: 'name' }, regionLabel(f)),
+    h('span', { class: 'name' }, f.name),
+    levelCell(f),
     h('span', { class: 'ui-badge' }, 'fallback'),
     moodCell(map, f),
     previewButton(f.mood));
@@ -204,17 +210,19 @@ export default function mount(el, ctx) {
   // ---- the form under the list
 
   // One undo step with the edit, or the reason why not. -> whether it ran
+  // patch: the same for every region - or a function (region) -> patch, for a value that depends on what each has.
   function apply(patch, label = null) {
     const t = target();
     if (t === 'none') return false;
     if (store.grouping) { ui.toast(BUSY, 'warn'); return false; }
     if (!layerOpen()) { refuseLayer(); return false; }
+    const each = typeof patch === 'function';
     let command;
-    if (t === 'fallback') command = cmd.setProps({ fallback: patch });
+    if (t === 'fallback') command = cmd.setProps({ fallback: each ? patch(store.map.fallback) : patch });
     else {
       const items = editable(ctx, selectedRegions());
       if (!items.length) { ui.toast('The region is locked or hidden: unlock it to edit it', 'warn'); return false; }
-      command = cmd.set(items, patch);
+      command = each ? cmd.setEach(items, items.map(patch)) : cmd.set(items, patch);
     }
     if (!label) { store.exec(command); return true; }
     store.begin(label);
@@ -229,8 +237,13 @@ export default function mount(el, ctx) {
   const name = textField({ value: '', minLength: LIMITS.regionName[0], maxLength: LIMITS.regionName[1], onCommit: (text) => commit({ name: text }) });
   const mood = selectField({ value: null, options: [], onCommit: (value) => commit({ mood: value }) });
   const safe = checkField({ value: false, onCommit: (on) => commit({ safe: on }) });
-  const levelsOn = checkField({ value: false, onCommit: (on) => commit({ levels: on ? levelsRange.value ?? [LIMITS.level[0], LIMITS.level[0]] : null }) });
-  const levelsRange = intRangeField({ value: null, min: LIMITS.level[0], max: LIMITS.level[1], onCommit: (pair) => commit({ levels: pair }) });
+  // Levels are written region by region: with several selected, the end that is typed goes to all of them and the
+  // other end of each stays its own; ticking the box keeps the levels a region has and gives the others a first pair.
+  const levelsOn = checkField({ value: false, onCommit: (on) => commit((r) => ({ levels: on ? r.levels ?? [LIMITS.level[0], LIMITS.level[0]] : null })) });
+  const levelsRange = intRangeField({
+    value: null, min: LIMITS.level[0], max: LIMITS.level[1],
+    onCommit: (pair, { end = 0 } = {}) => commit((r) => ({ levels: withEnd(r.levels, end, pair[end]) })),
+  });
   const fromSpawns = button('From spawns', () => actions.run('region.levelsFromSpawns', target() === 'fallback' ? [store.map.fallback] : selectedRegions()),
     { title: 'Set the levels to the lowest and the highest level of the spawns inside the region' });
   levelsOn.el.title = 'Does the region show a level range on its banner?';
@@ -564,5 +577,7 @@ export default function mount(el, ctx) {
   ui.on('overlays', refresh);
   ui.on('preview', refresh);
   render();
-  return {};
+  // every rendered frame: what a command changed is in the list before the frame is drawn - as in the other panels,
+  // and also in a window that hands out no animation frames of its own
+  return { update() { refresh.flush(); } };
 }

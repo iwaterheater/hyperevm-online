@@ -3,7 +3,7 @@
 //   click on free ground          a new chest with the settings of the options strip (gold, big, respawn, facing)
 //   press and drag on free ground a new chest that turns to face the pointer - one undo step
 //   click a chest                 select it (Shift / Mod: add or take it)      double-click: that one chest alone
-//   drag a chest                  move the selected chests                     Alt+drag: move a copy
+//   drag a chest                  move the selection                           Alt+drag: move a copy
 //   Alt+click a chest             copy its settings into the strip
 //   Q E                           turn the selection by 15 degrees (Shift 90, Alt 1); with nothing selected they turn
 //                                 the chest that is about to be placed
@@ -45,6 +45,7 @@ export default function create(ctx) {
 
   const tool = markerTool(ctx, {
     id: 'chest', label: 'Chest', icon: '▣', layer: 'chests', kind: 'chest', drag: 'facing',
+    about: 'Treasure chests: click to add one, drag to turn it',
 
     props: () => template.fresh(),
 
@@ -57,7 +58,7 @@ export default function create(ctx) {
 
     ghost: (props) => ({ chests: [props] }),
     adopt: (item) => template.adopt(item),
-    placed(item) { if (item) ui.setStatus(`${item.big ? 'Big chest' : 'Chest'} added \u00b7 ${item.gold} g \u00b7 opens again after ${item.respawn} s`); },
+    placed(item) { if (item) ui.setNote(`${item.big ? 'Big chest' : 'Chest'} added \u00b7 ${item.gold} g \u00b7 opens again after ${item.respawn} s`); },
 
     // nothing selected: Q and E turn the chest that is about to be placed
     idleKey(action, ev) {
@@ -67,9 +68,10 @@ export default function create(ctx) {
     },
 
     hints: {
+      intro: 'Chest: click adds a chest, drag turns it · click a chest to select it, drag it to move it',
       get create() { return `Click: ${text(template.fresh())} · drag: turn it to face the pointer · Q E: turn`; },
       item: 'Click: select · drag: move · Shift+click: add · Alt+click: copy its settings · Alt+drag: move a copy',
-      selected: 'Drag: move the selected chests · Q E: turn · Alt+drag: move a copy',
+      selected: 'Drag: move the selection · Q E: turn · Alt+drag: move a copy',
     },
 
     options(el, keep) {

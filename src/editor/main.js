@@ -92,6 +92,7 @@ function wrapFrames(ui) {
         ui.set('collapsed', next);
       },
     });
+    box.dataset.panel = id;     // base.css keeps the Minimap frame in view by it
     el.replaceWith(box);
     box.append(el);
   }
@@ -139,7 +140,7 @@ function registerCoreActions(ctx) {
   actions.register('snap.toggle', () => {
     const on = !ui.snap.on;
     ui.set('snap', { ...ui.snap, on });
-    ui.setStatus(on ? `Snap on, step ${ui.snap.step}` : 'Snap off');
+    ui.setNote(on ? `Snap on, step ${ui.snap.step}` : 'Snap off');
   });
 
   // tool.<id> is ui.set('tool', id). The toolbar disables a tool whose layer is hidden or locked, and its key must not
@@ -156,6 +157,45 @@ function registerCoreActions(ctx) {
   }
 }
 
+// ---------------------------------------------------------------- the options strip
+
+// The strip is one line of fixed height (a strip that grew would move the viewport at every tool switch), so in a
+// narrow window a long one - the Spawn tool's, a Line of the Place tool - is wider than the page. Then it scrolls
+// sideways: the wheel over it scrolls it, and the edge that hides something fades out (.more-left / .more-right in
+// base.css). The hint a strip ends with may be cut short by the same lack of room: its tooltip has the whole text.
+function fitStrip(strip) {
+  const mark = () => {
+    const left = strip.scrollLeft, room = strip.scrollWidth - strip.clientWidth;
+    strip.classList.toggle('more-left', room > 1 && left > 1);
+    strip.classList.toggle('more-right', room > 1 && left < room - 1);
+    const hint = strip.lastElementChild;
+    if (hint?.classList.contains('ui-hint') && (!hint.title || hint.dataset.cut === '1')) {
+      if (hint.scrollWidth > hint.clientWidth) { hint.title = hint.textContent; hint.dataset.cut = '1'; }
+      else if (hint.dataset.cut === '1') { hint.removeAttribute('title'); delete hint.dataset.cut; }
+    }
+  };
+  let due = false;
+  const soon = () => {
+    if (due) return;
+    due = true;
+    queueMicrotask(() => { due = false; mark(); });
+  };
+  strip.addEventListener('scroll', mark, { passive: true });
+  strip.addEventListener('wheel', (ev) => {
+    if (strip.scrollWidth - strip.clientWidth <= 1 || ev.ctrlKey) return;
+    const delta = Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY;
+    if (!delta) return;
+    strip.scrollLeft += ev.deltaMode === 1 ? delta * 16 : delta;
+    mark();
+    ev.preventDefault();   // the page itself never scrolls; this keeps a trackpad from "going back" on a sideways swipe
+  }, { passive: false });
+  window.addEventListener('resize', soon);
+  // a tool fills its strip when it is activated and rebuilds it when its mode changes
+  if (typeof MutationObserver === 'function') new MutationObserver(soon).observe(strip, { childList: true, subtree: true, characterData: true });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(soon).observe(strip);
+  mark();
+}
+
 // ---------------------------------------------------------------- tool switching
 
 // ui 'tool' -> deactivate the old tool, activate the new one, fill the options strip.
@@ -164,6 +204,7 @@ function registerCoreActions(ctx) {
 function wireTools(ctx) {
   const { ui, store } = ctx, strip = $('#tooloptions');
   let active = null;   // { id, tool }
+  if (strip) fitStrip(strip);
 
   ui.on('tool', (id) => {
     const tool = ctx.tools[id];
@@ -183,6 +224,7 @@ function wireTools(ctx) {
     }
     const now = active = { id, tool };
     strip?.replaceChildren();
+    if (strip) strip.scrollLeft = 0;
     if (typeof tool.activate === 'function') guard(`tool ${id}`, 'activate', () => tool.activate());
     if (active !== now) return;   // activate() chose another tool itself (a paste with nothing to paste)
     if (strip && typeof tool.options === 'function') {

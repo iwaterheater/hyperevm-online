@@ -16,7 +16,7 @@
 // `tool.opts`, read at every use: the options strip writes it, and so may a script.
 import * as THREE from 'three';
 import { h, row, button, checkField, selectField, numberField, angleField } from '../ui/dom.js';
-import { hintFor } from '../keymap.js';
+import { hintFor, keyText } from '../keymap.js';
 import { LIMITS, groundAt, qAngle, qPos, qScale } from '../../map/format.js';
 import { colliderOf, modelInfo } from '../../map/catalog.js';
 import { dragTracker, placeOnce, snapPoint, snapping } from './common.js';
@@ -25,7 +25,7 @@ import { layoutLine, layoutRing, pathLength } from '../path.js';
 const DEG = Math.PI / 180, TAU = Math.PI * 2;
 const MODES = [
   ['single', 'Single', 'One object per click'],
-  ['line', 'Line', 'A row along the points you click: Enter or a double-click places it'],
+  ['line', 'Line', keyText('A row along the points you click: Enter or a double-click places it')],
   ['ring', 'Ring', 'A ring: press at the centre, drag to the radius'],
 ];
 const ORIENT = [
@@ -347,7 +347,7 @@ export default function create(ctx) {
   function eyedrop(hit) {
     const obj = hit.kind === 'object' ? hit.item : null;
     if (!obj) {
-      tell('Nothing to pick up here: Alt+click an object to take its model, scale and rotation');
+      tell(keyText('Nothing to pick up here: Alt+click an object to take its model, scale and rotation'));
       return;
     }
     ry = obj.ry;
@@ -376,11 +376,11 @@ export default function create(ctx) {
     const name = modelInfo(m)?.label ?? m;
     if (mode === 'line') {
       return points.length
-        ? `Line of ${name}: click the next point, Enter or double-click to place, Backspace takes a point back, Esc drops the line`
+        ? `Line of ${name}: ${keyText('click the next point, Enter or double-click to place, Backspace takes a point back, Esc drops the line')}`
         : `Line of ${name}: click the first point`;
     }
     if (mode === 'ring') return `Ring of ${name}: press at the centre and drag to the radius`;
-    return `Place ${name}: click to place, drag to turn, Q / E rotate, [ ] scale, R re-roll, Alt+click picks up an object`;
+    return `Place ${name}: ${keyText('click to place, drag to turn, Q / E rotate, [ ] scale, R re-roll, Alt+click picks up an object')}`;
   }
 
   // Rebuilds everything the tool shows from its state: the ghost, its collider footprints, the guide lines of a row,
@@ -547,7 +547,7 @@ export default function create(ctx) {
 
     const rotationRow = titled(row(path ? 'Turn' : 'Rotation', w.rotation), path
       ? 'Added to the rotation of every piece (Q / E before the first point): 180 degrees turn a ring inside out'
-      : 'The rotation of the next object. Q / E turn it by 15 degrees (Shift 90, Alt 1); dragging a press sets it');
+      : keyText('The rotation of the next object. Q / E turn it by 15 degrees (Shift 90, Alt 1); dragging a press sets it'));
     const scaleRow = titled(row('Scale', w.lo, h('span', { class: 'ui-dash' }, '–'), w.hi),
       'Every object gets a scale between the two numbers. [ and ] scale both');
     const yRow = titled(row(path ? 'Y' : 'Y offset', w.y), 'Y offset: raises (or sinks) what is placed; remembered per model');
@@ -567,8 +567,8 @@ export default function create(ctx) {
       );
     } else {
       if (mode === 'line') {
-        w.finish = button(`Place${key('path.commit')}`, () => commitLine(), { title: 'Place the row along the points clicked so far (Enter, or a double-click on the last point)' });
-        w.back = button(`Back${key('path.back')}`, () => { if (points.length) { points.pop(); refresh(); sync(); } }, { title: 'Take the last point back (Backspace)' });
+        w.finish = button(`Place${key('path.commit')}`, () => commitLine(), { title: keyText('Place the row along the points clicked so far (Enter, or a double-click on the last point)') });
+        w.back = button(`Back${key('path.back')}`, () => { if (points.length) { points.pop(); refresh(); sync(); } }, { title: keyText('Take the last point back (Backspace)') });
         el.append(w.finish, w.back);
       }
       w.spacingMode = selectField({
@@ -616,6 +616,8 @@ export default function create(ctx) {
 
   const tool = {
     id: 'place', label: 'Place', icon: '✚', layer: 'objects', picks: ['object'], hidden: false,
+    about: 'Put the model chosen in the palette on the map: one by one, in a line or in a ring',
+    get intro() { return hint(); },
     // a line in progress takes Backspace and Enter; everything else is a ghost that Q, E, [ ] and R act on
     get context() { return mode === 'line' && points.length > 0 ? 'path' : 'ghost'; },
     get mode() { return mode; },
@@ -773,8 +775,11 @@ export default function create(ctx) {
         return true;
       }
       if (action === 'path.back') {
-        if (mode !== 'line' || !points.length) return false;
-        points.pop();
+        // In Line mode Backspace is the key of the points, with or without one left: a press too many must not fall
+        // through to "delete the selection" - which is the row that was placed a moment ago.
+        if (mode !== 'line') return false;
+        if (points.length) points.pop();
+        else tell('Line: no point to take back');
         refresh();
         return true;
       }

@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import { MapView } from '../map/view.js';
 import { createLighting } from '../map/lighting.js';
 import { createComposer } from '../postfx.js';
-import { GROUND_TYPES, LAYER_OF, MOODS, cellIndex, groundIx, groundX, moodAt, qPos, regionLabel, shapeBounds } from '../map/format.js';
+import { GROUND_TYPES, LAYER_OF, LIMITS, MOODS, cellIndex, groundIx, groundX, moodAt, qPos, regionLabel, shapeBounds } from '../map/format.js';
 import { reportOnce } from './actions.js';
+import { chordLabel } from './keymap.js';
 import { pivotOf, snapPoint } from './tools/common.js';
 
 // The viewport: the scene and its orbit camera, the frame loop, and everything between the pointer and the tools.
@@ -255,7 +256,9 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   function toolContext(tool) {
     try { return tool?.context ?? 'none'; } catch { return 'none'; }   // a getter of somebody else's module
   }
-  const radius = () => store.map?.radius ?? 260;
+  // The size of the island as the camera takes it: the map's radius, kept within what a map can have at all - a file
+  // under repair may say anything, and every camera limit is a multiple of this number.
+  const radius = () => { const r = store.map?.radius; return Number.isFinite(r) ? clamp(r, 1, 2 * LIMITS.radius[1]) : 260; };
   const layerOpen = (layer) => { const l = ui.layers?.[layer]; return !l || (l.visible !== false && !l.locked); };
 
   // ---------------------------------------------------------------- camera rig
@@ -266,6 +269,9 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
 
   // The rig -> the camera, at once: a pick right after a camera call must see the new matrices, frame or no frame.
   function applyRig() {
+    // The rig is numbers that came from the map (frame an item, go to an issue): one item of a file under repair that
+    // stands at 1e308 must not leave the camera at NaN, from where no Home and no animation would bring it back.
+    for (const key of ['x', 'z', 'distance', 'yaw', 'pitch']) if (!Number.isFinite(rig[key])) rig[key] = HOME[key] ?? 0;
     const R = radius(), max = R + 40, d = Math.hypot(rig.x, rig.z);
     rig.pitch = clamp(rig.pitch, PITCH_MIN, PITCH_MAX);
     rig.distance = clamp(rig.distance, DISTANCE_MIN, 3 * R);
@@ -292,6 +298,8 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   // A camera move in progress: { t, from, to } - `to` holds only the rig keys that move, each can be taken out alone.
   function animateTo(to, time = ANIM_TIME) {
     const goal = { ...anim?.to, ...to };
+    for (const key of Object.keys(goal)) if (!Number.isFinite(goal[key])) delete goal[key];      // nowhere to go to
+    if (!Object.keys(goal).length) return;
     if (goal.yaw !== undefined) goal.yaw = rig.yaw + wrap(goal.yaw - rig.yaw);   // the short way round
     anim = { t: 0, time, from: { ...rig }, to: goal };
     invalidate();
@@ -416,7 +424,7 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   function gotoBookmark(i) {
     const slot = slotOf(i), b = slot < 0 ? null : readBookmarks()[slot];
     if (!b) {
-      if (slot >= 0) ui.toast(`Bookmark ${i} is empty (${MAC ? 'Option' : 'Alt'}+Shift+${i} stores the view)`);
+      if (slot >= 0) ui.toast(`Bookmark ${i} is empty (${chordLabel(`Alt+Shift+Digit${i}`)} stores the view)`);
       return false;
     }
     overhead = null;
@@ -553,10 +561,10 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
       if (m && !(m.item && ui.isPickable(m.kind, m.item))) m = null;
     }
     if (m && beforeScenery(m, sx, sy)) return { item: m.item, kind: m.kind, handle: m.handle ?? null };
-    // 4. scenery
+    // 4. scenery - and the body of a chest, which stands among it: of the two, what the ray meets first
     if (picks.includes('object') && layerOpen('objects')) {
       const hit = view.pickObject(RAYCASTER, { slopPx: OBJECT_SLOP, viewportHeight: height, filter: pickable });
-      if (hit) return { item: hit.obj, kind: 'object', handle: null };
+      if (hit && !(m && m.part === 'body' && m.distance <= hit.distance)) return { item: hit.obj, kind: 'object', handle: null };
     }
     return m ? { item: m.item, kind: m.kind, handle: null } : NO_PICK;
   }

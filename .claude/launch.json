@@ -4,7 +4,18 @@
     {
       "name": "game",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["server.js"],
+      "runtimeArgs": [
+        "server.js"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "editor",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server.js",
+        "--editor"
+      ],
       "port": 8765
     }
   ]

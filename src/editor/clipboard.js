@@ -20,9 +20,14 @@ export const CLIP_KINDS = ['object', 'spawn', 'chest', 'npc'];   // what can be 
 export const MAX_STAMPS = 200;
 export const STAMP_NAME_MAX = 48;
 
+// No map reaches a thousandth of this (the largest island has a radius of 600): a clip with a coordinate beyond it
+// was not copied from a map, and pasting it would only put things where no camera goes.
+const FAR = 1e6;
+
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 const isObj = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+const near = (v) => finite(v) && Math.abs(v) <= FAR;
 
 // ---------------------------------------------------------------- storage and change notes
 
@@ -60,14 +65,18 @@ export function subscribe(fn) {
 // -> a clean copy of `raw` when it is a clip that holds at least one item, else null. Every item goes through
 // decodeItem and comes back in canonical file form, so nothing a file or another tab wrote is taken on trust.
 function checkClip(raw) {
-  if (!isObj(raw) || raw.v !== 1 || !isObj(raw.pivot) || !finite(raw.pivot.x) || !finite(raw.pivot.z)) return null;
+  if (!isObj(raw) || raw.v !== 1 || !isObj(raw.pivot) || !near(raw.pivot.x) || !near(raw.pivot.z)) return null;
   const clip = { v: 1, pivot: { x: qPos(raw.pivot.x), z: qPos(raw.pivot.z) }, objects: [], spawns: [], chests: [], npcs: [] };
   let n = 0;
   try {
     for (const kind of CLIP_KINDS) {
       const list = COLLECTION[kind], items = raw[list];
       if (!Array.isArray(items) || items.length > LIMITS[list]) return null;
-      for (const item of items) clip[list].push(encodeItem(kind, decodeItem(kind, item)));
+      for (const item of items) {
+        const decoded = decodeItem(kind, item);
+        if (!near(decoded.x) || !near(decoded.z) || (kind === 'object' && !near(decoded.y))) return null;
+        clip[list].push(encodeItem(kind, decoded));
+      }
       n += items.length;
     }
   } catch { return null; }   // a MapError of decodeItem: this is not a clip of ours
@@ -127,17 +136,27 @@ export function writeClip(clip) {
   return !memoryOnly;
 }
 
+// May items of this kind be pasted right now? Not onto a hidden or locked layer - and no spawn, chest or NPC in the
+// Game preview, where markers are not drawn: what is pasted there could not be seen (the marker tools refuse to
+// create in it for the same reason).
+export function pasteOpen(ctx, kind) {
+  const layer = ctx.ui.layers?.[LAYER_OF[kind]];
+  if (layer && (layer.visible === false || layer.locked)) return false;
+  return kind === 'object' || (ctx.viewport?.preview ?? ctx.ui.preview) !== 'game';
+}
+
 // New runtime items from a clip, moved so that its pivot is at (x, z) and turned by `rot` about it (objects, chests and
 // NPCs turn with it; a spawn only moves). Without x / z the items stay where they were copied.
-// Items whose layer is hidden or locked (ctx.ui.layers) are left out and counted in `skipped`.
+// Items that may not be pasted right now (pasteOpen: a hidden or locked layer, markers in the Game preview) are left
+// out and counted in `skipped`.
 // Every distinct group of the clip becomes a new group: ONE call of ctx.store.newGroupIds per instantiate.
 // -> { objects, spawns, chests, npcs, skipped }: items that are not in the map yet (add them with cmd.add)
 export function instantiate(ctx, clip, { x = clip.pivot.x, z = clip.pivot.z, rot = 0 } = {}) {
   const out = { objects: [], spawns: [], chests: [], npcs: [], skipped: 0 };
   const cos = Math.cos(rot), sin = Math.sin(rot), px = clip.pivot.x, pz = clip.pivot.z, groups = new Map();
   for (const kind of CLIP_KINDS) {
-    const list = COLLECTION[kind], layer = ctx.ui.layers?.[LAYER_OF[kind]];
-    if (layer && (layer.visible === false || layer.locked)) {
+    const list = COLLECTION[kind];
+    if (!pasteOpen(ctx, kind)) {
       out.skipped += clip[list].length;
       continue;
     }

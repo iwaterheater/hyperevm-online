@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import { LIMITS, groundHalf } from '../../map/format.js';
 import { h, row, button, checkField, selectField } from '../ui/dom.js';
-import { mod, hintFor, chordLabel } from '../keymap.js';
+import { mod, hintFor, chordLabel, keyText } from '../keymap.js';
 import { SNAP_STEPS } from '../state.js';
 import { dragTracker, dragMove, dragRadius, placeOnce, selectionKey, snapPoint, snapping, editable } from './common.js';
 import { createLine, createDots, polygonArea, segmentLength } from './measure.js';
@@ -33,6 +33,7 @@ const SAME_PX = 3;             // a click this close to the last point is the se
 const MIN_POINTS = LIMITS.polyPoints[0], MAX_POINTS = LIMITS.polyPoints[1];
 const LINE_COLOR = 0x8fd3ff, ACTIVE_COLOR = 0xffb84d, CLOSE_COLOR = 0x6dff9a;
 const BUSY = 'Finish the current edit first';
+const GAME_PREVIEW = 'Markers are hidden in the Game preview: switch the preview back to edit them';
 
 const num = (v) => v.toFixed(2);
 const copy = (points) => points.map((p) => [p[0], p[1]]);
@@ -86,6 +87,9 @@ export default function create(ctx) {
   // The tool can outlive the lock of its layer (the lock is set while it is active): an edit must not.
   const layerOpen = () => { const l = ui.layers?.regions; return !l || (l.visible !== false && !l.locked); };
   const refuseLayer = () => ui.toast(`Layer ${ui.layers.regions.visible === false ? 'hidden' : 'locked'}: regions`, 'warn');
+  // The Game preview shows the world as players see it: no outline is drawn and none is picked there, so a region
+  // drawn or dragged in it could not be seen. The same refusal as the Spawn, Chest, NPC and Start tools give.
+  const inGame = () => (viewport.preview ?? ui.preview) === 'game';
   // validate() wants a region within twice the ground's half size: a point at the horizon would make a map that cannot be saved
   const inReach = (x, z) => {
     const reach = LIMITS.regionReach * groundHalf(store.map.ground);
@@ -142,7 +146,7 @@ export default function create(ctx) {
 
   function polyStatus() {
     const n = poly.points.length;
-    say(`Polygon: ${n} point${n === 1 ? '' : 's'}. Click to add; ${n >= MIN_POINTS ? 'Enter, a double-click or the first point closes it' : `${MIN_POINTS - n} more to close`}; `
+    say(`Polygon: ${n} point${n === 1 ? '' : 's'}. Click to add; ${n >= MIN_POINTS ? keyText('Enter, a double-click or the first point closes it') : `${MIN_POINTS - n} more to close`}; `
       + `${chordLabel('Backspace')} takes one back; Esc cancels`);
   }
 
@@ -186,9 +190,10 @@ export default function create(ctx) {
     }
     if (store.grouping) { ui.toast(BUSY, 'warn'); return false; }
     if (!layerOpen()) { refuseLayer(); return false; }
+    if (inGame()) { ui.toast(GAME_PREVIEW, 'warn'); return false; }
     const region = placeOnce(ctx, 'region', { name: freshName(store.map), shape: { type: 'poly', points } });
     endPoly();
-    say(`Added the region "${region.name}": name it in the Regions panel`);
+    ui.setNote(`Added the region "${region.name}": name it in the Regions panel`);
     return true;
   }
 
@@ -217,7 +222,7 @@ export default function create(ctx) {
     // a double-click delivers its two clicks first: the second one must not add the same point again
     if (segmentLength(last, p) < 0.01 || pxTo(last, ev) < SAME_PX) { draw(); return; }
     if (pts.length >= MAX_POINTS) {
-      ui.toast(`A polygon has at most ${MAX_POINTS} points: close it with Enter`, 'warn');
+      ui.toast(`A polygon has at most ${MAX_POINTS} points: close it with ${chordLabel('Enter')}`, 'warn');
       return;
     }
     if (!inReach(p[0], p[1])) { ui.toast('Too far from the map for a region', 'warn'); return; }
@@ -349,7 +354,7 @@ export default function create(ctx) {
   // both in one undo group - release commits it, Esc takes the region back.
   function startCircle(g, hit) {
     if (store.grouping) { ui.toast(BUSY, 'warn'); g.type = 'dead'; return; }
-    store.begin('Add region');
+    store.begin('Add 1 region');   // the label a polygon gets from cmd.add
     try {
       const region = placeOnce(ctx, 'region', { name: freshName(store.map), shape: { type: 'circle', x: g.centre[0], z: g.centre[1], r: LIMITS.regionR[0] } });
       g.region = region;
@@ -374,6 +379,8 @@ export default function create(ctx) {
 
   function hover(hit) {
     if (!layerOpen()) { setCursor(''); return; }   // the viewport shows "not allowed"
+    if (inGame()) { setCursor('not-allowed'); say(GAME_PREVIEW); return; }
+    if (status === GAME_PREVIEW) say(idleHint());  // the preview is back
     if (hit.handle) setCursor('');                 // ... and its own pointer over a handle
     else if (hit.item) setCursor(store.selection.has(hit.item) ? 'move' : 'pointer');
     else setCursor('crosshair');                   // a press here draws
@@ -422,6 +429,8 @@ export default function create(ctx) {
 
   const tool = {
     id: 'region', label: 'Region', icon: '⬡', layer: 'regions', hidden: false,
+    about: 'Named zones with levels, a mood and safety: draw a circle or a polygon',
+    get intro() { return idleHint(); },
     // nothing is picked while a polygon is being drawn: every click is a point, and no region lights up under the cursor
     get picks() { return poly ? NO_PICKS : PICKS; },
     get context() { return poly ? 'path' : 'select'; },
@@ -479,6 +488,11 @@ export default function create(ctx) {
       if (!store.map) return;
       if (!layerOpen()) {
         refuseLayer();
+        gesture = { type: 'dead' };
+        return;
+      }
+      if (inGame()) {
+        ui.toast(GAME_PREVIEW, 'warn');
         gesture = { type: 'dead' };
         return;
       }
@@ -573,7 +587,7 @@ export default function create(ctx) {
       } else if (g.type === 'create') {
         if (g.drag) {
           g.drag.end();
-          if (store.kindOf(g.region) === 'region') say(`Added the region "${g.region.name}": name it in the Regions panel`);
+          if (store.kindOf(g.region) === 'region') ui.setNote(`Added the region "${g.region.name}": name it in the Regions panel`);
         } else store.clearSelection();   // a click on nothing
       }
     },
@@ -618,7 +632,7 @@ export default function create(ctx) {
       });
       strip = {
         circle: button('Circle', () => tool.setMode('circle'), { title: 'Press at the centre, drag to the radius' }),
-        poly: button('Polygon', () => tool.setMode('poly'), { title: 'Click the points; Enter, a double-click or the first point closes the polygon' }),
+        poly: button('Polygon', () => tool.setMode('poly'), { title: keyText('Click the points; Enter, a double-click or the first point closes the polygon') }),
         close: button(['Close', key('Enter')], () => finishPoly(), { title: 'Close the polygon: it becomes a region' }),
         back: button(['Undo point', key('Backspace')], polyBack, { title: 'Take the last point back' }),
         cancel: button(['Cancel', key('Escape')], endPoly, { title: 'Give the polygon up' }),

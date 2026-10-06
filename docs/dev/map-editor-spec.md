@@ -3609,3 +3609,101 @@ CONTRACT: read the module before calling it. The differences that matter to step
     until a viewport size is emulated (`resize_window` 1440 × 900), otherwise every `__editor.click` lands on one
     pixel; `requestAnimationFrame` is throttled, so frames are stepped with `__editor.tick(0.016)` and state is read
     through the console, not from pixels.
+14. **After step 5 (integration).** Decisions of the lead and deviations the owners chose that STAY; each line
+    overrides the section it names.
+    - §9.14 / `checks.js`: for a spawn with `r > 0` both checks ask about its DISC, not its centre (monsters appear all
+      over it, `spawnHome`): `item-in-collider` only when the centre is inside a collider AND the disc holds no open
+      cell of the flood grid; `unreachable` only when NO cell within `max(r, 1.5)` of the centre was reached. A spawn
+      of radius 0, a chest and an NPC are judged as points, as before. The flood is 8-connected and seeded from every
+      open cell of the start disc; a start disc without one is ONE issue at path `start`. `model-failed` also lists
+      failed models that no object uses. The first check after a `'load'` runs at once.
+    - §9.2 / §9.8–9.10 (`selectionKey`, marker tools): a tool PICKS only its own kind, but whatever is selected is
+      edited as a whole in every tool — the keys of context `select`, a drag that starts on a selected item, Alt+drag
+      (copies of everything selected), Delete, the inspector and Arrange. In a marker tool a click on a group member
+      selects that group's members of the tool's kind only. The Start tool selects the start point when it is activated.
+    - §10.9 `markers.pick` / `markers.stack` bring the pins and the label rectangles up to date for the camera they
+      are asked with: a pick right after a camera move needs no frame in between.
+    - §9.1 options strip: one line of fixed height; below 1400 px its controls are packed closer, the hint a strip
+      ends with gives way first (its tooltip has the text), and what still does not fit scrolls sideways by the wheel
+      with the hidden edge faded (`fitStrip` in `main.js`, `.more-left` / `.more-right` in `base.css`).
+    - §9.8–9.10: the Spawn, Chest, NPC, Start AND Region tools refuse to create or edit in the `'game'` preview (their
+      markers are not drawn there). Creation is also refused where it would be a validation error (a camp in a safe
+      region, anything off the island, a chest or an NPC on blocked ground) and with Shift held. A press-drag create
+      has the same undo label as a click (`Add 1 spawn`, `Add 1 region`).
+    - §9.8 Spawns panel: a value is edited in a popover card beside its row, not in the cell. The options strip of the
+      Spawn / Chest / NPC tools edits a TEMPLATE; "Follow" copies the item placed or selected last, "Apply to
+      selection" stamps it. Populate keeps `r + WANDER_R` clear of safe regions and measures its keep-out from the
+      disc edge.
+    - §9.10 `region.levelsFromSpawns` (`spawnstats.js`): min / max over the camps whose CENTRE the region wins
+      (`regionAt`), boss camps left out unless the region has no other; it also accepts `map.fallback`. The Regions
+      panel edits a region in a form under the list (rows carry chip, name, badges, eye, lock); it adds Raise / Lower,
+      Focus, Delete, "+ Circle" / "+ Polygon" and a Tint switch; the tool adds "To polygon". A polygon being drawn is
+      a preview and enters the map on close as one `cmd.add`; `tool.picks` is `[]` meanwhile. Shift+press on a handle
+      toggles the selection. Delete on a 3-point polygon with an active vertex is consumed with a toast.
+    - §9.11 Measure consumes Backspace while active (it never deletes the selection).
+    - §9.6 Scatter takes its spots from a world-anchored hashed lattice (which is why a repeated stroke adds nothing);
+      Alt is read at the press and fixes the stroke as add or erase. §9.7: a brush or road is never narrower than
+      0.7072 × cell; Fill stops at `map.radius`; Alt+click picks the ground type in all three modes.
+    - §9.4 / §10.19 `path.js`: a Line is laid out segment by segment (a corner is a clicked point); a Ring is always
+      evenly spaced and `fit` rescales the pieces; additive options `turn`, `jitter`, `max`, and `place.opts.jitter`,
+      `place.opts.randomModel` ("Mix models": each piece takes one of `ui.models`). Row pieces outside `radius − 1` or
+      on blocked ground are skipped and counted in the toast. Only a real `pointerup` commits in Place and Paste.
+    - §9.12 Palette: favourites and recent models are `.chip` elements (131 `.tile` stay); a model armed from outside
+      the palette (the eyedropper) is scrolled into view. §9.5: a stamp imported under a taken name becomes "name (2)".
+    - §9.13 Inspector: level ranges are two number fields; map properties commit on Enter or blur only. Arrange: Face
+      point and Array work on ONE item too (Align needs 2, Distribute 3); `array()` moves the selection as one rigid
+      piece and copies regions but not the start point; Randomize scale is absolute within [min, max].
+    - §9.14 Layers: hiding a layer or a model drops its items from the selection and sends a tool of that layer back to
+      Select; a group rename reaches members on locked layers too. Help merges numbered key families into one row.
+    - §9.15: the draft offer is `ui.choose` (Discard / Restore; Esc keeps the draft); a draft equal to the loaded map is
+      dropped unasked; "Restore anyway" sets `net.baseRev = draft.rev`; the draft is flushed on `pagehide` and removed
+      when every edit is undone. Additions: `file.new` (an empty island), a `.json` dropped on the window imports,
+      `actions.run('file.import', file)`; Export, Import, Revert and New follow the "open edits first" rule.
+    - §9.16: the Play options live inside `hypercat-editor-play` (its `id` and `at` kept); in token mode Play awaits
+      `net.token()` and hands the token to the play tab's `sessionStorage`.
+    - Additive exports: `MOD_LABEL` (`keymap.js`), `addClones` (`tools/select.js`), `markerTool` / `templateState`
+      (`tools/spawn.js`). The inspector label of a region's `color` is "Colour".
+15. **After the review pass.** What the four reviews changed; each line overrides the section it names.
+    - §9.15 drafts: a draft that was offered and not answered is KEPT (`net.draftKept`): no save, revert, reload or
+      later draft write removes or overwrites it; the menu bar shows `Draft HH:MM?`, which asks again, and the editor
+      asks once more by itself when this page has unsaved changes of its own. The offer is `ui.choose(…, { sticky:
+      true })`: a click beside it does not answer. A save clears the draft only when it wrote unsaved work of this
+      page. A `429` with `Retry-After` of at most 2 s is waited out and the POST repeated once. Revert and Import
+      confirm with `{ danger: true }` (Cancel has the focus).
+    - §4.2 / §3.12 `format.js` (a defect of the frozen file): `qPos`, `qScale`, `qAngle` and `toRad` return a finite
+      number for every finite input (beyond 1e15 the value is on the grid already; the old multiplication overflowed
+      to `Infinity` near 1e306, which JSON writes as `null`: a draft or an export of such a map could not be read
+      back). The number stays a RANGE error for `validate`. `view.js` `_grid` puts a collider whose cell index is not
+      a safe integer on its `big` list (the cell loop never ended there). The viewport keeps its rig finite and takes
+      the island radius within `[1, 2 × LIMITS.radius[1]]`. `clipboard.js` refuses a clip with a coordinate beyond
+      ±1e6; Copy and Cut say so and remove nothing.
+    - §10.9 `markers.pick`: a chest is also picked by its BODY (the ray against `boundsOf`), `priority: 4`,
+      `part: 'body'`; the viewport takes it or the scenery hit, whichever the ray meets first. `markerLabel` and
+      `mixText` write a mix with the short display names: `5× Minion 3 : Mage 1 · Lv 6–8 · 14 s` (§9.8 said
+      `chaser 3 : shooter 1`).
+    - §9.2: `Mod+A` in the Select tool selects what a box would (never regions). After undo / redo the selection is
+      the selection the step was made with, when everything the step changed was part of it (Align on three objects,
+      undone, leaves three selected). A press on a gizmo handle that never passes the drag threshold is a click on
+      what lies under the handle.
+    - §9.5 / §9.9: Paste and stamps leave spawns, chests and NPCs out while the Game preview hides the markers
+      (`clipboard.pasteOpen`; counted as skipped, and with nothing left the tool is not entered). The Spawn, Chest and
+      NPC tools create nothing from a press that ends without a `pointerup`.
+    - §9.8: the template of the Spawn tool copies what a step of the store leaves, never a state a step passes
+      through (a drawn camp starts at radius 0), and a radius cut at the shore is not adopted. The Spawns table
+      holds its row order while the editor card is open (`holdRows`); Escape in a field of the card closes the card
+      in the same press; opening the Help sheet closes open popovers.
+    - §9.4 / §9.7 / §11.2: in Place > Line and Terrain > Road `Backspace` / `Delete` are always consumed (rows in
+      contexts `ghost` and `brush`); context `path` also has `[` `]` and `1`–`9` for a road in progress.
+    - §9.14: `ui.setNote(text)` is a line about what has just happened; the status bar shows it over `ui.status`
+      and drops it on the next `'history'`, `'selection'` or tool change, or after 6 s. With neither, the bar shows
+      `tool.intro` of the active tool. Tools may carry `about` (one line for the toolbar tooltip). `keyText(text)`
+      (`keymap.js`) writes the keys named in a hint as the keyboard has them; every hint goes through it. Issues:
+      `object-blocked` (ONE warning for all objects on blocked ground; its row and the `multi-boss` row select the
+      items they mean), a spawn row is named `Camp N · spawns[N-1]`, and the walk checks are skipped while
+      `map.radius` is outside `LIMITS.radius` (a disc is then not judged at all). `hiddenRegions`, `paintTint` and
+      `raster.inside` walk a region row by row (`raster.runs`).
+    - §9.1: the Minimap frame is `position: sticky` at the foot of the right column and its canvas is
+      `min(100%, max(150px, 24vh))` wide. §9.12: the Recent row takes the tile that was clicked (not the range a
+      Shift+click swept up) or the one model the eyedropper took. §9.10 Regions panel: the level range has a cell of
+      its own that never shrinks; a typed end goes to every selected region and the other end of each stays its own
+      (`withEnd` in `fields.js`). `thumbs.js` draws through stand-ins it owns and disposes them with its renderer.

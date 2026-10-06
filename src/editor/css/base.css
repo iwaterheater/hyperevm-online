@@ -113,6 +113,14 @@ body {
 #palette { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 #palette, #inspector, #arrange, #layers, #regions, #spawns, #validation, #minimap { padding: 8px; }
 #right > section { border-bottom: 1px solid var(--bg); }   /* a section that has no frame yet */
+/* The minimap is how one gets about the island, and the column above it is two screens long as soon as the lists are
+   open: it stays at the foot of the column, in view, while the panels scroll under it (folded, it is one line there;
+   minimap.css keeps the open one compact). */
+#right > .ui-frame[data-panel="minimap"] {
+  position: sticky; bottom: 0; z-index: 3; background: var(--panel);
+  border-top: 1px solid var(--line); box-shadow: 0 -6px 10px -6px rgb(0 0 0 / .55);
+}
+#right { scroll-padding-bottom: 60px; }
 
 #status {
   display: flex; align-items: center; gap: 14px; height: 24px; padding: 0 10px; overflow: hidden;
@@ -137,6 +145,7 @@ body {
 #menu-file, #menu-io, #menu-play { display: flex; align-items: center; gap: 4px; min-width: 0; }
 #menu-file { flex: 0 1 auto; }
 #menu-io { padding-left: 10px; border-left: 1px solid var(--line); color: var(--dim); }
+#menu-io .kept { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }   /* a draft that waits for an answer (io.js) */
 #menu-play { margin-left: auto; color: var(--dim); }
 #menu-file .brand { margin-right: 4px; color: var(--dim); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
 #menu-file .name { flex: 0 1 auto; width: 220px; min-width: 60px; }
@@ -186,6 +195,24 @@ body {
 #tooloptions .ui-slider { width: 150px; }
 #tooloptions .ui-section, #tooloptions .ui-section-body { display: contents; }
 #tooloptions .ui-section > summary { display: none; }
+/* The strip is ONE line and never grows: a taller strip would move the viewport under the pointer at every tool
+   switch. So what does not fit goes three ways. The hint at the end of a strip is the first to give way (main.js
+   keeps its full text in the tooltip); a narrower window packs the controls closer; and what still does not fit is
+   scrolled sideways - by the wheel (main.js) - with the edge that hides something fading out (.more-left / .more-right,
+   set by main.js). */
+#tooloptions > .ui-hint:last-child { flex: 0 1 auto; min-width: 24px; overflow: hidden; text-overflow: ellipsis; }
+#tooloptions.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent); }
+#tooloptions.more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 56px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 56px), transparent); }
+#tooloptions.more-left.more-right {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
+@media (max-width: 1400px) {
+  #tooloptions { gap: 6px; padding: 0 8px; }      /* at 1280 the longest strips (Spawn, a Line of Place) just fit */
+  #tooloptions .ui-row { gap: 3px; }
+  #tooloptions .ui-input { width: 52px; }
+  #tooloptions .ui-slider { width: 110px; }
+}
 
 /* ---------------------------------------------------------------- viewport */
 

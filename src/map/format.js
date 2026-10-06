@@ -76,13 +76,18 @@ export class MapError extends Error {
 
 // Every number in a map sits on a grid: positions and radii 0.01, scales 0.001, angles 0.01 degree. normalize() and every
 // editor command quantise what they write, so the store, the view and the file always hold the same values.
-export const qPos   = (v) => { const q = Math.round(v * 100) / 100;   return q === 0 ? 0 : q; };
-export const qScale = (v) => { const q = Math.round(v * 1000) / 1000; return q === 0 ? 0 : q; };
+// A finite number stays finite: beyond 1e15 a double has no thousandths left to round - it IS on the grid - and the
+// multiplication would overflow near 1e306 (a hand-edited file with "x": 1e308 must come out of normalize() as a number
+// that validate() can call out of range and that JSON can write, not as Infinity, which JSON writes as null).
+const EXACT = 1e15;
+export const qPos   = (v) => { if (Math.abs(v) >= EXACT) return v; const q = Math.round(v * 100) / 100;   return q === 0 ? 0 : q; };
+export const qScale = (v) => { if (Math.abs(v) >= EXACT) return v; const q = Math.round(v * 1000) / 1000; return q === 0 ? 0 : q; };
 export const toDeg = (rad) => { const d = Math.round(rad * 18000 / Math.PI) / 100; return d === 0 ? 0 : d; };
-export const toRad = (deg) => deg * Math.PI / 180;
+export const toRad = (deg) => (Math.abs(deg) >= EXACT ? deg % 360 : deg) * Math.PI / 180;   // (deg * PI overflows near 5.7e307)
 
 // radians -> radians on the 0.01 degree grid, wrapped into (-PI, PI]. toDeg() of the result is exact.
 export function qAngle(rad) {
+  if (Math.abs(rad) >= EXACT) rad %= 2 * Math.PI;           // no fraction of a turn is left in it: any angle will do, but a finite one
   let c = Math.round(rad * 180 / Math.PI * 100) % 36000;    // hundredths of a degree; the remainder is exact for any angle
   if (c > 18000) c -= 36000;
   else if (c <= -18000) c += 36000;

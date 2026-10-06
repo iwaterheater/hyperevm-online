@@ -108,6 +108,9 @@ export const BINDINGS = [
   row('ghost', 'BracketLeft', 'scale.down', 'Scale the ghost down'),
   row('ghost', 'BracketRight', 'scale.up', 'Scale the ghost up'),
   row('ghost', 'KeyR', 'ghost.reroll', 'Re-roll the random rotation and scale (Place)'),
+  // a Line of the Place tool before its first point: one Backspace too many must not delete the selection
+  row('ghost', 'Backspace', 'path.back', 'Place, Line: nothing left to take back (the selection is not deleted)'),
+  row('ghost', 'Delete', 'path.back', 'Place, Line: nothing left to take back (the selection is not deleted)'),
 
   // ---- brush: Terrain brush and fill, Scatter
   row('brush', 'BracketLeft', 'brush.smaller', 'Smaller brush'),
@@ -115,11 +118,18 @@ export const BINDINGS = [
   row('brush', 'Shift+BracketLeft', 'brush.optDown', 'Scatter: lower density. Terrain: soft edge'),
   row('brush', 'Shift+BracketRight', 'brush.optUp', 'Scatter: higher density. Terrain: hard edge'),
   ...digits(9).map((n) => row('brush', `Digit${n}`, `brush.type.${n}`, `Terrain: ground type ${n}`)),
+  // a Road of the Terrain tool before its first point: as for a Line above
+  row('brush', 'Backspace', 'path.back', 'Terrain, Road: nothing left to take back (the selection is not deleted)'),
+  row('brush', 'Delete', 'path.back', 'Terrain, Road: nothing left to take back (the selection is not deleted)'),
 
   // ---- path: a polygon, a road, a Place line with at least one point, a measurement in progress
   row('path', 'Backspace', 'path.back', 'Remove the last point'),
   row('path', 'Delete', 'path.back', 'Remove the last point'),
   row('path', 'Enter', 'path.commit', 'Finish the path'),
+  // a road keeps the keys of its brush while its points are being clicked (the other paths do not use them)
+  row('path', 'BracketLeft', 'brush.smaller', 'Road: narrower'),
+  row('path', 'BracketRight', 'brush.larger', 'Road: wider'),
+  ...digits(9).map((n) => row('path', `Digit${n}`, `brush.type.${n}`, `Road: ground type ${n}`)),
 ];
 
 const TABLE = new Map();   // 'ctx chord' -> binding
@@ -160,12 +170,16 @@ export function chordOf(ev) {
   return parts.join('+');
 }
 
+const KEY_NAMES_MAC = { Enter: '\u21a9', Backspace: '\u232b', Delete: '\u2326' };   // return, delete, forward delete
 const KEY_NAMES = {
   Comma: ',', Period: '.', Slash: '/', BracketLeft: '[', BracketRight: ']', Escape: 'Esc', Space: 'Space', Home: 'Home',
   ArrowLeft: '\u2190', ArrowUp: '\u2191', ArrowRight: '\u2192', ArrowDown: '\u2193',
-  Enter: MAC ? '\u21a9' : 'Enter', Backspace: MAC ? '\u232b' : 'Backspace', Delete: MAC ? '\u2326' : 'Del',
+  Enter: MAC ? KEY_NAMES_MAC.Enter : 'Enter', Backspace: MAC ? KEY_NAMES_MAC.Backspace : 'Backspace', Delete: MAC ? KEY_NAMES_MAC.Delete : 'Del',
 };
 const MAC_SIGNS = { Alt: '\u2325', Shift: '\u21e7', Mod: '\u2318' };   // option, shift, command - in the order macOS writes them
+
+// The Mod key as the user reads it in a hint about the mouse ("Mod-click"): the command sign on macOS, 'Ctrl' elsewhere.
+export const MOD_LABEL = MAC ? MAC_SIGNS.Mod : 'Ctrl';
 
 // A chord as the user reads it: 'Mod+Shift+KeyZ' -> shift-command-Z signs on macOS, 'Ctrl+Shift+Z' elsewhere.
 export function chordLabel(chord) {
@@ -174,6 +188,33 @@ export function chordLabel(chord) {
   if (MAC) return Object.keys(MAC_SIGNS).filter((m) => parts.includes(m)).map((m) => MAC_SIGNS[m]).join('') + key;
   return [...parts.map((m) => (m === 'Mod' ? 'Ctrl' : m)), key].join('+');
 }
+
+// A hint that names keys in the editor's own words - 'Alt+click', 'Alt+Shift+1', 'Shift + wheel', 'Mod+drag', 'Enter',
+// 'Backspace' - as they are written on THIS keyboard, in the same signs chordLabel uses: on macOS the option, shift
+// and command signs and the return and delete arrows ('Alt+click' reads as the option sign and '-click', 'Alt+Shift+1'
+// as the two signs and '1'); elsewhere the words stay and Mod is 'Ctrl'. Every title, strip hint and status line that
+// names a key goes through this, so one key has one name on the whole screen.
+// Only for the editor's own sentences: a word of a name from the map ("Shift Valley") would be rewritten too.
+export function keyTextFor(text, mac) {
+  if (!mac) return String(text).replace(/\bMod\b/g, 'Ctrl');
+  const sign = (name) => MAC_SIGNS[name === 'Option' ? 'Alt' : name];
+  const order = Object.keys(MAC_SIGNS);
+  return String(text)
+    // modifiers and what they are held with: a key ('Alt+Shift+1', 'Shift+]'), a gesture ('Alt+click'), or nothing more
+    .replace(/\b((?:(?:Alt|Option|Shift|Mod)\s?\+\s?)+)(Alt|Option|Shift|Mod|[A-Za-z]+|\d|[\[\]])/g, (all, mods, what) => {
+      const names = mods.split('+').map((m) => m.trim()).filter(Boolean).map((m) => (m === 'Option' ? 'Alt' : m));
+      const last = what === 'Option' ? 'Alt' : what;
+      if (Object.hasOwn(MAC_SIGNS, last)) names.push(last);
+      const signs = order.filter((m) => names.includes(m)).map((m) => MAC_SIGNS[m]).join('');
+      if (Object.hasOwn(MAC_SIGNS, last)) return signs;
+      if (Object.hasOwn(KEY_NAMES_MAC, what)) return signs + KEY_NAMES_MAC[what];      // 'Mod+Enter'
+      return what.length === 1 ? signs + what : `${signs}-${what}`;
+    })
+    .replace(/\b(Alt|Option|Shift|Mod)\b/g, (all, name) => sign(name))
+    .replace(/\bEnter\b/g, KEY_NAMES_MAC.Enter)
+    .replace(/\bBackspace\b/g, KEY_NAMES_MAC.Backspace);
+}
+export const keyText = (text) => keyTextFor(text, MAC);
 
 // -> the key of an action as a hint for a button or a menu: the command sign and S on macOS, 'Ctrl+S' elsewhere;
 // '' when nothing is bound to it. An action with several chords shows the first row of the table.
@@ -238,11 +279,22 @@ export function install(ctx) {
     return false;
   };
 
+  // The open popover `el` sits in (the editor card of the Spawns table, the Play options), or null.
+  const popoverOf = (el) => {
+    try { return el?.closest?.(':popover-open') ?? null; } catch { return null; }   // a browser without the popover API
+  };
+
   // edit.cancel - Escape. In order, stopping at the first step that applies.
   const cancel = () => {
     const ev = current ?? new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape' });
     if (dialog()) { closeFloating(); return; }           // a dialog first, also when its own text field has the focus
-    if (leaveField()) return;                            // (1) a focused field: it commits and gives the keys back
+    // (1) a focused field: it commits and gives the keys back. A field inside a popover takes the popover along -
+    // the box was opened to be typed into, and its close button says "Esc": one press, not two.
+    const box = popoverOf(document.activeElement);
+    if (leaveField()) {
+      if (box) { try { box.hidePopover(); } catch { /* closed by the commit already */ } }
+      return;
+    }
     if (closeFloating()) return;                         // (2) the help sheet, a popover ...
     if (viewportModal()) { cancelViewportModal(); return; }   // ... or the grab / pick-a-point of the viewport
     const tool = activeTool();

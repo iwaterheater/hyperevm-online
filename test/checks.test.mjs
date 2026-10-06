@@ -101,8 +101,9 @@ test('the same NPC inside an object circle raises item-in-collider', () => {
   assert.deepEqual(codes(deep), ['item-in-collider', 'unreachable']);
 });
 
-test('chests and spawn centres inside a circle or a box are reported, the rim is not', () => {
+test('a chest and a spawn of radius 0 inside a circle or a box are reported, the rim is not', () => {
   const map = world();
+  map.spawns[0].r = 0;   // every monster of it appears on the centre
   const inCircle = editorChecks(map, { obstacles: obstacles({ circles: [[40.5, 0, 0.8], [-60, 30.3, 0.5]] }) });
   assert.deepEqual(of(inCircle, 'item-in-collider').map((i) => i.path), ['chests[0]', 'spawns[0]']);
   // just outside the radius
@@ -124,6 +125,42 @@ test('a box is tested in its own frame: the rotation counts', () => {
   assert.deepEqual(of(along, 'item-in-collider').map((i) => i.path), ['chests[0]']);
   const across = editorChecks(map, { obstacles: obstacles({ boxes: [[40 - Math.cos(ry) * far, 0 - Math.sin(ry) * far, 3, 0.2, ry]] }) });
   assert.deepEqual(of(across, 'item-in-collider'), []);
+});
+
+test('a camp with a radius is judged by its disc: a centre in a tree is harmless', () => {
+  const map = world(), spawn = map.spawns[0];   // (-60, 30), r 8: its monsters appear all over the disc
+  const tree = [[spawn.x, spawn.z + 0.3, 1.2]];
+  assert.deepEqual(editorChecks(map, { obstacles: obstacles({ circles: tree }) }), []);
+  // the same tree under a camp of radius 0 is where every monster would appear
+  spawn.r = 0;
+  assert.deepEqual(codes(editorChecks(map, { obstacles: obstacles({ circles: tree }) })), ['item-in-collider']);
+  // a disc with no open spot at all: one collider over the whole camp
+  spawn.r = 3;
+  const buried = editorChecks(map, { obstacles: obstacles({ circles: [[spawn.x, spawn.z, 5]] }) });
+  assert.deepEqual(buried.map((i) => [i.code, i.path]), [['item-in-collider', 'spawns[0]'], ['unreachable', 'spawns[0]']]);
+  // ... and one that only covers the middle leaves a ring of open ground
+  assert.deepEqual(editorChecks(map, { obstacles: obstacles({ circles: [[spawn.x, spawn.z, 1.5]] }) }), []);
+  // a tiny disc that holds no grid cell falls back on its centre
+  spawn.x = -60.5; spawn.z = 30.5; spawn.r = 0.3;
+  assert.deepEqual(codes(editorChecks(map, { obstacles: obstacles({ circles: [[-60.5, 30.5, 0.2]] }) })), ['item-in-collider']);
+});
+
+test('a camp is unreachable only when no open spot of its disc can be walked to', () => {
+  const map = world(), spawn = map.spawns[0];   // (-60, 30), r 8
+  // sealed inside a wall wider than the disc: monsters appear, nobody gets to them
+  const sealed = editorChecks(map, { obstacles: obstacles({ circles: ring(spawn.x, spawn.z, 12) }) });
+  assert.deepEqual(sealed.map((i) => [i.code, i.path, i.kind, i.x, i.z]), [['unreachable', 'spawns[0]', 'spawn', -60, 30]]);
+  assert.match(sealed[0].message, /disc/);
+  // the same wall with a gate
+  assert.deepEqual(editorChecks(map, { obstacles: obstacles({ circles: ring(spawn.x, spawn.z, 12, 1, (a) => a < 0.4) }) }), []);
+  // a wall that seals only the middle of the camp: the rest of the disc is outside it and can be walked to
+  assert.deepEqual(editorChecks(map, { obstacles: obstacles({ circles: ring(spawn.x, spawn.z, 4) }) }), []);
+  // the centre in a tree AND the tree fenced in: the open part of the disc still counts
+  assert.deepEqual(editorChecks(map, { obstacles: obstacles({ circles: [[spawn.x, spawn.z, 1.2], ...ring(spawn.x, spawn.z, 3)] }) }), []);
+  // with radius 0 the middle is all there is
+  spawn.r = 0;
+  assert.deepEqual(codes(editorChecks(map, { obstacles: obstacles({ circles: ring(spawn.x, spawn.z, 4) }) })), ['unreachable']);
+  assert.doesNotMatch(editorChecks(map, { obstacles: obstacles({ circles: ring(spawn.x, spawn.z, 4) }) })[0].message, /disc/);
 });
 
 // ---------------------------------------------------------------- unreachable
@@ -232,6 +269,73 @@ test('a region smaller than a ground cell or off the grid is hidden as well', ()
   // several hidden regions come in file order
   map.regions = [1, 2, 3].map((n) => cmd.make('region', { name: `R${n}`, shape: { type: 'circle', x: 0, z: 0, r: 10 * n } }));
   assert.deepEqual(editorChecks(map).map((i) => i.path), ['regions[0]', 'regions[1]']);
+});
+
+test('region-hidden asks row by row: the limit of 64 regions with 64 points each is no freeze', () => {
+  const map = emptyMap({ radius: 492 });
+  for (let k = 0; k < 64; k++) {
+    const points = Array.from({ length: 64 }, (_, i) => {
+      const a = i / 64 * Math.PI * 2, r = (i % 2 ? 380 : 480) - k * 2;
+      return [Math.round(Math.cos(a) * r * 100) / 100, Math.round(Math.sin(a) * r * 100) / 100];
+    });
+    map.regions.push(cmd.make('region', { name: `Star ${k}`, shape: { type: 'poly', points } }));
+  }
+  const t0 = performance.now();
+  const issues = editorChecks(map);
+  const ms = performance.now() - t0;
+  // each star is a little smaller than the one before it and lies on top: every one of them wins its outer rim
+  assert.deepEqual(of(issues, 'region-hidden'), []);
+  assert.ok(ms < 1500, `took ${Math.round(ms)} ms`);
+  // ... and the answer is the one inShape gives: the same star again on top hides the one under it
+  map.regions.push(cmd.make('region', { name: 'Twin', shape: { type: 'poly', points: map.regions[63].shape.points.map((p) => [p[0], p[1]]) } }));
+  assert.deepEqual(of(editorChecks(map), 'region-hidden').map((i) => i.path), ['regions[63]']);
+});
+
+// ---------------------------------------------------------------- objects on blocked ground
+
+test('object-blocked: ONE row for every object that stands on ground nobody can walk on', () => {
+  const map = world(), g = map.ground;
+  const tree = (x, z) => cmd.make('object', { m: 'medieval/tree_single_A', x, z });
+  map.objects.push(tree(100, 100), tree(102, 100), tree(140, 100));
+  assert.deepEqual(of(editorChecks(map), 'object-blocked'), []);
+  // a pond painted over two of the three
+  for (const [x, z] of [[100, 100], [102, 100]]) g.cells[cellIndex(g, x, z)] = GROUND_INDEX.water;
+  let found = of(editorChecks(map), 'object-blocked');
+  assert.equal(found.length, 1);
+  assert.deepEqual([found[0].level, found[0].path, found[0].kind, found[0].index], ['warning', 'objects', undefined, undefined]);
+  assert.match(found[0].message, /^2 objects stand on ground that cannot be walked on/);
+  g.cells[cellIndex(g, 102, 100)] = GROUND_INDEX.grass;
+  found = of(editorChecks(map), 'object-blocked');
+  assert.match(found[0].message, /^1 object stands /);
+  g.cells[cellIndex(g, 100, 100)] = GROUND_INDEX.grass;
+  assert.deepEqual(codes(editorChecks(map)), []);
+});
+
+// ---------------------------------------------------------------- a map that is being repaired
+
+test('a radius outside the limits switches the walk checks off instead of flooding a grid of that size', () => {
+  const map = world();
+  map.radius = 100000;                                   // a hand-edited file: validate() lists it as an error
+  assert.ok(validate(map).some((i) => i.level === 'error' && i.code === 'radius'));
+  const ring1 = obstacles({ circles: [[40, 0, 2]] });    // the chest stands in a tree
+  const t0 = performance.now();
+  const issues = editorChecks(map, { obstacles: ring1 });
+  assert.ok(performance.now() - t0 < 500, 'no (2 x radius + 1) squared grid');
+  assert.deepEqual(issues.map((i) => [i.code, i.path]), [['item-in-collider', 'chests[0]']], 'no reachability without a usable size; what needs none still runs');
+  // the same for a radius that is no number at all, or too small to be a map
+  for (const r of [NaN, Infinity, -5, 0, 3]) {
+    map.radius = r;
+    assert.doesNotThrow(() => editorChecks(map, { obstacles: ring1 }), `radius ${r}`);
+    assert.deepEqual(of(editorChecks(map, { obstacles: ring1 }), 'unreachable'), [], `radius ${r}`);
+  }
+  // A camp with a radius whose centre is in a collider is judged by its disc - and without a walk grid the disc cannot
+  // be asked about, so the camp is not accused: a map with a broken radius would otherwise grow a warning for every
+  // camp that merely has a tree at its centre. A camp of radius 0 is its centre, and is reported as ever.
+  const tree = obstacles({ circles: [[map.spawns[0].x, map.spawns[0].z, 2]] });
+  map.spawns[0].r = 6;
+  assert.deepEqual(editorChecks(map, { obstacles: tree }), []);
+  map.spawns[0].r = 0;
+  assert.deepEqual(editorChecks(map, { obstacles: tree }).map((i) => [i.code, i.path]), [['item-in-collider', 'spawns[0]']]);
 });
 
 // ---------------------------------------------------------------- triangles and models

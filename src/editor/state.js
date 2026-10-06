@@ -130,7 +130,8 @@ export function createUi({ storage = browserStorage() } = {}) {
     preview: 'neutral',              // 'neutral' | 'game' | MoodKey
     readOnly: false,
     issues: { errors: 0, warnings: 0 },
-    status: '',
+    status: '',                      // the standing line of the status bar: the instruction of a tool, a progress
+    note: '',                        // what has just happened ("Deleted 3 objects"); see setNote
     collapsed: kept.collapsed,       // { [section id]: true } for every collapsed section of the right column
 
     // Assigns and emits `key`: listeners get (value, previous). Always emits, also for an equal value: setting the active
@@ -193,12 +194,15 @@ export function createUi({ storage = browserStorage() } = {}) {
       try { renderers.toast(text, level); } catch (e) { console.error('[editor] toast failed', e); }
     },
 
-    confirm(text, { ok = 'OK', cancel = 'Cancel' } = {}) {      // -> Promise<boolean>
-      return ask('confirm', false, [text, { ok, cancel }]);
+    // danger: the OK button destroys something - it is drawn as such and Cancel has the focus, so Enter is harmless
+    confirm(text, { ok = 'OK', cancel = 'Cancel', danger = false } = {}) {      // -> Promise<boolean>
+      return ask('confirm', false, [text, { ok, cancel, danger: !!danger }]);
     },
 
-    choose(text, options) {                                     // -> Promise<string | null>; options: [{ id, label, danger? }]
-      return ask('choose', null, [text, options]);
+    // options: [{ id, label, danger? }]. sticky: a click beside the dialog does not cancel it (Escape still does) -
+    // for a question that a stray click must not wave away.
+    choose(text, options, { sticky = false } = {}) {            // -> Promise<string | null>
+      return ask('choose', null, [text, options, { sticky: !!sticky }]);
     },
 
     prompt(text, value = '') {                                  // -> Promise<string | null>
@@ -216,6 +220,15 @@ export function createUi({ storage = browserStorage() } = {}) {
 
     setStatus(text) {
       ui.set('status', text);
+    },
+
+    // A line about something that has JUST HAPPENED: "Deleted 3 objects", "Camp added ...". The status bar shows it in
+    // place of the status text and takes it away again - with the next edit, the next change of the selection, a tool
+    // switch, or after a few seconds - so it never stands there when it is no longer true. ui.status is not touched:
+    // the instruction of the active tool is back when the note has gone. (setStatus is for what stays true: a tool's
+    // instruction, a progress.)
+    setNote(text) {
+      ui.set('note', text == null ? '' : String(text));
     },
   };
   return ui;

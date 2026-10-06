@@ -15,7 +15,7 @@ import { STORAGE_KEY, SNAP_STEPS, createEmitter, createUi } from '../src/editor/
 import { createActions, reportOnce } from '../src/editor/actions.js';
 import * as cmd from '../src/editor/commands.js';
 import { dragMove, dragRadius, placeOnce } from '../src/editor/tools/common.js';
-import { groupSelection, ungroupSelection } from '../src/editor/tools/select.js';
+import { groupSelection, selectAll, ungroupSelection } from '../src/editor/tools/select.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EVENTS = ['change', 'selection', 'history', 'load'];
@@ -678,6 +678,54 @@ test('after undo / redo the selection is what the step touched and still exists'
   assert.deepEqual(store.selected(), [twin]);
 });
 
+test('undo / redo of an edit of the selection gives the WHOLE selection back, also the part the edit left as it was', () => {
+  const { store, map, o, s } = world();
+  // "Align X" on three objects: one of them stands there already, so the command changes two (setEach never even
+  // hears of the third). Undoing it must not leave two selected - the next button would work on two.
+  const three = [o[0], o[1], o[2]];
+  store.select(three);
+  const x = o[0].x;
+  store.exec(cmd.setEach([o[1], o[2]], [{ x }, { x }]));
+  store.select([s[0]]);                                          // looked at something else in between
+  store.undo();
+  assert.deepEqual(store.selected(), three);
+  store.select([s[0]]);
+  store.redo();
+  assert.deepEqual(store.selected(), three);
+  // the same for a group (a drag, a typed field): the selection its begin() found
+  store.select(three);
+  store.begin('Drop');
+  store.exec(cmd.set([o[2]], { y: 2 }));
+  store.commit();
+  store.clearSelection();
+  store.undo();
+  assert.deepEqual(store.selected(), three);
+  // of that selection only what still exists
+  store.select(three);
+  store.exec(cmd.set([o[1]], { x: 77 }));
+  store.exec(cmd.remove([o[0]]));
+  store.undo();                                                  // o[0] is back (and it alone was touched)
+  store.select([]);
+  store.undo();                                                  // the edit of o[1], made with all three selected
+  assert.deepEqual(store.selected(), three);
+  store.redo();
+  store.redo();                                                  // the remove again
+  store.undo();
+  store.undo();
+  assert.deepEqual(store.selected(), three);
+  // an edit of items that were NOT the selection (a panel that edits what it lists) still selects what it touched
+  store.select([s[0]]);
+  store.exec(cmd.set([o[1], o[2]], { y: 1 }));
+  store.undo();
+  assert.deepEqual(store.selected(), [o[1], o[2]]);
+  // ... and so does an edit that reached beyond the selection it was made with
+  store.select([o[1]]);
+  store.exec(cmd.set([o[1], o[2]], { y: 3 }));
+  store.select([map.start]);
+  store.undo();
+  assert.deepEqual(store.selected(), [o[1], o[2]]);
+});
+
 test('steps that touch no item leave the selection alone', () => {
   const { store, map, o, r } = world();
   store.select([o[0], r[0]]);
@@ -995,6 +1043,13 @@ test('ui.set assigns and emits the key; ui.on returns an unsubscribe', () => {
   ui.on('status', (text) => log.push(text));
   ui.setStatus('Ready');
   assert.equal(ui.status, 'Ready');
+  // a note is a second line that covers the status for a moment: setting or clearing it leaves the status alone
+  const notes = [];
+  ui.on('note', (value) => notes.push(value));
+  ui.setNote('Deleted 3 objects');
+  assert.deepEqual([ui.note, ui.status], ['Deleted 3 objects', 'Ready']);
+  ui.setNote(null);
+  assert.deepEqual([ui.note, ui.status, notes], ['', 'Ready', ['Deleted 3 objects', '']]);
   assert.equal(log[2], 'Ready');
 
   assert.throws(() => ui.set('toast', 1), TypeError, 'a method is not a state key');
@@ -1143,15 +1198,20 @@ test('ui works without a page: dialogs resolve as cancelled until a renderer is 
   // renderers arrive from several modules, a few at a time
   ui.attach({
     confirm: (text, options) => { calls.push(['confirm', text, options]); return true; },
-    choose: async (text, options) => options[1].id,
+    choose: async (text, options, extra) => { calls.push(['choose', text, extra]); return options[1].id; },
     prompt: (text, value) => `${value}!`,
   });
   ui.attach({ pickPoint: (label) => Promise.resolve({ x: 1, z: 2, label }), setCursor: (css) => calls.push(['cursor', css]) });
   assert.equal(await ui.confirm('Sure?'), true);
-  assert.deepEqual(calls[4], ['confirm', 'Sure?', { ok: 'OK', cancel: 'Cancel' }]);
-  await ui.confirm('Overwrite?', { ok: 'Overwrite' });
-  assert.deepEqual(calls[5][2], { ok: 'Overwrite', cancel: 'Cancel' });
+  assert.deepEqual(calls[4], ['confirm', 'Sure?', { ok: 'OK', cancel: 'Cancel', danger: false }]);
+  // a destructive confirmation says so: the renderer then keeps the focus on Cancel, and Enter loses nothing
+  await ui.confirm('Overwrite?', { ok: 'Overwrite', danger: true });
+  assert.deepEqual(calls[5][2], { ok: 'Overwrite', cancel: 'Cancel', danger: true });
   assert.equal(await ui.choose('Which?', [{ id: 'a', label: 'A' }, { id: 'b', label: 'B', danger: true }]), 'b');
+  assert.deepEqual(calls.pop(), ['choose', 'Which?', { sticky: false }]);
+  // a question that a stray click beside the dialog must not wave away
+  await ui.choose('Restore?', [{ id: 'a' }, { id: 'b' }], { sticky: true });
+  assert.deepEqual(calls.pop(), ['choose', 'Restore?', { sticky: true }]);
   assert.equal(await ui.prompt('Token', 'abc'), 'abc!');
   assert.equal(await ui.prompt('Token'), '!');
   assert.deepEqual(await ui.pickPoint('Face point'), { x: 1, z: 2, label: 'Face point' });
@@ -1265,6 +1325,35 @@ function context() {
 }
 const at = (x, z) => ({ x, z, onGround: true });
 
+test('Select All: what the active tool picks - and in the Select tool what a box would take, so never the regions', () => {
+  const { store, map, o, s, c, n, r, ctx } = context();
+  const all = ['object', 'spawn', 'chest', 'npc', 'region', 'start'];
+  ctx.tools = { select: { picks: all }, region: { picks: ['region'] }, spawn: { picks: ['spawn'] }, paint: { picks: [] } };
+  ctx.ui.set('tool', 'select');
+  // the scenery and the markers; a region is a zone - "select all, delete" must not take the lands of the island
+  assert.equal(selectAll(ctx), o.length + s.length + c.length + n.length + 1);
+  assert.deepEqual(store.selected(), [...o, ...s, ...c, ...n, map.start]);
+  assert.equal(store.selected('region').length, 0);
+  assert.match(ctx.ui.note, /regions are not part of Select All/);
+  // a locked layer is left out, as everywhere
+  ctx.ui.set('layers', { ...ctx.ui.layers, spawns: { visible: true, locked: true } });
+  selectAll(ctx);
+  assert.equal(store.selected('spawn').length, 0);
+  ctx.ui.set('layers', { ...ctx.ui.layers, spawns: { visible: true, locked: false } });
+  // the tool of a kind selects all of that kind: this is how every region is selected at once
+  ctx.ui.set('tool', 'region');
+  assert.equal(selectAll(ctx), r.length);
+  assert.deepEqual(store.selected(), r);
+  ctx.ui.set('tool', 'spawn');
+  selectAll(ctx);
+  assert.deepEqual(store.selected(), s);
+  // a tool that picks nothing selects nothing (and says nothing)
+  ctx.ui.set('tool', 'paint');
+  ctx.ui.setNote('');
+  assert.equal(selectAll(ctx), 0);
+  assert.deepEqual([store.selection.size, ctx.ui.note], [0, '']);
+});
+
 test('grouping: Mod+G gives a selection one new id, Mod+Shift+G clears it - one cmd.set each', () => {
   const { store, map, o, s, r } = world();
   const text = bytes(map);
@@ -1326,8 +1415,9 @@ test('Mod+G groups whatever can be grouped - one item is enough - and Mod+Shift+
   const steps = store.undoLabel, said = toasts.length;
   assert.equal(groupSelection(ctx), false, 'nothing that can carry a group');
   assert.equal(store.undoLabel, steps);
-  assert.equal(toasts.length, said, 'it says so in the status text, not with a toast');
-  assert.match(ctx.ui.status, /Nothing to group/);
+  assert.equal(toasts.length, said, 'it says so in the status bar, not with a toast');
+  assert.match(ctx.ui.note, /Nothing to group/);
+  assert.equal(ctx.ui.status, '', 'as a note: the standing status text is not replaced');
   store.clearSelection();
   assert.equal(groupSelection(ctx), false);
 

@@ -31,6 +31,18 @@ export function typesPatch(spawn, types) {
   return { types: next };
 }
 
+// One end of an ordered pair (the levels of a spawn or of a region) typed into a field, as the new pair of ONE item:
+// the other end stays the item's own, and an end typed past it takes it along. An item that has no pair yet gets the
+// value at both ends. Every editor of a pair builds one patch per item with this - a pair read from the field would
+// write the other end of whatever item the field happened to show over all of them. Pure: `pair` is not changed.
+//   end: 0 = the low end, 1 = the high end
+export function withEnd(pair, end, value) {
+  const next = Array.isArray(pair) ? [pair[0], pair[1]] : [value, value];
+  next[end] = value;
+  if (next[0] > next[1]) next[1 - end] = value;
+  return next;
+}
+
 const span = (a, b) => (a === b ? a.toLocaleString('en-US') : `${a.toLocaleString('en-US')}–${b.toLocaleString('en-US')}`);
 
 // One line per monster type of the spawn: its HP, P.Atk and XP at the lowest and the highest level.
@@ -85,7 +97,7 @@ const SCHEMA = {
     { label: 'Set from spawns', type: 'action', action: 'region.levelsFromSpawns' },
     { key: 'mood', type: 'select', options: [null, ...Object.keys(MOODS)] },      // null = '(inherit)'
     { key: 'safe', type: 'bool' },
-    { key: 'color', type: 'color' },
+    { key: 'color', label: 'Colour', type: 'color' },      // the word every other panel uses
   ],
   start: [X, Z, { key: 'r', label: 'Radius', type: 'number', min: L.startR[0], max: L.startR[1], step: 0.5 }],
   // nothing selected: the map itself, written with cmd.setProps

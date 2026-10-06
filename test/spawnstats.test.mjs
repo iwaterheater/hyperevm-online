@@ -14,7 +14,7 @@ import { createStore } from '../src/editor/store.js';
 import { createUi } from '../src/editor/state.js';
 import {
   SORT_KEYS, SPAWN_PRESETS, campColor, campText, cleanTemplate, dominantType, expectedByType, filterRows, levelColor, levelsFromSpawns,
-  levelText, mixText, parseFilter, populate, sameTemplate, sortRows, spawnRows, templateOf, threatOf, totalsByRegion, typeKeys,
+  holdRows, levelText, mixText, parseFilter, populate, sameTemplate, shortName, sortRows, spawnRows, templateOf, threatOf, totalsByRegion, typeKeys,
 } from '../src/editor/spawnstats.js';
 import createSpawnTool from '../src/editor/tools/spawn.js';
 import createChestTool from '../src/editor/tools/chest.js';
@@ -63,6 +63,8 @@ function populated() {
 }
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
+// fields of one camp, written as a command would write them (the map is not in a store here)
+const write = (spawn, patch) => { Object.assign(spawn, patch); };
 
 // ---------------------------------------------------------------- one camp
 
@@ -78,7 +80,7 @@ test('expectedByType: count x weight / the sum of the weights, in MOB_KEYS order
 test('typeKeys, mixText, levelText, campText, threatOf: how a camp reads', () => {
   assert.deepEqual(typeKeys({ tank: 1, chaser: 2, runner: 0 }), ['chaser', 'tank']);
   assert.equal(mixText({ chaser: 1 }), 'Skeleton Minion');
-  assert.equal(mixText({ runner: 2, chaser: 3 }), 'chaser 3 : runner 2');
+  assert.equal(mixText({ runner: 2, chaser: 3 }), 'Minion 3 : Rogue 2', 'a mix in the names every panel uses, not in the keys of the file');
   assert.equal(mixText({}), 'no monsters');
   assert.equal(levelText([3, 3]), 'Lv 3');
   assert.equal(levelText([1, 2]), 'Lv 1–2');
@@ -265,6 +267,39 @@ test('parseFilter / filterRows: words on the region and the monsters, level term
   assert.notEqual(filterRows(rows, {}), rows);                      // always a new array
 });
 
+test('holdRows: while a value is typed the rows keep their places - whatever the sort and the filter say now', () => {
+  const { map, meadows, a, b, c, d, boss } = populated();
+  const sorted = () => sortRows(spawnRows(map), 'count', -1), spawns = (rows) => rows.map((r) => r.spawn);
+  assert.deepEqual(spawns(sorted()), [c, d, a, b, boss]);
+  const held = spawns(sorted());                      // the editor opens on camp c (count 6), the table sorted by N
+  // "12" is typed: after the "1" the map has count 1, and the sort would send the row to the end
+  write(c, { count: 1 });
+  assert.deepEqual(spawns(sorted()), [d, a, b, boss, c], 'what the sort alone would do between two keys');
+  assert.deepEqual(spawns(holdRows(spawnRows(map), sorted(), held, [c])), [c, d, a, b, boss], 'the row stays where it was');
+  assert.equal(holdRows(spawnRows(map), sorted(), held, [c])[0].count, 1, 'and it is the row of the map as it is now');
+  write(c, { count: 12 });
+  assert.deepEqual(spawns(holdRows(spawnRows(map), sorted(), held, [c])), [c, d, a, b, boss]);
+
+  // a filter that no longer matches the camp under edit does not take its row away; the others obey it
+  const filtered = filterRows(spawnRows(map), { region: meadows });
+  assert.deepEqual(spawns(filtered), [a, b]);
+  assert.deepEqual(spawns(holdRows(spawnRows(map), filtered, held, [c])), [c, a, b]);
+  assert.deepEqual(spawns(holdRows(spawnRows(map), filtered, held, [])), [a, b]);
+
+  // a camp that has gone leaves, one that appeared meanwhile is put after the held rows
+  map.spawns.splice(map.spawns.indexOf(d), 1);
+  const fresh = camp(10, 10, { count: 9 });
+  map.spawns.push(fresh);
+  assert.deepEqual(spawns(holdRows(spawnRows(map), sorted(), held, [c])), [c, a, b, boss, fresh]);
+  assert.deepEqual(spawns(holdRows(spawnRows(map), sorted(), [], [])), spawns(sorted()), 'nothing held: the table as sorted');
+});
+
+test('shortName: the one word a monster type is called by, never the key of the file', () => {
+  assert.deepEqual(MOB_KEYS.map(shortName), ['Minion', 'Rogue', 'Mage', 'Warrior', 'King']);
+  assert.equal(campText({ types: { chaser: 3, shooter: 1 }, lvl: [6, 8], count: 5, respawn: 14 }), '5× Minion 3 : Mage 1 · Lv 6–8 · 14 s');
+  assert.equal(campText({ types: { boss: 1 }, lvl: [18, 18], count: 1, respawn: 90 }), '1× Skeleton King · Lv 18 · 90 s');
+});
+
 // ---------------------------------------------------------------- populate
 
 const TEMPLATE = { types: { chaser: 3, runner: 2 }, lvl: [1, 3], count: 4, r: 12, respawn: 14 };
@@ -410,13 +445,16 @@ function bench() {
   return { ...w, ctx, store, ui, toasts, tools: ctx.tools };
 }
 // What a tool reads of a pointer event and of a Hit. Ten pixels per world unit, so a drag leaves the click threshold.
-const ev = (x, z, mods = {}) => ({ clientX: x * 10, clientY: z * 10, shiftKey: !!mods.shift, altKey: !!mods.alt, metaKey: false, ctrlKey: false, buttons: 1 });
+// `type` is what the viewport passes: a release is a 'pointerup'; a press that ends without one (the window lost the
+// focus, a tool key) ends with the last event of the press instead.
+const ev = (x, z, mods = {}, type = 'pointermove') => ({ type, clientX: x * 10, clientY: z * 10, shiftKey: !!mods.shift, altKey: !!mods.alt, metaKey: false, ctrlKey: false, buttons: 1 });
+const up = (x, z, mods) => ev(x, z, mods, 'pointerup');
 const hit = (x, z, extra = {}) => ({ x, z, onGround: true, item: null, kind: null, handle: null, ...extra });
-const click = (tool, x, z, extra, mods) => { tool.pointerDown(ev(x, z, mods), hit(x, z, extra)); tool.pointerUp(ev(x, z, mods), hit(x, z, extra)); };
+const click = (tool, x, z, extra, mods) => { tool.pointerDown(ev(x, z, mods, 'pointerdown'), hit(x, z, extra)); tool.pointerUp(up(x, z, mods), hit(x, z, extra)); };
 const drag = (tool, points, extra, mods) => {
-  points.forEach(([x, z], i) => (i === 0 ? tool.pointerDown(ev(x, z, mods), hit(x, z, extra)) : tool.pointerMove(ev(x, z, mods), hit(x, z))));
+  points.forEach(([x, z], i) => (i === 0 ? tool.pointerDown(ev(x, z, mods, 'pointerdown'), hit(x, z, extra)) : tool.pointerMove(ev(x, z, mods), hit(x, z))));
   const [x, z] = points[points.length - 1];
-  tool.pointerUp(ev(x, z, mods), hit(x, z));
+  tool.pointerUp(up(x, z, mods), hit(x, z));
 };
 
 test('marker tools: the contract of a tool - id, layer, picks, context, the handlers', () => {
@@ -460,9 +498,9 @@ test('Spawn tool: press-drag makes a camp from its centre to its radius as ONE u
   const made = map.spawns[n];
   assert.deepEqual([map.spawns.length, made.x, made.z, made.r, made.count], [n + 1, 120, 60, 9, 4]);
   assert.ok(!store.grouping && store.selection.has(made));
-  assert.equal(store.undo(), 'Add spawn');
+  assert.equal(store.undo(), 'Add 1 spawn');
   assert.deepEqual([map.spawns.length, store.canUndo], [n, false]);
-  assert.equal(store.redo(), 'Add spawn');
+  assert.equal(store.redo(), 'Add 1 spawn');
   assert.deepEqual([map.spawns[n], made.r], [made, 9]);
   // Escape in the middle: the camp is gone, the selection is back, the rest of the press is swallowed
   store.select([map.spawns[0]]);
@@ -472,7 +510,7 @@ test('Spawn tool: press-drag makes a camp from its centre to its radius as ONE u
   assert.equal(spawn.key('cancel', {}), true);
   assert.deepEqual([map.spawns.length, store.grouping, [...store.selection]], [n + 1, false, [map.spawns[0]]]);
   spawn.pointerMove(ev(158, 60), hit(158, 60));
-  spawn.pointerUp(ev(158, 60), hit(158, 60));
+  spawn.pointerUp(up(158, 60), hit(158, 60));
   assert.equal(map.spawns.length, n + 1);
   assert.equal(spawn.key('cancel', {}), false);                 // nothing left to cancel: Escape goes on to the next step
   // a drag that hardly leaves the spot is a click with a shaky hand: the camp gets the template's radius
@@ -506,6 +544,19 @@ test('Spawn tool: nothing is created in a safe region, off the island, on a lock
   click(spawn, 250, 0);
   assert.deepEqual([map.spawns.length, map.spawns[n].r, spawn.opts.r], [n + 1, 7, 12]);
   assert.deepEqual(validate(map).filter((i) => i.level === 'error'), []);
+  // the same with the pointer resting on the spot first and the options strip listening, as in the editor: the strip
+  // redraws the ghost whenever the template changes, and that redraw must not eat the radius the click asked for
+  spawn.onTemplate(() => spawn.refreshGhost());
+  spawn.setTemplate({ r: 16 });
+  spawn.pointerMove(ev(250, 20), hit(250, 20));
+  click(spawn, 250, 20);
+  assert.deepEqual([map.spawns.length, map.spawns[n + 1].r, spawn.opts.r], [n + 2, 6.2, 16]);
+  // a shaky click there (a drag that hardly leaves the spot) is that click
+  drag(spawn, [[250, -20], [250.5, -20]]);
+  assert.deepEqual([map.spawns[n + 2].r, spawn.opts.r], [6.2, 16]);
+  // a radius drawn by hand IS what the next camp starts from
+  drag(spawn, [[150, 60], [154, 60], [159, 60]]);
+  assert.deepEqual([map.spawns[n + 3].r, spawn.opts.r], [9, 9]);
   spawn.deactivate();
 });
 
@@ -565,6 +616,94 @@ test('Spawn tool: the template follows the camp selected last, and its later edi
   assert.deepEqual([spawn.template().count, spawn.template().types, spawn.template().lvl], [30, { chaser: 1 }, [3, 9]]);
 });
 
+test('Spawn tool: the template copies what a step leaves behind - never the radius 0 a drawn camp starts with', () => {
+  const { store, map, a, tools: { spawn } } = bench();
+  spawn.activate();
+  const n = map.spawns.length;
+  // a camp drawn by a drag: the template takes its final radius, and keeps it when the camp is undone
+  spawn.setTemplate({ r: 10 });
+  drag(spawn, [[150, 60], [154, 60], [158, 60]]);
+  assert.deepEqual([map.spawns[n].r, spawn.opts.r], [8, 8]);
+  assert.equal(store.undo(), 'Add 1 spawn');
+  assert.deepEqual([map.spawns.length, spawn.opts.r], [n, 8]);
+  assert.equal(store.redo(), 'Add 1 spawn');
+  assert.deepEqual([map.spawns[n].r, spawn.opts.r], [8, 8]);
+  store.undo();
+  // Escape in the middle of the drag: the template is what it was before the press
+  spawn.setTemplate({ r: 10 });
+  spawn.pointerDown(ev(150, 60, {}, 'pointerdown'), hit(150, 60));
+  spawn.pointerMove(ev(153, 60), hit(153, 60));
+  assert.ok(store.grouping && map.spawns[n].r === 3);
+  assert.equal(spawn.key('cancel', {}), true);
+  spawn.pointerUp(up(153, 60), hit(153, 60));
+  assert.deepEqual([map.spawns.length, spawn.opts.r], [n, 10]);
+  // a click with a shaky hand, undone - and the next click still makes a camp of radius 10, not a pile on one spot
+  drag(spawn, [[150, 60], [150.5, 60]]);
+  assert.deepEqual([map.spawns[n].r, spawn.opts.r], [10, 10]);
+  store.undo();
+  assert.equal(spawn.opts.r, 10);
+  click(spawn, 150, 60);
+  assert.deepEqual([map.spawns.length, map.spawns[n].r], [n + 1, 10]);
+  // an edit of the followed camp that is undone is read again once the undo is whole
+  store.select([a]);
+  store.exec(cmd.set([a], { r: 20 }));
+  assert.equal(spawn.opts.r, 20);
+  store.undo();
+  assert.deepEqual([a.r, spawn.opts.r], [16, 16]);
+  // a rim drag that is cancelled: the strip followed it, and follows it back
+  spawn.pointerDown(ev(66, 0, {}, 'pointerdown'), hit(66, 0, { item: a, handle: { type: 'radius' } }));
+  spawn.pointerMove(ev(72, 0), hit(72, 0));
+  assert.deepEqual([a.r, spawn.opts.r], [22, 22]);
+  spawn.key('cancel', {});
+  spawn.pointerUp(up(72, 0), hit(72, 0));
+  assert.deepEqual([a.r, spawn.opts.r, store.grouping], [16, 16, false]);
+  // a selection made inside an open group counts when the group closes, with what the item is then
+  const fresh = cmd.make('spawn', { x: 100, z: 100, r: 0, count: 9 });
+  store.begin('Add by a script');
+  store.exec(cmd.add('spawn', [fresh]));
+  store.select([fresh]);
+  assert.equal(spawn.opts.count, 4);                             // still camp a's: the group is open
+  store.exec(cmd.set([fresh], { r: 14 }));
+  store.commit();
+  assert.deepEqual([spawn.opts.count, spawn.opts.r], [9, 14]);
+  spawn.deactivate();
+});
+
+test('marker tools: a press that ends without its release creates nothing', () => {
+  const { store, map, a, tools: { spawn, chest } } = bench();
+  // the window lost the focus, a tool key was pressed, the pointer was cancelled: the viewport ends the press with
+  // the LAST event of the press, which is not a 'pointerup'
+  spawn.activate();
+  const n = map.spawns.length;
+  spawn.pointerDown(ev(120, 60, {}, 'pointerdown'), hit(120, 60));
+  spawn.pointerUp(ev(120, 60, {}, 'pointerdown'), hit(120, 60));
+  assert.deepEqual([map.spawns.length, store.canUndo], [n, false]);
+  // a camp that was being drawn is taken back
+  spawn.pointerDown(ev(120, 60, {}, 'pointerdown'), hit(120, 60));
+  spawn.pointerMove(ev(126, 60), hit(126, 60));
+  assert.ok(store.grouping && map.spawns.length === n + 1);
+  spawn.pointerUp(ev(126, 60), hit(126, 60));
+  assert.deepEqual([map.spawns.length, store.grouping, store.canUndo], [n, false, false]);
+  // a move of what exists is kept as far as it got, as in the Select tool
+  spawn.pointerDown(ev(a.x, a.z, {}, 'pointerdown'), hit(a.x, a.z, { item: a }));
+  spawn.pointerMove(ev(a.x + 5, a.z), hit(a.x + 5, a.z));
+  spawn.pointerUp(ev(a.x + 5, a.z), hit(a.x + 5, a.z));
+  assert.deepEqual([a.x, store.grouping, store.undoLabel], [55, false, 'Move 1 spawn']);
+  spawn.deactivate();
+  // the same for a chest: no click, and no chest that was turning under the pointer
+  chest.activate();
+  chest.pointerDown(ev(60, 60, {}, 'pointerdown'), hit(60, 60));
+  chest.pointerUp(ev(60, 60, {}, 'pointerdown'), hit(60, 60));
+  chest.pointerDown(ev(60, 60, {}, 'pointerdown'), hit(60, 60));
+  chest.pointerMove(ev(64, 60), hit(64, 60));
+  assert.ok(store.grouping && map.chests.length === 1);
+  chest.pointerUp(ev(64, 60), hit(64, 60));
+  assert.deepEqual([map.chests.length, store.grouping], [0, false]);
+  click(chest, 60, 60);                                          // a real click still places
+  assert.equal(map.chests.length, 1);
+  chest.deactivate();
+});
+
 test('Spawn tool: with nothing selected the brackets size the next camp; with a selection the keys edit it', () => {
   const { store, a, tools: { spawn } } = bench();
   spawn.activate();
@@ -596,7 +735,7 @@ test('Chest and NPC tools: a click places the template, a press-drag turns the n
   drag(chest, [[70, 30], [72, 30], [76, 30]]);                  // towards +X: 90 degrees
   const second = map.chests[1];
   assert.ok(near(second.ry, Math.PI / 2, 1e-6));
-  assert.deepEqual([second.gold, store.undoLabel], [400, 'Add chest']);
+  assert.deepEqual([second.gold, store.undoLabel], [400, 'Add 1 chest']);
   store.undo();
   assert.equal(map.chests.length, 1);
   // nothing selected: Q and E turn the chest that is about to be placed, and leave no undo step
@@ -662,7 +801,7 @@ test('marker tools: a store load in the middle of a gesture leaves nothing open'
   const next = island().map;
   store.load(next);
   spawn.pointerMove(ev(130, 60), hit(130, 60));
-  spawn.pointerUp(ev(130, 60), hit(130, 60));
+  spawn.pointerUp(up(130, 60), hit(130, 60));
   assert.deepEqual([next.spawns.length, store.grouping, store.canUndo], [0, false, false]);
   click(spawn, 120, 60);                                         // and the tool works on the new map
   assert.equal(next.spawns.length, 1);

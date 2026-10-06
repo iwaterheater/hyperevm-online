@@ -21,7 +21,7 @@
 import { GROUND_TYPES, LIMITS, cellHash, groundIx, qPos } from '../../map/format.js';
 import { modelInfo } from '../../map/catalog.js';
 import { h, row, button, checkField, numberField, rangeField } from '../ui/dom.js';
-import { chordLabel } from '../keymap.js';
+import { chordLabel, keyText } from '../keymap.js';
 
 const RADIUS = [1, 40], DENSITY = [0.1, 50], SPACING = [0, 20], CLEAR = [0, 20];
 const NO_SCATTER = ['paving', 'dirt', 'dirt_dark'];   // roads and squares: off by default
@@ -73,14 +73,23 @@ export default function create(ctx) {
     return [Math.min(lo, hi), Math.max(lo, hi)];
   };
 
+  // The status line says what a drag does here, for as long as the tool is active; what a stroke or a key has just
+  // done is a note - the bar shows it and takes it away again.
+  const resting = () => (brushModels().length
+    ? keyText('Scatter: drag to scatter the chosen models · Alt+drag erases them, Alt+Shift+drag any object')
+    : keyText('Scatter: pick models in the palette first (Mod+click adds one, Shift+click a range), then drag'));
   function say(text) {
     said = text;
     ui.setStatus(text);
   }
   function hush() {
-    if (said !== null && ui.status === said) ui.setStatus('');
-    said = null;
+    if (active) say(resting());
+    else {
+      if (said !== null && ui.status === said) ui.setStatus('');
+      said = null;
+    }
   }
+  const note = (text) => ui.setNote(text);
 
   // ---------------------------------------------------------------- what to keep clear of
 
@@ -253,17 +262,17 @@ export default function create(ctx) {
   // Says what the stroke did - and when it did nothing, why.
   function report(s) {
     if (s.erase) {
-      say(s.total ? `Erased ${count(s.total, 'object')}` : s.erase === 'models' ? 'Nothing to erase: no object of the brush models under the brush (Alt+Shift erases any object)' : 'Nothing to erase under the brush');
+      note(s.total ? `Erased ${count(s.total, 'object')}` : s.erase === 'models' ? keyText('Nothing to erase: no object of the brush models under the brush (Alt+Shift erases any object)') : 'Nothing to erase under the brush');
       return;
     }
     if (s.why.limit) ui.toast(`A map holds ${LIMITS.objects.toLocaleString('en-US')} objects at most: nothing more was added`, 'warn');
-    if (s.total) { say(`Scattered ${count(s.total, 'object')}`); return; }
+    if (s.total) { note(`Scattered ${count(s.total, 'object')}`); return; }
     const w = s.why, refused = Math.max(w.ground, w.clear, w.spacing, w.edge);
-    if (!refused || w.taken > refused) say(w.full || w.taken ? 'Nothing added: the ground under the brush has its objects already' : 'Nothing added: no free spot under the brush');
-    else if (refused === w.ground) say('Nothing added: the ground under the brush is switched off in "Ground", or blocked');
-    else if (refused === w.clear) say('Nothing added: every spot is too close to a collider, a chest, an NPC or the start ("Keep clear")');
-    else if (refused === w.spacing) say('Nothing added: no room left at this min spacing');
-    else say('Nothing added: outside the island');
+    if (!refused || w.taken > refused) note(w.full || w.taken ? 'Nothing added: the ground under the brush has its objects already' : 'Nothing added: no free spot under the brush');
+    else if (refused === w.ground) note('Nothing added: the ground under the brush is switched off in "Ground", or blocked');
+    else if (refused === w.clear) note('Nothing added: every spot is too close to a collider, a chest, an NPC or the start ("Keep clear")');
+    else if (refused === w.spacing) note('Nothing added: no room left at this min spacing');
+    else note('Nothing added: outside the island');
   }
 
   // ---------------------------------------------------------------- ring
@@ -315,7 +324,7 @@ export default function create(ctx) {
     const models = brushModels();
     w.models.textContent = models.length ? count(models.length, 'model') : 'No models';
     w.models.className = `ui-badge ${models.length ? 'accent' : 'warn'}`;
-    w.models.title = models.length ? `The brush scatters: ${models.join(', ')}` : 'Pick one or more models in the palette (Shift+click or Ctrl/Cmd+click for several)';
+    w.models.title = models.length ? `The brush scatters: ${models.join(', ')}` : keyText('Pick one or more models in the palette (Mod+click adds one, Shift+click a range)');
   }
 
   function buildStrip() {
@@ -409,11 +418,11 @@ export default function create(ctx) {
       row('Ground', w.ground),
       tip(row('Keep clear', w.clearOn, w.clear), 'World units kept free around colliders, chests, NPCs and the start disc'),
       list,
-      h('span', { class: 'ui-hint', title: 'Drag to scatter the models chosen in the palette. Hold Alt to erase their objects under the brush, Alt+Shift to erase any object.' },
-        'Alt: erase brush models · Alt+Shift: erase any'),
+      h('span', { class: 'ui-hint', title: keyText('Drag to scatter the models chosen in the palette. Hold Alt to erase their objects under the brush, Alt+Shift to erase any object.') },
+        keyText('Drag: scatter · Alt: erase brush models · Alt+Shift: erase any')),
     );
     syncStrip(true);
-    subs = [ui.on('models', () => syncStrip(true))];
+    subs = [ui.on('models', () => { syncStrip(true); hush(); })];      // with or without models the instruction differs
   }
 
   // ---------------------------------------------------------------- the map changes under the tool
@@ -429,6 +438,8 @@ export default function create(ctx) {
 
   return {
     id: 'scatter', label: 'Scatter', icon: '∴', layer: 'objects', picks: [], hidden: false,
+    about: 'Brush many objects of the chosen models over the ground, or erase them',
+    get intro() { return resting(); },
     get context() { return 'brush'; },
     opts,
 
@@ -437,7 +448,7 @@ export default function create(ctx) {
       const c = ui.cursor;
       hover = c && c.onGround ? { x: c.x, z: c.z, alt: false } : null;
       showRing();
-      if (!brushModels().length) say('Scatter: pick one or more models in the palette');
+      hush();          // the instruction of the tool
     },
 
     deactivate() {
@@ -512,16 +523,16 @@ export default function create(ctx) {
     key(action) {
       if (action === 'cancel') {
         if (!abort()) return false;
-        say('Stroke cancelled');
+        note('Stroke cancelled');
         showRing();
         return true;
       }
       if (action === 'brush.smaller' || action === 'brush.larger') {
         stepRadius(action === 'brush.larger' ? 1 : -1);
-        say(`Brush radius ${opts.radius}`);
+        note(`Brush radius ${opts.radius}`);
       } else if (action === 'brush.optDown' || action === 'brush.optUp') {
         stepDensity(action === 'brush.optUp' ? 1 : -1);
-        say(`Density ${opts.density} per 100 square units`);
+        note(`Density ${opts.density} per 100 square units`);
       } else return false;                // the digits choose ground types: Terrain only
       syncStrip(true);
       showRing();

@@ -4,10 +4,14 @@
 //   press and drag on free ground a new camp from its centre out to its radius - one undo step
 //   click a pin, a rim, a label   select that camp (Shift / Mod: add or take it); its group mates of the same kind come along
 //   double-click                  that one camp alone
-//   drag from there               move the selected camps          Alt+drag: move a copy
+//   drag from there               move the selection               Alt+drag: move a copy
 //   drag the rim of a selected camp   resize it                    drag inside its disc: move it
 //   Alt+click a camp              copy its settings into the template (the eyedropper)
 //   [ ]  arrows  Q E              scale / nudge / turn the selection; with nothing selected [ ] change the template's radius
+//
+// A marker tool PICKS only its own kind (tool = filter), but what is selected is edited as a whole, as everywhere in
+// the editor: the keys, a drag that starts on a selected item, Delete, the inspector and Arrange all act on the same
+// items - also on a tree or a chest that a panel, Select All or the tool before this one put into the selection.
 //
 // The disc of a camp that is NOT selected is never a pick: camps cover most of a zone, and a press inside one must be
 // able to start the next camp. What the cursor is over is decided by the viewport (hit.item / hit.handle).
@@ -20,10 +24,11 @@
 import { MOB_KEYS, MOB_TYPES } from '../../shared.js';
 import { LIMITS, inShape, isBlocked, groundAt, qPos } from '../../map/format.js';
 import { h, row, button, numberField, selectField, checkField } from '../ui/dom.js';
-import { mod } from '../keymap.js';
+import { mod, keyText } from '../keymap.js';
 import { typesPatch } from '../fields.js';
 import { dragTracker, dragMove, dragRadius, placeOnce, selectionKey, snapPoint, snapping, editable, expandPickable, describe } from './common.js';
-import { SPAWN_PRESETS, campColor, campText, cleanTemplate, sameTemplate, templateOf, threatOf, typeKeys } from '../spawnstats.js';
+import { addClones } from './select.js';
+import { SPAWN_PRESETS, campColor, campText, cleanTemplate, sameTemplate, shortName, templateOf, threatOf, typeKeys } from '../spawnstats.js';
 
 const NOUN = { spawn: 'spawn', chest: 'chest', npc: 'NPC', start: 'start point' };
 const hex = (color) => `#${color.toString(16).padStart(6, '0')}`;
@@ -43,11 +48,18 @@ export const turnStep = (ev) => (ev?.shiftKey ? 90 : ev?.altKey ? 1 : 15) * Math
 //   on       -> unsubscribe; fn() after every change
 // While opts.follow is on, the template adopts the item of this kind that was selected last - placed, clicked,
 // brought back by an undo - and re-reads it when it is edited.
+// It copies what a step of the store LEAVES, never what a step passes through: a camp that a drag is creating starts
+// with radius 0, and an undo or a cancelled drag walks back through every state the step had. So a selection that
+// changes inside an open group is looked at when the group closes, and an item rewritten by an undo, a redo or a
+// cancel is read again once that step is whole - when the item is still there. Esc on a half-drawn camp therefore
+// leaves the template as it was, and undoing a new camp leaves it with that camp's settings.
 export function templateState(ctx, kind, { defaults, read, clean }) {
   const { store } = ctx, listeners = new Set();
   const opts = { ...clean(defaults), follow: true };
   let source = null;         // the item the template was copied from last, while nobody has changed the template since
   let known = new Set();     // the selected items of this kind, to tell which one is new
+  let unsettled = false;     // the selection changed inside an open group, or the source was rewritten by an undo
+  let reread = false;        // ... the second of the two: the source has to be read again
   const tell = () => {
     for (const fn of [...listeners]) {
       try { fn(); } catch (err) { console.error(`[editor] a ${kind} template listener failed`, err); }
@@ -77,16 +89,28 @@ export function templateState(ctx, kind, { defaults, read, clean }) {
       return () => listeners.delete(fn);
     },
   };
-  store.on('selection', () => {
+  // The selection as it is now against the one the template looked at last. Only called between two steps of the store.
+  const look = () => {
+    const again = reread;
+    unsettled = reread = false;
     const now = store.selected(kind), added = now.filter((item) => !known.has(item));
     known = new Set(now);
-    if (opts.follow && added.length) state.adopt(added[added.length - 1]);
+    if (source && store.kindOf(source) !== kind) source = null;      // deleted, or its creation was undone
+    if (!opts.follow) return;
+    if (added.length) state.adopt(added[added.length - 1]);
+    else if (again && source) state.adopt(source);
+  };
+  store.on('selection', () => {
+    if (store.grouping) unsettled = true;
+    else look();
   });
   store.on('change', (change) => {
-    const list = change.updated?.[`${kind}s`];
-    if (source && opts.follow && list?.includes(source)) state.adopt(source);
+    if (!source || !opts.follow || !change.updated?.[`${kind}s`]?.includes(source)) return;
+    if (change.origin === 'do') state.adopt(source);      // edited: the strip shows it at once, also during a drag
+    else unsettled = reread = true;                       // one command of an undo, a redo or a cancel: not a state to copy
   });
-  store.on('load', () => { source = null; known = new Set(); });      // the items of the old map are gone
+  store.on('history', () => { if (unsettled && !store.grouping) look(); });
+  store.on('load', () => { source = null; known = new Set(); unsettled = reread = false; });      // the items of the old map are gone
   return state;
 }
 
@@ -121,7 +145,8 @@ export function templateControls(ctx, kind, state, apply) {
 // The tool object of a marker tool, from what makes it this tool:
 //   id, label, icon, layer, kind
 //   props()            -> the fields of a new item without its place, or leave it out when the tool creates nothing
-//   fit(props)         -> props, adjusted to where it lands (optional; x and z are set)
+//   fit(props)         -> props, adjusted to where it lands (optional; x and z are set). It is called for every ghost
+//                      as well: it must keep nothing
 //   canPlace(x, z)     -> null, or the reason why nothing may be put there
 //   ghost(props)       -> what markers.setGhost shows under the cursor ({ spawns | chests | npcs }), or null
 //   ring(props)        -> { r, color } of a ground ring drawn with the ghost (viewport.brush), or null
@@ -129,9 +154,13 @@ export function templateControls(ctx, kind, state, apply) {
 //                      pointer), 'follow' (the one existing item follows the pointer - the start point)
 //   target()           -> the item a click on free ground moves ('follow' only)
 //   adopt(item)        Alt+click: copy the item's settings
-//   placed(item, how)  after an item was created; how: 'click' | 'drag'
+//   placed(item, how, asked)  after an item was created; how: 'click' | 'drag'; asked: what props() gave for it,
+//                      before fit() - the template as it was at the press
 //   idleKey(action, ev) -> boolean: a key the selection did not use (turn or resize the template)
-//   hints              { create, item, selected, handle }: status texts
+//   hints              { intro, create, item, selected, handle }: status texts. `intro` is the instruction of the tool:
+//                      it stands in the status bar from the moment the tool is chosen and whenever the cursor is over
+//                      nothing more particular. Keys are named in the editor's words ('Alt+click'): keyText writes them
+//   about              one line for the tooltip of the toolbar button
 //   options(el, keep)  fills the options strip; keep(off) registers what deactivate() must release
 //   activate(), deactivate()   optional extras
 export function markerTool(ctx, spec) {
@@ -144,7 +173,7 @@ export function markerTool(ctx, spec) {
   //   'follow'  the start point follows the pointer
   //   'dead'    the gesture was cancelled or refused with the button still down: the rest of it is swallowed
   let mode = null;
-  let press = null;        // { item, at, start, shift, toggle, alt, tracker, props }
+  let press = null;        // { item, at, start, shift, toggle, alt, tracker, asked, props }
   let drag = null;         // what dragMove / dragRadius returned
   let made = null;         // the item a press-drag is creating
   let restore = null;      // the selection to put back when a copy-drag is cancelled
@@ -157,6 +186,8 @@ export function markerTool(ctx, spec) {
   const layerState = () => ui.layers?.[layer] ?? null;
   const say = (text) => { if (text !== said) { said = text; ui.setStatus?.(text ?? ''); } };
   const hush = () => { if (said !== null && ui.status === said) ui.setStatus?.(''); said = null; };
+  // the hint for what the cursor is over ('intro': nothing in particular), with its keys as this keyboard writes them
+  const hint = (name) => { const text = spec.hints?.[name] ?? spec.hints?.intro ?? null; return text == null ? null : keyText(text); };
   const point = (hit, ev) => snapPoint(ctx, hit.x, hit.z, ev);
   const ownKind = (items) => items.filter((item) => store.kindOf(item) === kind);
   // a group member brings the members of the SAME kind: this tool edits one kind, and the inspector shows its fields
@@ -193,8 +224,9 @@ export function markerTool(ctx, spec) {
     setCursor('');
   }
   // The props of the item a click at `at` would create (or the place a click would move the start point to).
-  function propsAt(at) {
-    const base = spec.props ? spec.props() : {};
+  // base: what the template gives - passed by a caller that needs it afterwards.
+  const asking = () => (spec.props ? spec.props() : {});
+  function propsAt(at, base = asking()) {
     const props = { ...base, x: at.x, z: at.z };
     return spec.fit ? spec.fit(props) : props;
   }
@@ -215,12 +247,12 @@ export function markerTool(ctx, spec) {
       last = at;
       showGhost(propsAt(at));
       setCursor('crosshair');
-      say(spec.hints?.create ?? null);
+      say(hint('create'));
     } else {
       last = null;
       showGhost(null);
       setCursor(next === 'refused' ? 'not-allowed' : next === 'selected' ? 'move' : next === 'item' ? 'pointer' : '');
-      say(next === 'refused' ? why : spec.hints?.[next] ?? null);
+      say(next === 'refused' ? why : hint(next || 'intro'));
     }
   }
   // The template changed (a key, the strip): the ghost under a resting cursor follows.
@@ -230,32 +262,21 @@ export function markerTool(ctx, spec) {
 
   // ---- gestures
 
-  // Copies of `items`, added in place inside the group the caller has opened; every group among them becomes a new one.
-  function addClones(items) {
-    const groups = new Set();
-    for (const item of items) if (typeof item.g === 'string') groups.add(item.g);
-    const ids = store.newGroupIds(groups.size), fresh = new Map([...groups].map((g, i) => [g, ids[i]]));
-    const clones = items.map((item) => {
-      const clone = cmd.clone(item);
-      if (typeof clone.g === 'string') clone.g = fresh.get(clone.g);   // not in the map yet: this builds the item, it edits none
-      return clone;
-    });
-    store.exec(cmd.add(kind, clones));
-    return clones;
-  }
-
   // The pointer left the click threshold.
   function startDrag() {
     if (store.grouping) { mode = 'dead'; return; }       // somebody's edit is open: a drag would join it and close it
     if (press.item) {
-      const picked = store.selection.has(press.item) ? store.selected(kind) : mates(press.item);
+      // from a selected item the SELECTION moves, whatever it holds (the keys and the inspector edit the same items);
+      // from an unselected one, that item with its group mates of this kind
+      const picked = store.selection.has(press.item) ? [...store.selection] : mates(press.item);
       const items = editable(ctx, picked);
       if (!items.length) { mode = 'dead'; return; }
-      if (press.alt && kind !== 'start') {
+      const originals = items.filter((item) => store.kindOf(item) !== 'start');     // the start point has no copy
+      if (press.alt && originals.length) {
         restore = [...store.selection];
-        store.begin(`Duplicate ${describe(ctx, items)}`);
+        store.begin(`Duplicate ${describe(ctx, originals)}`);
         try {
-          const clones = addClones(items);
+          const clones = addClones(ctx, originals);        // every group among them becomes a new one
           store.select(clones);
           drag = dragMove(ctx, clones, press.start);     // joins the group opened above: copy and move are one step
           mode = 'move';
@@ -273,7 +294,7 @@ export function markerTool(ctx, spec) {
       return;
     }
     // free ground
-    const why = press.shift ? 'Shift is for adding to the selection: nothing is created with it' : refusal(press.hit, press.at);
+    const why = press.shift ? keyText('Shift is for adding to the selection: nothing is created with it') : refusal(press.hit, press.at);
     if (why || !spec.drag) {
       if (why && !press.shift) ui.toast?.(why, 'warn');
       mode = 'dead';
@@ -288,8 +309,9 @@ export function markerTool(ctx, spec) {
       mode = 'follow';
       return;
     }
-    press.props = propsAt(press.at);
-    store.begin(`Add ${noun}`);
+    press.asked = asking();
+    press.props = propsAt(press.at, press.asked);
+    store.begin(`Add 1 ${noun}`);     // the label a click gets from cmd.add: one name for one thing in the history
     try {
       const item = cmd.make(kind, spec.drag === 'radius' ? { ...press.props, r: 0 } : press.props);
       store.exec(cmd.add(kind, [item]));
@@ -324,7 +346,7 @@ export function markerTool(ctx, spec) {
     if (!made) return;
     const at = point(hit, ev), why = refusal(hit, at);
     if (why) { say(why); return; }
-    say(spec.hints?.create ?? null);
+    say(hint('create'));
     store.exec(cmd.set([made], { x: at.x, z: at.z }));
     ctx.viewport?.readout?.(`${num(at.x)}, ${num(at.z)}`);
   }
@@ -352,8 +374,9 @@ export function markerTool(ctx, spec) {
       store.select([target]);
       return;
     }
-    const created = placeOnce(ctx, kind, propsAt(press.at));
-    spec.placed?.(created, 'click');
+    const asked = asking();
+    const created = placeOnce(ctx, kind, propsAt(press.at, asked));
+    spec.placed?.(created, 'click', asked);
   }
 
   // Takes back whatever the current gesture has done. -> whether there was a gesture
@@ -383,12 +406,16 @@ export function markerTool(ctx, spec) {
 
   const tool = {
     id: spec.id, label: spec.label, icon: spec.icon, layer, picks: [kind], hidden: false,
+    about: spec.about ?? '',
+    get intro() { return hint('intro') ?? ''; },
     get context() { return 'select'; },
 
     activate() {
-      // the pointer left the viewport: nothing would be created anywhere, so nothing is promised
-      subs.push(ui.on('cursor', (hit) => { if (hit === null && mode === null) { clearHover(); hush(); } }));
+      // the pointer left the viewport: nothing would be created anywhere, so nothing is promised - the bar goes back
+      // to what the tool does
+      subs.push(ui.on('cursor', (hit) => { if (hit === null && mode === null) { clearHover(); say(hint('intro')); } }));
       spec.activate?.();
+      say(hint('intro'));
     },
 
     deactivate() {
@@ -431,7 +458,15 @@ export function markerTool(ctx, spec) {
       else if (mode === 'follow') follow(hit, ev);
     },
 
+    // The viewport ends every press with a pointerUp - also one whose release never came (the window lost the focus,
+    // a tool key, a cancelled pointer): then `ev` is the last event of the press, not a 'pointerup'. Such a press
+    // creates nothing, as in Place and Paste: no click, and the camp or the chest that was growing out of it is taken
+    // back. A move or a resize of what exists is kept as far as it got, as in the Select tool.
     pointerUp(ev, hit) {
+      if (ev?.type !== 'pointerup' && (mode === 'press' || mode === 'create' || mode === 'face')) {
+        abort();
+        return;
+      }
       const was = mode;
       mode = null;
       try {
@@ -439,13 +474,14 @@ export function markerTool(ctx, spec) {
         else if (was === 'move' || was === 'radius') drag?.end();
         else if (was === 'create') {
           // a drag that hardly left the spot was a click with a shaky hand: the camp gets the template's radius
-          if (made && made.r < 1 && press?.props && press.props.r >= 1) store.exec(cmd.set([made], { r: press.props.r }));
+          const shaky = !!(made && made.r < 1 && press?.props && press.props.r >= 1);
+          if (shaky) store.exec(cmd.set([made], { r: press.props.r }));
           drag?.end();
-          spec.placed?.(made, 'drag');
+          spec.placed?.(made, shaky ? 'click' : 'drag', press?.asked);
         } else if (was === 'face') {
           ctx.viewport?.readout?.(null);
           store.commit();
-          spec.placed?.(made, 'drag');
+          spec.placed?.(made, 'drag', press?.asked);
         } else if (was === 'follow') {
           ctx.viewport?.readout?.(null);
           store.commit();
@@ -490,15 +526,12 @@ export function markerTool(ctx, spec) {
 // ---------------------------------------------------------------- the Spawn tool
 
 const DEFAULT_TEMPLATE = { types: { chaser: 1 }, lvl: [1, 2], count: 3, r: 8, respawn: 14 };
-// 'Skeleton Minion' -> 'Minion': the strip has one line
-const shortName = (key) => MOB_TYPES[key].name.split(' ').pop();
 
 export default function create(ctx) {
   const { store, ui, cmd } = ctx;
   const template = templateState(ctx, 'spawn', { defaults: DEFAULT_TEMPLATE, read: templateOf, clean: cleanTemplate });
   const { opts } = template;
 
-  let wanted = null;       // the template radius of the last fit() that had to cut it, else null
   const safeRegionAt = (x, z) => store.map.regions.find((region) => region.safe && inShape(region.shape, x, z)) ?? null;
 
   // New weights for the template, through the one rule every editor of `types` uses: a camp that becomes the boss alone
@@ -515,13 +548,13 @@ export default function create(ctx) {
 
   const tool = markerTool(ctx, {
     id: 'spawn', label: 'Spawn', icon: '☠', layer: 'spawns', kind: 'spawn', drag: 'radius',
+    about: 'Monster camps: click to add one, drag to draw its radius',
 
     props: () => template.fresh(),
 
-    // a camp clicked near the shore is as wide as the island allows; the template itself stays as it is
+    // a camp clicked near the shore is as wide as the island allows; the template itself stays as it is (placed, below)
     fit(props) {
       const room = store.map.radius - LIMITS.spawnMargin - Math.hypot(props.x, props.z);
-      wanted = props.r > room ? props.r : null;
       return props.r > room ? { ...props, r: qPos(Math.max(0, room)) } : props;
     },
 
@@ -539,13 +572,13 @@ export default function create(ctx) {
 
     adopt: (item) => template.adopt(item),
 
-    placed(item, how) {
+    placed(item, how, asked) {
       if (!item || store.kindOf(item) !== 'spawn') return;
       // the template has just copied the new camp (it follows the selection): a radius cut at the shore is not what
-      // the next camp should start from
-      if (how === 'click' && wanted !== null) template.set({ r: wanted });
+      // the next camp should start from. A radius drawn by hand is.
+      if (how === 'click' && Number.isFinite(asked?.r) && item.r < asked.r) template.set({ r: asked.r });
       const blocked = isBlocked(store.map, item.x, item.z) ? ` · its centre is on ${groundAt(store.map, item.x, item.z).name.toLowerCase()}: monsters appear on the walkable part of the disc` : '';
-      ui.setStatus(`Camp added: ${campText(item)} · radius ${num(item.r)} · threat radius ${num(threatOf(item))}${blocked}`);
+      ui.setNote(`Camp added: ${campText(item)} · radius ${num(item.r)} · threat radius ${num(threatOf(item))}${blocked}`);
     },
 
     // nothing selected: the brackets size the next camp
@@ -553,14 +586,15 @@ export default function create(ctx) {
       if (action !== 'scale.up' && action !== 'scale.down') return false;
       const r = Math.max(LIMITS.spawnR[0], Math.min(LIMITS.spawnR[1], Math.round(opts.r) + (action === 'scale.up' ? 1 : -1)));
       template.set({ r });
-      ui.setStatus(`Camp radius ${num(opts.r)} · threat radius ${num(threatOf(opts))}`);
+      ui.setNote(`Camp radius ${num(opts.r)} · threat radius ${num(threatOf(opts))}`);
       return true;
     },
 
     hints: {
+      intro: 'Spawn: click adds a camp, drag draws its radius · drag a camp to move it, its rim to resize',
       get create() { return `Click: ${campText(template.fresh())} · drag: centre to radius · [ ]: radius ${num(opts.r)}`; },
       item: 'Click: select · drag: move · Shift+click: add · Alt+click: copy its settings · Alt+drag: move a copy',
-      selected: 'Drag: move the selected camps · drag the rim: resize · Alt+drag: move a copy',
+      selected: 'Drag: move the selection · drag the rim: resize · Alt+drag: move a copy',
       handle: 'Drag the rim to resize the camp',
     },
 

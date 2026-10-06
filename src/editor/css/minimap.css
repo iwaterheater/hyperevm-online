@@ -1,7 +1,9 @@
 /* The minimap panel (panels/minimap.js). Every selector starts with #minimap. */
 
-/* the canvas is as wide as the panel and square; its pixel size follows in script */
-#minimap .frame { overflow: hidden; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
+/* The canvas is square and as wide as its frame; its pixel size follows in script. The frame is as wide as the panel
+   on a tall window and narrower on a short one: the panel stays in view at the foot of the right column (base.css),
+   and must leave the larger part of that column to the panels above it. */
+#minimap .frame { width: min(100%, max(150px, 24vh)); margin: 0 auto; overflow: hidden; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); }
 #minimap .map { width: 100%; height: auto; aspect-ratio: 1 / 1; cursor: crosshair; touch-action: none; }
 
 #minimap .bar { display: flex; align-items: center; gap: 2px; margin-top: 6px; }

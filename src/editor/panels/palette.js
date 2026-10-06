@@ -1,5 +1,5 @@
 import { h, button, leaveField } from '../ui/dom.js';
-import { hintFor, mod } from '../keymap.js';
+import { hintFor, mod, keyText } from '../keymap.js';
 import { CATEGORIES, MODELS, PACKS, modelInfo } from '../../map/catalog.js';
 import { createThumbs } from '../thumbs.js';
 import { clipSize, deleteStamp, exportStamps, importStamps, listStamps, readClip, renameStamp, stampName, subscribe } from '../clipboard.js';
@@ -209,11 +209,11 @@ export default function mount(el, ctx) {
 
   const empty = h('div', { class: 'ui-empty', hidden: true });
   const scroll = h('div', { class: 'scroll' }, favSection, recentSection, sections.map((s) => s.node), empty);
-  const modKey = hintFor('edit.copy').replace(/C$/, '').replace(/\+$/, '') || 'Ctrl';
   const models = h('div', { class: 'pane', dataset: { pane: 'models' } },
     h('div', { class: 'bar' }, search, found),
     pickedBar, scroll,
-    h('div', { class: 'foot ui-hint' }, `Click: place · ${modKey}-click or Shift-click: several, for Scatter · ★: favourite`));
+    h('div', { class: 'foot ui-hint', title: 'Several models are what the Scatter brush paints with, and what "Mix models" of the Place tool draws from' },
+      keyText('Click: place · Mod+click: add one · Shift+click: a range · ★: favourite')));
 
   if (typeof IntersectionObserver === 'function') {
     observer = new IntersectionObserver((list) => {
@@ -276,8 +276,10 @@ export default function mount(el, ctx) {
     showStars();
     fill(favChips, favSection, prefs.favourites);
   }
-  // A model that is armed becomes "recent". One that is in the row already keeps its place: the row must not
-  // reshuffle under the cursor that just clicked it.
+  // A model that is armed on purpose becomes "recent": the tile that was clicked (not the range a Shift+click swept
+  // up between two tiles - one such click would push every model the user did work with out of the row), or the one
+  // model the eyedropper took. One that is in the row already keeps its place: the row must not reshuffle under the
+  // cursor that just clicked it.
   function noteRecent(ids) {
     const fresh = ids.filter((id) => known.has(id) && !prefs.recent.includes(id));
     if (!fresh.length) return;
@@ -302,20 +304,40 @@ export default function mount(el, ctx) {
     return list.slice(Math.min(a, b), Math.max(a, b) + 1);
   }
 
+  let choosing = false;           // the models are being set by a click in this panel: nothing to scroll to
+
   function choose(id, ev) {
     const now = Array.isArray(ui.models) ? ui.models : [];
-    if (ev.shiftKey || mod(ev)) {
-      // several models: what the Scatter brush paints with. The tool is left alone.
-      let next;
-      if (ev.shiftKey && anchor && anchor !== id) next = [...new Set([...now, ...range(anchor, id)])];
-      else next = now.includes(id) ? now.filter((m) => m !== id) : [...now, id];
+    choosing = true;
+    try {
+      if (ev.shiftKey || mod(ev)) {
+        // several models: what the Scatter brush paints with. The tool is left alone.
+        let next;
+        if (ev.shiftKey && anchor && anchor !== id) next = [...new Set([...now, ...range(anchor, id)])];
+        else next = now.includes(id) ? now.filter((m) => m !== id) : [...now, id];
+        anchor = id;
+        ui.set('models', next);
+        if (next.includes(id)) noteRecent([id]);
+        return;
+      }
       anchor = id;
-      ui.set('models', next);
-      return;
+      ui.set('models', [id]);
+      noteRecent([id]);
+    } finally {
+      choosing = false;
     }
-    anchor = id;
-    ui.set('models', [id]);
     if (ui.tool !== 'scatter' && ui.tool !== 'place') enterPlace();
+  }
+
+  // A model armed from outside the palette - the eyedropper of the Place tool, a script - is brought into view, inside
+  // the list only: the tile is what tells the user which model the tool now holds.
+  function reveal(id) {
+    const tile = tiles.get(id);
+    if (!tile || tile.hidden || models.hidden) return;
+    const box = scroll.getBoundingClientRect(), r = tile.getBoundingClientRect();
+    if (!r.height || !box.height) return;      // filtered out by the search, or the panel is not laid out
+    if (r.top < box.top) scroll.scrollTop -= box.top - r.top + 8;
+    else if (r.bottom > box.bottom) scroll.scrollTop += r.bottom - box.bottom + 8;
   }
 
   // ---------------------------------------------------------------- search
@@ -543,7 +565,10 @@ export default function mount(el, ctx) {
 
   ui.on('models', (list) => {
     mark();
-    if (Array.isArray(list) && list.length) noteRecent(list);
+    if (Array.isArray(list) && list.length && !choosing) {
+      if (list.length === 1) noteRecent(list);      // the eyedropper; a list set by a script is nobody's choice
+      reveal(list[0]);
+    }
   });
   store.on('selection', drawSave);
   subscribe((what) => {

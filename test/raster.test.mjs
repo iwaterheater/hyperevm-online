@@ -10,7 +10,7 @@ import {
 } from '../src/map/format.js';
 import { createStore } from '../src/editor/store.js';
 import * as cmd from '../src/editor/commands.js';
-import { SOFT_CORE, boundsOf, capsule, disc, flood, inside, ribbon, softDisc } from '../src/editor/raster.js';
+import { SOFT_CORE, boundsOf, capsule, disc, flood, inside, ribbon, runs, softDisc } from '../src/editor/raster.js';
 
 // ---------------------------------------------------------------- helpers
 
@@ -303,6 +303,55 @@ test('inside: clipped at the border of the grid', () => {
   same(g, inside(g, poly), brute(g, (x, z) => inShape(poly, x, z)), 'a band wider than the grid');
   same(g, inside(g, { type: 'circle', x: 0, z: 0, r: 500 }), brute(g, () => true), 'a shape around everything');
   same(g, inside(g, { type: 'circle', x: 200, z: 0, r: 5 }), [], 'a shape off the grid');
+});
+
+test('runs: the rows of a shape as unbroken runs, not one vertex different from inShape', () => {
+  // a small generator with a fixed seed: the same polygons on every run
+  let seed = 20261006;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const g = grid(81, 2);                                 // vertices on even coordinates, -80 .. 80
+  const shapes = [];
+  for (let n = 0; n < 60; n++) {
+    const points = [], count = 3 + Math.floor(rnd() * 30);
+    // half of them on the grid of the vertices themselves: corners ON rows and columns, and edges that run along them
+    const snap = n % 2 === 0 ? (v) => Math.round(v / 2) * 2 : (v) => Math.round(v * 100) / 100;
+    for (let i = 0; i < count; i++) points.push([snap(rnd() * 200 - 100), snap(rnd() * 200 - 100)]);
+    shapes.push({ type: 'poly', points });
+  }
+  shapes.push({ type: 'circle', x: 3.3, z: -7.1, r: 41.7 }, { type: 'circle', x: 78, z: 78, r: 10 }, { type: 'circle', x: 0, z: 0, r: 0 });
+  for (const s of shapes) {
+    const got = [];
+    let last = -1;
+    runs(g, s, (iz, ix0, ix1) => {
+      assert.ok(Number.isInteger(iz) && ix0 <= ix1 && ix0 >= 0 && ix1 < g.size, 'a run on the grid');
+      const first = iz * g.size + ix0;
+      assert.ok(first > last + 1 || last < 0 || Math.floor(last / g.size) !== iz, 'rows north to south, runs west to east, never touching');
+      for (let ix = ix0; ix <= ix1; ix++) got.push(iz * g.size + ix);
+      last = iz * g.size + ix1;
+    });
+    assert.deepEqual(got, brute(g, (x, z) => inShape(s, x, z)), JSON.stringify(s).slice(0, 80));
+    same(g, inside(g, s), got, 'inside() is the same vertices');
+  }
+  // nothing is visited for what is no shape, or misses the grid
+  for (const bad of [null, { type: 'star' }, { type: 'circle', x: 0, z: 0, r: -4 }, { type: 'circle', x: NaN, z: 0, r: 4 },
+    { type: 'poly', points: [[0, 0], [1, 1]] }, { type: 'poly', points: [[0, 0], [1, 1], [2, 'x']] }, { type: 'circle', x: 500, z: 0, r: 5 }]) {
+    runs(g, bad, () => assert.fail(`visited for ${JSON.stringify(bad)}`));
+  }
+  runs(null, shapes[0], () => assert.fail('no ground'));
+});
+
+test('runs: a polygon costs its edges per row - 64 regions of 64 points over the largest grid are quick', () => {
+  const g = grid(513, 2);
+  const star = (k) => ({ type: 'poly', points: Array.from({ length: 64 }, (_, i) => {
+    const a = i / 64 * Math.PI * 2, r = (i % 2 ? 380 : 500) - k;
+    return [Math.round(Math.cos(a) * r * 100) / 100, Math.round(Math.sin(a) * r * 100) / 100];
+  }) });
+  const t0 = performance.now();
+  let n = 0;
+  for (let k = 0; k < 64; k++) runs(g, star(k), (iz, ix0, ix1) => { n += ix1 - ix0 + 1; });
+  const ms = performance.now() - t0;
+  assert.ok(n > 64 * 100000, 'they cover most of the grid');
+  assert.ok(ms < 1000, `took ${Math.round(ms)} ms (vertex by vertex this is about 1.1 thousand million edge tests)`);
 });
 
 // ---------------------------------------------------------------- boundsOf

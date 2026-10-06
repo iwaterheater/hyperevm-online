@@ -18,7 +18,7 @@ import {
 } from '../src/map/format.js';
 import { createStore, isEmptyChange } from '../src/editor/store.js';
 import * as cmd from '../src/editor/commands.js';
-import { FIELDS, GROUP_PATTERN, typesPatch } from '../src/editor/fields.js';
+import { FIELDS, GROUP_PATTERN, typesPatch, withEnd } from '../src/editor/fields.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LISTS = Object.values(COLLECTION);
@@ -1279,6 +1279,34 @@ test('every field of the schema is a field the commands can write', () => {
     store.undo();
   }
   assert.equal(text(map), before);
+});
+
+test('withEnd: one end of a level pair typed for several items - the other end of each stays its own', () => {
+  const pair = [5, 9];
+  assert.deepEqual(withEnd(pair, 0, 2), [2, 9]);
+  assert.deepEqual(withEnd(pair, 1, 12), [5, 12]);
+  assert.deepEqual(pair, [5, 9], 'the pair of the item is not changed');
+  assert.deepEqual(withEnd([5, 9], 0, 11), [11, 11], 'an end typed past the other takes it along');
+  assert.deepEqual(withEnd([5, 9], 1, 3), [3, 3]);
+  assert.deepEqual(withEnd(null, 1, 4), [4, 4], 'an item without a pair gets the value at both ends');
+  assert.deepEqual(withEnd(undefined, 0, 4), [4, 4]);
+
+  // what the Regions panel and the inspector build from it: 2 typed into the low end of two regions is ONE step that
+  // leaves the high ends 4 and 9 alone
+  const { store, map } = world();
+  const meadows = cmd.make('region', { name: 'Meadows', levels: [1, 4], shape: { type: 'circle', x: 0, z: 0, r: 40 } });
+  const wastes = cmd.make('region', { name: 'Wastes', levels: [5, 9], shape: { type: 'circle', x: 0, z: 0, r: 80 } });
+  const plain = cmd.make('region', { name: 'Plain', shape: { type: 'circle', x: 0, z: 0, r: 20 } });
+  store.exec(cmd.add('region', [wastes, meadows, plain]));
+  const items = [meadows, wastes];
+  store.exec(cmd.setEach(items, items.map((r) => ({ levels: withEnd(r.levels, 0, 2) }))));
+  assert.deepEqual([meadows.levels, wastes.levels, plain.levels], [[2, 4], [2, 9], null]);
+  store.exec(cmd.setEach(items, items.map((r) => ({ levels: withEnd(r.levels, 1, 3) }))));
+  assert.deepEqual([meadows.levels, wastes.levels], [[2, 3], [2, 3]]);
+  store.undo();
+  store.undo();
+  assert.deepEqual([meadows.levels, wastes.levels], [[1, 4], [5, 9]]);
+  assert.ok(map.regions.includes(plain));
 });
 
 test('typesPatch: the boss respawn rule', () => {

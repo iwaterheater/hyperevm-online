@@ -16,22 +16,29 @@ import * as THREE from 'three';
 import { GROUND_TYPES, cellIndex, groundX } from '../../map/format.js';
 import { colliderOf, modelInfo } from '../../map/catalog.js';
 import { h, row, button, checkField, numberField, rangeField } from '../ui/dom.js';
-import { chordLabel } from '../keymap.js';
+import { chordLabel, keyText } from '../keymap.js';
 import { snapPoint } from './common.js';
 import { SOFT_CORE, capsule, flood, inside, ribbon } from '../raster.js';
 
 const MODES = ['brush', 'road', 'fill'];
 const MODE_LABEL = { brush: 'Brush', road: 'Road', fill: 'Fill' };
 // what a mode does, as the tooltip of its button; and the few words that fit on the strip
+// (keys are named through keyText: one key has one name on the whole screen)
 const MODE_HELP = {
-  brush: 'Drag to paint. Shift+click paints a straight stroke from the end of the last one. Alt+click picks the ground type under the cursor.',
-  road: 'Click the points of the road, then press Enter or double-click to paint it. Backspace removes the last point, Esc drops them all.',
-  fill: 'Click to fill the connected area of one ground type, never beyond the radius of the island. Alt+click picks the ground type under the cursor.',
+  brush: keyText('Drag to paint. Shift+click paints a straight stroke from the end of the last one. Alt+click picks the ground type under the cursor.'),
+  road: keyText('Click the points of the road, then press Enter or double-click to paint it. Backspace removes the last point, Esc drops them all.'),
+  fill: keyText('Click to fill the connected area of one ground type, never beyond the radius of the island. Alt+click picks the ground type under the cursor.'),
+};
+// ... and the one line the status bar holds while the tool rests
+const MODE_REST = {
+  brush: keyText('drag to paint · Shift+click: a straight stroke from the last · Alt+click: pick the type'),
+  road: keyText('click the points, Enter or double-click paints it · Backspace: one point back · Esc: drop them'),
+  fill: keyText('click fills the connected area of one ground type · Alt+click: pick the type'),
 };
 const MODE_HINT = {
-  brush: 'Shift+click: straight stroke · Alt+click: pick type',
-  road: 'Click: add a point · Enter / double-click: paint · Backspace: one back',
-  fill: 'Click: fill the connected area · Alt+click: pick type',
+  brush: keyText('Drag: paint · Shift+click: straight stroke · Alt+click: pick type'),
+  road: keyText('Click: add a point · Enter / double-click: paint · Backspace: one back'),
+  fill: keyText('Click: fill the connected area · Alt+click: pick type'),
 };
 const RADIUS = [1, 40], WIDTH = [2, 12];
 // A brush is never smaller than this share of a ground cell: half the diagonal of a cell, so that a dab always holds
@@ -115,14 +122,22 @@ export default function create(ctx) {
   const widthNow = (ground) => 2 * reach(clamp(Number(opts.width) || WIDTH[0], WIDTH) / 2, ground);
   const layerOpen = (layer) => { const l = ui.layers?.[layer]; return !l || (l.visible !== false && !l.locked); };
 
+  // The status line is what stays true while the tool is in this state: what a click would do (Fill), how far a road
+  // has got - and otherwise the instruction of the mode, so the bar always says what a click or a drag does here.
+  // What has just happened ("Filled 40 cells", "Road cancelled") is a note: the bar shows it and takes it away again.
+  const resting = () => `Terrain \u00b7 ${MODE_LABEL[mode]}: ${MODE_REST[mode]}`;
   function say(text) {
     said = text;
     ui.setStatus(text);
   }
   function hush() {
-    if (said !== null && ui.status === said) ui.setStatus('');
-    said = null;
+    if (active) say(resting());
+    else {
+      if (said !== null && ui.status === said) ui.setStatus('');
+      said = null;
+    }
   }
+  const note = (text) => ui.setNote(text);
   // The tool was switched to while its layer was open, and the layer was closed afterwards: it says so and does nothing.
   function refused() {
     if (layerOpen('ground')) return false;
@@ -150,7 +165,9 @@ export default function create(ctx) {
     for (const o of map.objects) if (on(o)) objects++;
     for (const list of [map.spawns, map.chests, map.npcs]) for (const item of list) if (on(item)) markers++;
     if (!objects && !markers) return;
-    const text = `${count(objects, 'object')} and ${count(markers, 'marker')} now stand on blocked ground`;
+    // (the Issues panel has one row for the objects - a click on it selects them all - and one per marker)
+    const what = [objects ? count(objects, 'object') : '', markers ? count(markers, 'marker') : ''].filter(Boolean).join(' and ');
+    const text = `${what} now stand${objects + markers === 1 ? 's' : ''} on blocked ground`;
     const open = ctx.actions?.has('validation.open') ? { label: 'Issues', run: () => ctx.actions.run('validation.open') } : null;
     ui.toast(open ? { text, action: open } : text, 'warn');
   }
@@ -243,25 +260,24 @@ export default function create(ctx) {
   function fillAt(hit) {
     if (busy()) return;
     const map = store.map, g = map.ground, type = typeNow();
-    if (hit.ix < 0) { say('Fill: the cursor is off the ground'); return; }
+    if (hit.ix < 0) { note('Fill: the cursor is off the ground'); return; }
     const index = hit.iz * g.size + hit.ix, area = floodAt(index);
-    told = index * GROUND_TYPES.length + type;      // what is said now stays until the cursor moves on to another vertex
-    if (!area.length) { say('Fill: outside the island - the shore is painted with the brush'); return; }
-    if (g.cells[index] === type) { say(`Fill: nothing to do - this area is ${shortName(type)} already`); return; }
+    if (!area.length) { note('Fill: outside the island - the shore is painted with the brush'); return; }
+    if (g.cells[index] === type) { note(`Fill: nothing to do - this area is ${shortName(type)} already`); return; }
     const from = shortName(g.cells[index]);
     const n = paintOnce(`Fill with ${shortName(type).toLowerCase()}`, area, type);
-    say(`Filled ${count(n, 'cell')}: ${from} to ${shortName(type)}`);
+    note(`Filled ${count(n, 'cell')}: ${from} to ${shortName(type)}`);
   }
 
   function fillRegions() {
     if (!store.map || refused() || busy()) return;
     const regions = store.selected('region'), g = store.map.ground, type = typeNow();
-    if (!regions.length) { say('Fill region: select a region first (the Regions panel, or its outline with the Select tool)'); return; }
+    if (!regions.length) { note('Fill region: select a region first (the Regions panel, or its outline with the Select tool)'); return; }
     const parts = regions.map((r) => inside(g, r.shape));
     const all = parts.length === 1 ? parts[0] : Int32Array.from(new Set(parts.flatMap((p) => [...p])));
     const n = paintOnce(regions.length === 1 ? 'Fill region' : `Fill ${regions.length} regions`, all, type);
     const what = regions.length === 1 ? `"${regions[0].name}"` : count(regions.length, 'region');
-    say(n ? `Filled ${what} with ${shortName(type)}: ${count(n, 'cell')}` : `${what}: nothing to paint, it is ${shortName(type)} already`);
+    note(n ? `Filled ${what} with ${shortName(type)}: ${count(n, 'cell')}` : `${what}: nothing to paint, it is ${shortName(type)} already`);
   }
 
   // The pickable objects whose collider comes within `margin` of the road's centre line.
@@ -286,7 +302,7 @@ export default function create(ctx) {
 
   function addRoadPoint(ev, hit) {
     if (!hit.onGround) return;
-    if (hit.ix < 0) { say('Road: this point is off the ground'); return; }
+    if (hit.ix < 0) { note('Road: this point is off the ground'); return; }
     const p = snapPoint(ctx, hit.x, hit.z, ev), prev = road[road.length - 1];
     if (prev && Math.hypot(p.x - prev[0], p.z - prev[1]) < POINT_GAP) return;
     road.push([p.x, p.z]);
@@ -295,6 +311,7 @@ export default function create(ctx) {
 
   // The points of the road changed (or what the road will do to the scenery): strip, status and preview follow.
   function roadChanged() {
+    ui.setNote('');          // what was said about the road before this point is over
     syncStrip(true);
     if (road.length) {
       // with "Clear scenery" on, the status says before the commit how much stands in the way
@@ -316,7 +333,8 @@ export default function create(ctx) {
     refresh();
     const kept = opts.clearScenery && !layerOpen('objects') ? ` (objects layer ${ui.layers.objects.visible ? 'locked' : 'hidden'}: scenery kept)` : '';
     const cleared = doomed.length ? `, ${count(doomed.length, 'object')} cleared` : kept;
-    say(n || doomed.length ? `Road painted (${shortName(type)}): ${count(n, 'cell')}${cleared}` : `Road: nothing to paint, it is ${shortName(type)} already`);
+    hush();
+    note(n || doomed.length ? `Road painted (${shortName(type)}): ${count(n, 'cell')}${cleared}` : `Road: nothing to paint, it is ${shortName(type)} already`);
     return true;
   }
 
@@ -325,16 +343,17 @@ export default function create(ctx) {
     road = [];
     syncStrip(true);
     refresh();
-    say('Road cancelled');
+    hush();
+    note('Road cancelled');
     return true;
   }
 
   function pickType(hit) {
     const g = store.map.ground;
-    if (hit.ix < 0) { say('The cursor is off the ground'); return; }
+    if (hit.ix < 0) { note('The cursor is off the ground'); return; }
     const type = g.cells[hit.iz * g.size + hit.ix];
     ui.set('groundType', type);
-    say(`Ground type: ${GROUND_TYPES[type].name}`);
+    note(`Ground type: ${GROUND_TYPES[type].name}`);
   }
 
   // ---------------------------------------------------------------- preview: the cells a gesture would paint
@@ -600,12 +619,15 @@ export default function create(ctx) {
   store.on('change', (change) => {
     if (!change.ground && !change.props.length) return;
     filled = null;          // the ground is not what the last flood saw
-    if (change.origin !== 'do') told = -1;   // undone or redone under the cursor: the hover text is due again
+    told = -1;              // painted, undone or redone under the cursor: what a click would do there is due again
     if (change.props.includes('ground') || change.props.includes('radius')) { lastEnd = null; previewKey = null; }
   });
 
   return {
     id: 'paint', label: 'Terrain', icon: '▦', layer: 'ground', picks: [], hidden: false,
+    about: 'Paint the ground types: with a brush, as a road, or by filling an area',
+    get intro() { return resting(); },
+    // a road in progress takes Enter; Backspace, the brackets and the digits are in both tables
     get context() { return mode === 'road' && road.length ? 'path' : 'brush'; },
     get mode() { return mode; },
     setMode,
@@ -617,6 +639,7 @@ export default function create(ctx) {
       ctx.viewport.overlay.add(cells, line, dots);
       const c = ui.cursor;
       hover = c && c.onGround ? { x: c.x, z: c.z, ix: c.ix, iz: c.iz, px: c.x, pz: c.z, shift: false } : null;
+      hush();          // the instruction of the mode
       refresh();
     },
 
@@ -636,7 +659,7 @@ export default function create(ctx) {
       ctx.viewport.readout(null);
       release();
       strip = widgets = null;
-      hush();
+      hush();          // (no longer active: this clears what the tool wrote)
     },
 
     pointerDown(ev, hit) {
@@ -677,7 +700,10 @@ export default function create(ctx) {
         return cancelRoad();
       }
       if (action === 'path.back') {
-        if (!road.length) return false;
+        // In Road mode Backspace is the key of the points, with or without one left: a press too many must not fall
+        // through to "delete the selection" (whatever was selected before the road was begun).
+        if (mode !== 'road') return false;
+        if (!road.length) { note('Road: no point to take back'); return true; }
         road.pop();
         roadChanged();
         return true;
@@ -687,10 +713,10 @@ export default function create(ctx) {
         const dir = action === 'brush.larger' ? 1 : -1;
         if (mode === 'brush') {
           stepRadius(dir);
-          say(`Brush radius ${opts.radius}`);
+          note(`Brush radius ${opts.radius}`);
         } else if (mode === 'road') {
           opts.width = clamp((Number(opts.width) || WIDTH[0]) + dir, WIDTH);
-          say(`Road width ${opts.width}`);
+          note(`Road width ${opts.width}`);
         } else return false;
         syncStrip(true);
         refresh();
@@ -699,7 +725,7 @@ export default function create(ctx) {
       if (action === 'brush.optDown' || action === 'brush.optUp') {
         if (mode !== 'brush') return false;
         opts.soft = action === 'brush.optDown';
-        say(opts.soft ? 'Soft edge' : 'Hard edge');
+        note(opts.soft ? 'Soft edge' : 'Hard edge');
         syncStrip(true);
         refresh();
         return true;
@@ -708,7 +734,7 @@ export default function create(ctx) {
         const n = Number(action.slice('brush.type.'.length));
         if (!Number.isInteger(n) || n < 1 || n > GROUND_TYPES.length) return false;
         ui.set('groundType', n - 1);
-        say(`Ground type: ${GROUND_TYPES[n - 1].name}`);
+        note(`Ground type: ${GROUND_TYPES[n - 1].name}`);
         return true;
       }
       return false;

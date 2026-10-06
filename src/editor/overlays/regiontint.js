@@ -8,12 +8,13 @@
 // - the minimap draws the same canvas over its own picture (ctx.overlays.regiontint.canvas, with `version` to know
 //   when it changed).
 // It is recomputed 150 ms after a region change - while a region is dragged that is a few times a second, each time a
-// pass over the grid with regionIndex - and at once when another map is loaded. While the tint is switched off nobody
+// pass over the regions, row by row - and at once when another map is loaded. While the tint is switched off nobody
 // looks at it, so the pass waits: for the switch, or for whoever reads `canvas` or `version` after those 150 ms.
 // The switch is ui.overlays.regiontint; the eye of the Regions layer hides the tint with everything else of the
 // regions (the minimap follows the same two).
 import * as THREE from 'three';
-import { groundX, regionColor, regionIndex } from '../../map/format.js';
+import { regionColor } from '../../map/format.js';
+import { runs } from '../raster.js';
 
 const ALPHA = 0.35;
 const DELAY = 150;           // ms from a region change to the recompute
@@ -36,16 +37,21 @@ export function touchesTint(change) {
 }
 
 // Fills `data` (RGBA, size x size) for the map. -> the number of distinct regions that win somewhere (the fallback counts)
+// The winner of a vertex is the LAST region of the file that contains it (regionAt): so the regions are laid over the
+// fallback in file order, each one row by row (raster.js runs - what is inside is inShape's answer to the letter, at
+// the cost of a region's edges per row, not per vertex: the pass runs a few times a second while a region is dragged).
 export function paintTint(map, data) {
-  const ground = map.ground, size = ground.size, index = regionIndex(map), colors = new Map(), a = Math.round(ALPHA * 255);
-  for (let iz = 0, o = 0; iz < size; iz++) {
-    const z = groundX(ground, iz);
-    for (let ix = 0; ix < size; ix++, o += 4) {
-      const region = index.regionAt(groundX(ground, ix), z);
-      let c = colors.get(region);
-      if (!c) colors.set(region, c = rgbOf(regionColor(map, region)));
-      data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = a;
-    }
+  const ground = map.ground, size = ground.size, a = Math.round(ALPHA * 255);
+  const owner = new Int32Array(size * size).fill(-1);       // the index of the winning region; -1: the fallback
+  map.regions.forEach((region, r) => {
+    runs(ground, region.shape, (iz, ix0, ix1) => owner.fill(r, iz * size + ix0, iz * size + ix1 + 1));
+  });
+  const colors = new Map();
+  for (let k = 0, o = 0; k < owner.length; k++, o += 4) {
+    const r = owner[k];
+    let c = colors.get(r);
+    if (!c) colors.set(r, c = rgbOf(regionColor(map, r < 0 ? map.fallback : map.regions[r])));
+    data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = a;
   }
   return colors.size;
 }

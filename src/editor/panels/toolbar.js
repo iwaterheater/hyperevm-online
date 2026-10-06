@@ -25,6 +25,7 @@ export default function mount(el, ctx) {
   const tools = TOOLS.filter((row) => !row.hidden).map((row) => {
     const tool = ctx.tools?.[row.id];
     const label = String(tool?.label ?? row.label), layer = tool?.layer ?? row.layer, hint = hintFor(`tool.${row.id}`);
+    const about = typeof tool?.about === 'string' ? tool.about : '';      // one line on what the tool is for
     const node = button([
       h('span', { class: 'tool-icon' }, String(tool?.icon ?? label[0])),
       h('span', { class: 'tool-label' }, label),
@@ -36,7 +37,7 @@ export default function mount(el, ctx) {
     });
     node.classList.add('tool');
     node.dataset.tool = row.id;
-    return { id: row.id, label, layer, hint, node };
+    return { id: row.id, label, layer, hint, about, node };
   });
 
   const syncTools = () => {
@@ -49,7 +50,7 @@ export default function mount(el, ctx) {
       t.node.setAttribute('aria-pressed', String(active));
       t.node.title = off
         ? `${t.label}: the ${t.layer} layer is ${state.visible ? 'locked' : 'hidden'}`
-        : t.hint ? `${t.label} (${t.hint})` : t.label;
+        : `${t.hint ? `${t.label} (${t.hint})` : t.label}${t.about ? `\n${t.about}` : ''}`;
     }
   };
 

@@ -4,6 +4,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { MOB_TYPES, MOB_KEYS, AGGRO_R, BOSS_AGGRO_R, WANDER_R } from '../shared.js';
 import { LAYER_OF, NPC_RADIUS, inShape, shapeBounds, shapeCentre, regionLabel, regionColor, hasBoss } from '../map/format.js';
+import { mixText } from './spawnstats.js';
 
 // Markers: everything of a map that is not scenery - monster spawns, chests, NPCs, regions and the start point - as
 // the editor shows it, and the answer to "what is under the cursor" for those five kinds.
@@ -46,6 +47,7 @@ const OWNER_TOOL = { spawn: 'spawn', start: 'start', region: 'region' };
 const NONE = [];
 
 const M = new THREE.Matrix4(), V = new THREE.Vector3(), V2 = new THREE.Vector3(), C = new THREE.Color(), WHITE = new THREE.Color(1, 1, 1);
+const RAY_FROM = new THREE.Vector3(), RAY_DIR = new THREE.Vector3(), BODY = new THREE.Box3();   // the cursor ray of a pick
 const noRaycast = () => {};     // markers are picked analytically: a stray scene raycast must not find their meshes
 
 // ---------------------------------------------------------------- what a marker says (pure)
@@ -80,11 +82,8 @@ const capital = (s) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 // The text next to a marker (and in the hover tip): "4x Skeleton Minion - Lv 1-2 - 14 s", "12 g - 150 s", "Blacksmith",
 // "Hypercat Town", "Start" - with the real multiplication sign, middle dots and en dash.
 export function markerLabel(kind, item) {
-  if (kind === 'spawn') {
-    const keys = MOB_KEYS.filter((key) => Object.hasOwn(item.types, key));
-    const who = keys.length === 1 ? (MOB_TYPES[keys[0]]?.name ?? keys[0]) : keys.map((key) => `${key} ${item.types[key]}`).join(' : ');
-    return `${item.count}× ${who} · ${levels(item.lvl)} · ${item.respawn} s`;
-  }
+  // one type: its name; a mix: the short names with their weights ('Minion 3 : Mage 1') - the words of every panel
+  if (kind === 'spawn') return `${item.count}× ${mixText(item.types)} · ${levels(item.lvl)} · ${item.respawn} s`;
   if (kind === 'chest') return `${item.gold} g · ${item.respawn} s`;
   if (kind === 'npc') return capital(item.kind);
   if (kind === 'region') return regionLabel(item);
@@ -265,16 +264,36 @@ const distSeg = (px, py, ax, ay, bx, by) => {
   return Math.hypot(px - ax - dx * t, py - ay - dy * t);
 };
 
+// How far along the ray (from, dir - of length 1) it enters the box; 0 from inside; -1 when it misses.
+function rayBox(from, dir, box) {
+  let t0 = 0, t1 = Infinity;
+  for (const axis of ['x', 'y', 'z']) {
+    const o = from[axis], d = dir[axis], min = box.min[axis], max = box.max[axis];
+    if (Math.abs(d) < 1e-12) {
+      if (o < min || o > max) return -1;
+      continue;
+    }
+    const a = (min - o) / d, b = (max - o) / d;
+    t0 = Math.max(t0, Math.min(a, b));
+    t1 = Math.min(t1, Math.max(a, b));
+    if (t0 > t1) return -1;
+  }
+  return t0;
+}
+
 // World -> pixels of the viewport canvas (origin at its top left corner), for one camera at one size.
 class Screen {
   constructor() {
     this.m = new THREE.Matrix4();
+    this.back = new THREE.Matrix4();      // pixels -> world, made when a ray is first asked for
+    this.backFor = null;
     this.w = 1; this.h = 1; this.k = 1; this.ortho = false;
     this.x = 0; this.y = 0; this.d = 0;   // the last point: pixels and depth
   }
 
   set(camera, w, h) {
     this.m.copy(camera.matrixWorld).invert().premultiply(camera.projectionMatrix);
+    this.backFor = null;
     this.w = w; this.h = h;
     this.k = camera.projectionMatrix.elements[5];
     this.ortho = !!camera.isOrthographicCamera;
@@ -345,6 +364,18 @@ class Screen {
     const sum = a * a + b * b + c * c + d * d, det = a * d - b * c;
     const least = (sum - Math.sqrt(Math.max(0, sum * sum - 4 * det * det))) / 2;
     return least > 1e-6 ? 2 * px / Math.sqrt(least) : Infinity;
+  }
+
+  // The ray through the pixel (cx, cy): `from` on the near plane, `dir` of length 1. -> false when there is none.
+  ray(cx, cy, from, dir) {
+    if (this.backFor !== this.m) { this.back.copy(this.m).invert(); this.backFor = this.m; }
+    const nx = cx / this.w * 2 - 1, ny = 1 - cy / this.h * 2;
+    from.set(nx, ny, -1).applyMatrix4(this.back);
+    dir.set(nx, ny, 1).applyMatrix4(this.back).sub(from);
+    const len = dir.length();
+    if (!(len > 0) || !Number.isFinite(len)) return false;
+    dir.multiplyScalar(1 / len);
+    return true;
   }
 
   // Pixels from (cx, cy) to the pin standing at (x, z): the segment from its tip on the ground to its top.
@@ -464,37 +495,38 @@ export class Markers {
   // ---------------------------------------------------------------- picking
 
   // What a click along the ray would pick among the markers - in the order: a handle of a selected marker (8 px), a pin
-  // (10 px, nearest first), an outline or a label (6 px), a disc or an interior under the ground point - or null.
-  // Scenery belongs between the pins and the outlines; `priority` in the result tells the caller on which side it is.
+  // (10 px, nearest first), the body of a chest, an outline or a label (6 px), a disc or an interior under the ground
+  // point - or null.
+  // Scenery belongs between the pins and the outlines; `priority` in the result tells the caller on which side it is:
+  // 2 a handle, 3 a pin, 4 the body of a chest (part 'body': it stands among the scenery, and of the two the one
+  // nearer to the eye is the pick - `distance` says how far the ray went), 5 everything else.
   //   kinds      the kinds that may be picked
   //   interiors  'none' | 'selected' (the disc / interior of an already selected spawn / region, smallest first)
   //              | 'all' (every spawn disc, smallest first; a region interior is never a pick then)
   //   handles    the handle types to report: 'radius' | 'vertex' | 'edge'
   // Only what is drawn, on a visible unlocked layer and not flagged, is ever picked (ui.isPickable).
   pick(raycaster, ground, { kinds = MARKER_KINDS, interiors = 'none', handles = ['radius'] } = {}) {
-    this._flush();
     const camera = raycaster.camera ?? this.ctx.viewport?.camera;
-    if (!camera || !this._measure()) return null;
+    if (!camera || !this._sync(camera) || !this._measure()) return null;
     const { origin, direction } = raycaster.ray, sc = this.screen.set(camera, this.size.w, this.size.h);
     if (!sc.at(origin.x + direction.x, origin.y + direction.y, origin.z + direction.z)) return null;   // where the cursor is
     const found = this._scan(sc.x, sc.y, origin, ground, kinds, interiors, handles);
-    return found.handle ?? found.pins[0] ?? found.edges[0] ?? found.areas[0] ?? null;
+    return found.handle ?? found.pins[0] ?? found.bodies[0] ?? found.edges[0] ?? found.areas[0] ?? null;
   }
 
-  // Every pickable marker under the cursor (client pixels), in pick order and each one once: pins, then outlines and
-  // labels, then the spawn discs over the ground point, smallest first. Region interiors are left out: a region that
+  // Every pickable marker under the cursor (client pixels), in pick order and each one once: pins, chests hit in the
+  // body, then outlines and labels, then the spawn discs over the ground point, smallest first. Region interiors are left out: a region that
   // covers the island would sit in every stack.
   stack(ground, sx, sy, { kinds = MARKER_KINDS, interiors = 'all' } = {}) {
-    this._flush();
     const camera = this.ctx.viewport?.camera;
-    if (!camera || !this._measure()) return [];
+    if (!camera || !this._sync(camera) || !this._measure()) return [];
     camera.updateMatrixWorld();
     const rect = this._dom()?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
     const e = camera.matrixWorld.elements, eye = { x: e[12], y: e[13], z: e[14] };
     this.screen.set(camera, this.size.w, this.size.h);
     const found = this._scan(sx - rect.left, sy - rect.top, eye, ground, kinds, interiors, NONE);
     const seen = new Set(), out = [];
-    for (const f of [...found.pins, ...found.edges, ...found.areas]) {
+    for (const f of [...found.pins, ...found.bodies, ...found.edges, ...found.areas]) {
       if (seen.has(f.item)) continue;
       seen.add(f.item);
       out.push({ item: f.item, kind: f.kind, priority: f.priority, part: f.part });
@@ -505,7 +537,7 @@ export class Markers {
   // The work behind pick() and stack(): every candidate of every stage, each stage in its own order.
   // (cx, cy) is the cursor in canvas pixels; this.screen is set for the camera.
   _scan(cx, cy, eye, ground, kinds, interiors, handles) {
-    const out = { handle: null, pins: [], edges: [], areas: [] };
+    const out = { handle: null, pins: [], bodies: [], edges: [], areas: [] };
     const { store, ui } = this.ctx, map = store.map;
     if (!map || !this._shown()) return out;
     const sc = this.screen, sel = store.selection;
@@ -562,6 +594,17 @@ export class Markers {
     if (want('chest')) for (const item of map.chests) pin(item, 'chest');
     if (want('spawn')) for (const item of map.spawns) pin(item, 'spawn');
     out.pins.sort((a, b) => a.px - b.px);
+
+    // -- the body of a chest. A chest is the one marker that is drawn as a model, and from close by that model is far
+    // larger than the 10 px around its pin: a click on its lid is a click on the chest - not on the ground behind it,
+    // where the Chest tool would put a second chest into the first.
+    if (want('chest') && map.chests.length && sc.ray(cx, cy, RAY_FROM, RAY_DIR)) {
+      for (const item of map.chests) {
+        const t = rayBox(RAY_FROM, RAY_DIR, this.boundsOf(item, BODY));
+        if (t >= 0 && ok('chest', item)) out.bodies.push(hit(item, 'chest', 4, 'body', 0, t + Math.hypot(RAY_FROM.x - eye.x, RAY_FROM.y - eye.y, RAY_FROM.z - eye.z)));
+      }
+      out.bodies.sort((a, b) => a.distance - b.distance);
+    }
 
     // -- outlines and labels
     const there = ground ? far(ground.x, ground.z) : 0;
@@ -676,9 +719,17 @@ export class Markers {
   // Once per rendered frame: brings the instances up to date with the map, keeps pins, arrows and knobs at their size
   // on screen, and redraws the labels - the last two only when the camera, the canvas or the data changed.
   update(dt, camera = this.ctx.viewport?.camera) {
-    if (this.disposed) return;
+    if (camera) this._sync(camera);
+    else if (!this.disposed) this._flush();
+  }
+
+  // Everything a frame AND a pick depend on, brought up to date for `camera`: the instances, what is sized by the
+  // camera, and the label rectangles. A pick may come before the frame that follows a camera move (a click right after
+  // a jump, a script, a tab whose frames are throttled): the labels of the frame before are then somewhere else on
+  // screen, and a click on bare ground would pick whatever label used to be there. -> false when disposed.
+  _sync(camera) {
+    if (this.disposed) return false;
     this._flush();
-    if (!camera) return;
     const shown = this._shown(), moved = this._moved(camera) || shown !== this.shown;
     this.shown = shown;
     if (moved || this.placeDirty) {
@@ -693,6 +744,7 @@ export class Markers {
       this.labelsDirty = false;
       this._drawLabels();
     }
+    return true;
   }
 
   dispose() {

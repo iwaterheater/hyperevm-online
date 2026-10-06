@@ -7,8 +7,12 @@ import * as THREE from 'three';
 // ratio 1 with ACES tone mapping, that lives only while there is something to draw: 10 s after the queue ran empty
 // it is disposed and its context given back, and it is made again on demand.
 //
-// The scene holds one mesh that borrows the geometry and the material(s) of a model from view.loadModel - shared,
-// read-only, never disposed here (and the pack texture they keep is never closed).
+// The scene holds one mesh that shows a model of view.loadModel - through STAND-INS this module owns: a geometry that
+// shares the model's attributes, a clone of each material, a clone of each texture (it shares the image). A renderer
+// hangs a 'dispose' listener on every geometry, material and texture it draws and never takes it off again, so
+// drawing the view's own objects would leave one listener - holding a dead renderer - on each of them every time
+// this renderer is given back and made anew. The stand-ins are disposed with the renderer, which is what removes the
+// listeners and frees what was uploaded for them; the view's objects are never touched, never disposed here.
 // The camera is orthographic, centred on the centre of the model's bounds, half as wide as the diagonal of those
 // bounds (x 1.05) and looks along (1, 0.8, 1). It is NOT fitted to Model.radius: that is the footprint radius, and most
 // models are far taller than wide (a pillar is 1.0 x 4.4 x 1.0).
@@ -32,6 +36,7 @@ const SPIN = 0.7;              // radians per second of the hover preview
 const FIT = 1.05;              // air around the model
 const DIR = new THREE.Vector3(1, 0.8, 1).normalize();
 const CENTRE = new THREE.Vector3();
+const EMPTY = new THREE.BufferGeometry(), BLANK = new THREE.MeshBasicMaterial();   // what the mesh holds between two renderers: never drawn
 
 export function createThumbs(ctx) {
   const urls = new Map();        // id -> object URL, for the session
@@ -54,11 +59,57 @@ export function createThumbs(ctx) {
   scene.add(pivot);
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 10);
 
+  // ---- the stand-ins of the current renderer: the view's object -> ours
+  let own = { geometries: new Map(), materials: new Map(), textures: new Map() };
+  function ownGeometry(source) {
+    let g = own.geometries.get(source);
+    if (!g) {
+      g = new THREE.BufferGeometry();
+      g.setIndex(source.index);
+      for (const name of Object.keys(source.attributes)) g.setAttribute(name, source.attributes[name]);   // shared, not copied
+      for (const group of source.groups) g.addGroup(group.start, group.count, group.materialIndex);
+      g.setDrawRange(source.drawRange.start, source.drawRange.count);
+      own.geometries.set(source, g);
+    }
+    return g;
+  }
+  function ownTexture(source) {
+    let t = own.textures.get(source);
+    if (!t) {
+      t = source.clone();          // the same image, another texture object
+      t.needsUpdate = true;        // a clone starts at version 0, which is "nothing to upload"
+      own.textures.set(source, t);
+    }
+    return t;
+  }
+  function ownMaterial(source) {
+    if (Array.isArray(source)) return source.map(ownMaterial);
+    let m = own.materials.get(source);
+    if (!m) {
+      m = source.clone();
+      for (const key of Object.keys(m)) if (m[key]?.isTexture) m[key] = ownTexture(m[key]);
+      own.materials.set(source, m);
+    }
+    return m;
+  }
+  // Disposing them while their renderer still lives runs its listeners: they free what was uploaded and take
+  // themselves off.
+  function releaseOwn() {
+    const old = own;
+    own = { geometries: new Map(), materials: new Map(), textures: new Map() };
+    mesh.geometry = EMPTY;
+    mesh.material = BLANK;
+    for (const list of [old.geometries, old.materials, old.textures]) {
+      for (const item of list.values()) { try { item.dispose(); } catch { /* the context is gone already */ } }
+    }
+  }
+
   function drop() {
     const r = renderer;
     renderer = null;
     size = 0;
     if (!r) return;
+    releaseOwn();                 // first: the renderer must still be there to clean up after them
     try { r.dispose(); r.forceContextLoss(); } catch { /* the context is gone already */ }
   }
 
@@ -74,9 +125,10 @@ export function createThumbs(ctx) {
       renderer.setPixelRatio(1);
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.setClearColor(0x000000, 0);
-      const own = renderer;
-      // a context the browser took away (too many of them, a GPU reset): forget the renderer, the next job makes a new one
-      own.domElement.addEventListener('webglcontextlost', () => { if (renderer === own) { renderer = null; size = 0; } });
+      // a context the browser took away (too many of them, a GPU reset): forget the renderer and what was made for
+      // it, the next job makes both anew
+      const mine = renderer;
+      mine.domElement.addEventListener('webglcontextlost', () => { if (renderer === mine) { renderer = null; size = 0; releaseOwn(); } });
     }
     if (size !== px) {
       renderer.setSize(px, px, false);
@@ -88,8 +140,8 @@ export function createThumbs(ctx) {
   // Puts `model` into the scene and the camera around it.
   function aim(model, angle) {
     const c = model.bounds.getCenter(CENTRE), half = Math.max(model.size.length() / 2 * FIT, 1e-3);
-    mesh.geometry = model.geometry;
-    mesh.material = model.material;
+    mesh.geometry = ownGeometry(model.geometry);
+    mesh.material = ownMaterial(model.material);
     mesh.position.set(-c.x, -c.y, -c.z);
     pivot.rotation.y = angle;
     camera.left = camera.bottom = -half;

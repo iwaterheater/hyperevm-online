@@ -1,5 +1,5 @@
 import { h, button, selectField, textField, rafThrottle, leaveField } from '../ui/dom.js';
-import { hintFor } from '../keymap.js';
+import { hintFor, keyText } from '../keymap.js';
 import { GROUP_PATTERN } from '../fields.js';
 import { COLLECTION, LAYERS, LAYER_OF, spawnCount } from '../../map/format.js';
 
@@ -85,7 +85,7 @@ export default function mount(el, ctx) {
       row.node.classList.toggle('locked', !!state.locked);
       row.eye.classList.toggle('off', !state.visible);
       row.eye.setAttribute('aria-pressed', String(!!state.visible));
-      row.eye.title = `${state.visible ? 'Hide' : 'Show'} ${name} (Alt+click: this layer alone)`;
+      row.eye.title = `${state.visible ? 'Hide' : 'Show'} ${name} (${keyText('Alt+click: this layer alone')})`;
       if (!NO_LOCK.has(row.layer)) {
         row.lock.classList.toggle('off', !state.locked);
         row.lock.setAttribute('aria-pressed', String(!!state.locked));
@@ -127,7 +127,7 @@ export default function mount(el, ctx) {
       return;
     }
     store.select(items, { add });
-    ui.setStatus(`Selected ${plural(items.length, 'object')} of ${id}`);
+    ui.setNote(`Selected ${plural(items.length, 'object')} of ${id}`);
   }
 
   // All objects of one model get another: one undo step. A hidden model is replaced like a shown one - this panel is
@@ -179,7 +179,7 @@ export default function mount(el, ctx) {
       if (replacing === id) swap.classList.add('active');
       const row = h('div', {
         class: ['ui-item', 'model', off && 'hidden', n === 0 && 'unused'], dataset: { model: id },
-        title: n ? `${id}\nClick: select all ${int(n)} · Shift+click: add them to the selection` : `${id}\nNo object uses this model any more`,
+        title: n ? `${id}\nClick: select all ${int(n)} · ${keyText('Shift+click: add them to the selection')}` : `${id}\nNo object uses this model any more`,
       }, eye, h('span', { class: 'name' }, h('span', { class: 'pack' }, id.slice(0, cut + 1)), id.slice(cut + 1)), h('span', { class: 'count' }, int(n)), swap);
       row.addEventListener('click', (ev) => { if (n) selectModel(id, ev.shiftKey); });
       nodes.push(row);
@@ -220,7 +220,7 @@ export default function mount(el, ctx) {
     const all = membersOf(g), items = all.filter((item) => ui.isPickable(store.kindOf(item), item));
     if (!items.length) { ui.toast('Every member of this group is on a hidden or locked layer', 'warn'); return; }
     store.select(items, { add });
-    ui.setStatus(items.length === all.length ? `Selected the group ${g}: ${plural(items.length, 'item')}`
+    ui.setNote(items.length === all.length ? `Selected the group ${g}: ${plural(items.length, 'item')}`
       : `Selected ${int(items.length)} of ${int(all.length)} items of the group ${g}: the rest is hidden or locked`);
   }
 
@@ -233,7 +233,7 @@ export default function mount(el, ctx) {
       name.input.title = 'Group id: letters, digits, _ . - (at most 32). Rename it here; an empty name ungroups its members.';
       name.input.setAttribute('aria-label', `Group ${g}`);
       const parts = GROUPED.filter((kind) => c[kind]).map((kind) => plural(c[kind], NOUN[kind]));
-      const pick = button('Select', (ev) => selectGroup(g, ev.shiftKey), { title: 'Select the members of this group (Shift+click: add them)' });
+      const pick = button('Select', (ev) => selectGroup(g, ev.shiftKey), { title: keyText('Select the members of this group (Shift+click: add them)') });
       const go = button('Focus', () => { const items = membersOf(g); if (items.length) ctx.viewport.focus(items); }, { title: 'Frame this group in the viewport' });
       pick.classList.add('flat');
       go.classList.add('flat');

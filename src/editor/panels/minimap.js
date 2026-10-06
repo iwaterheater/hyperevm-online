@@ -1,5 +1,5 @@
 import { h, button, rafThrottle } from '../ui/dom.js';
-import { hintFor } from '../keymap.js';
+import { hintFor, chordLabel, keyText } from '../keymap.js';
 import { GROUND_TYPES, groundHalf } from '../../map/format.js';
 import { modelInfo } from '../../map/catalog.js';
 import { MOB_KEYS, MOB_TYPES } from '../../shared.js';
@@ -324,12 +324,12 @@ export default function mount(el, ctx) {
   // ---------------------------------------------------------------- bookmarks
 
   function syncMarks() {
-    const vp = ctx.viewport, alt = /mac/i.test(navigator.platform || '') ? 'Option' : 'Alt';
+    const vp = ctx.viewport, store1 = keyText('Shift+click stores the current view');
     marks.forEach((node, n) => {
       const i = n + 1, has = !!vp.hasBookmark?.(i);
       node.classList.toggle('set', has);
-      node.title = has ? `Bookmark ${i}: click to go there (${alt}+${i}) · Shift+click stores the current view`
-        : `Bookmark ${i} is empty: Shift+click stores the current view (${alt}+Shift+${i})`;
+      node.title = has ? `Bookmark ${i}: click to go there (${chordLabel(`Alt+Digit${i}`)}) · ${store1}`
+        : `Bookmark ${i} is empty: ${store1} (${chordLabel(`Alt+Shift+Digit${i}`)})`;
     });
     top.classList.toggle('active', !!vp.overhead);
   }

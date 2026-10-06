@@ -165,22 +165,69 @@ export function flood(ground, index, { radius } = {}) {
   return out;
 }
 
+// A region shape the rasteriser can walk: a circle with finite numbers and a radius of 0 or more, or a polygon of at
+// least three finite points.
+function walkable(shape) {
+  if (!shape) return false;
+  if (shape.type === 'circle') return finite(shape.x) && finite(shape.z) && shape.r >= 0 && finite(shape.r);
+  return shape.type === 'poly' && Array.isArray(shape.points) && shape.points.length >= 3
+    && shape.points.every((p) => Array.isArray(p) && finite(p[0]) && finite(p[1]));
+}
+
+// The vertices inside a region shape, row by row: visit(iz, ix0, ix1) for every unbroken run of them (ix0 .. ix1, both
+// inside), rows from north to south and the runs of a row from west to east. Nothing is visited for a shape that is
+// not one, or that misses the grid.
+// What is inside is decided exactly as the map format's inShape decides it - for a polygon with inShape's own
+// expressions, so that not one vertex differs from what the game calls inside the region. But a polygon costs its
+// edges once per ROW, not once per vertex: inShape counts the edges that cross the row to the right of a point, so
+// the crossings of a row are computed once, sorted, and every vertex of the row is answered by where it stands among
+// them. A 64-point region over a 513-vertex grid is 513 x (64 edges + a sort), not 263,000 x 64 edges.
+export function runs(ground, shape, visit) {
+  if (!usable(ground) || !walkable(shape)) return;
+  const b = shapeBounds(shape), xs = span(ground, b.minX, b.maxX), zs = span(ground, b.minZ, b.maxZ);
+  if (xs.lo > xs.hi || zs.lo > zs.hi) return;
+  const { size, cell } = ground, c = (size - 1) / 2;
+  if (shape.type === 'circle') {
+    for (let iz = zs.lo; iz <= zs.hi; iz++) {
+      const z = (iz - c) * cell;
+      let from = -1;
+      for (let ix = xs.lo; ix <= xs.hi; ix++) {
+        if (inShape(shape, (ix - c) * cell, z)) { if (from < 0) from = ix; } else if (from >= 0) { visit(iz, from, ix - 1); from = -1; }
+      }
+      if (from >= 0) visit(iz, from, xs.hi);
+    }
+    return;
+  }
+  const p = shape.points, crossings = new Float64Array(p.length);
+  for (let iz = zs.lo; iz <= zs.hi; iz++) {
+    const z = (iz - c) * cell;
+    let m = 0;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      const xi = p[i][0], zi = p[i][1], xj = p[j][0], zj = p[j][1];
+      if ((zi > z) !== (zj > z)) crossings[m++] = (xj - xi) * (z - zi) / (zj - zi) + xi;     // as in inShape, to the letter
+    }
+    if (!m) continue;
+    const sorted = crossings.subarray(0, m).sort();     // ascending, by value
+    // inShape: inside when an odd number of crossings lies to the right of the point (x < crossing)
+    let k = 0, from = -1;
+    for (let ix = xs.lo; ix <= xs.hi; ix++) {
+      const x = (ix - c) * cell;
+      while (k < m && !(x < sorted[k])) k++;
+      if ((m - k) & 1) { if (from < 0) from = ix; } else if (from >= 0) { visit(iz, from, ix - 1); from = -1; }
+    }
+    if (from >= 0) visit(iz, from, xs.hi);
+  }
+}
+
 // Every vertex inside a region shape ({ type: 'circle', x, z, r } or { type: 'poly', points }), by the map format's own
 // inShape: what the game calls inside the region is exactly what gets painted.
 export function inside(ground, shape) {
-  if (!usable(ground) || !shape) return new Int32Array(0);
-  if (shape.type === 'circle') {
-    if (!finite(shape.x) || !finite(shape.z) || !(shape.r >= 0) || !finite(shape.r)) return new Int32Array(0);
-  } else if (shape.type !== 'poly' || !Array.isArray(shape.points) || shape.points.length < 3
-    || !shape.points.every((p) => Array.isArray(p) && finite(p[0]) && finite(p[1]))) return new Int32Array(0);
+  if (!usable(ground) || !walkable(shape)) return new Int32Array(0);
   const b = shapeBounds(shape), xs = span(ground, b.minX, b.maxX), zs = span(ground, b.minZ, b.maxZ);
   if (xs.lo > xs.hi || zs.lo > zs.hi) return new Int32Array(0);
-  const { size, cell } = ground, c = (size - 1) / 2, out = new Int32Array((xs.hi - xs.lo + 1) * (zs.hi - zs.lo + 1));
+  const size = ground.size, out = new Int32Array((xs.hi - xs.lo + 1) * (zs.hi - zs.lo + 1));
   let n = 0;
-  for (let iz = zs.lo; iz <= zs.hi; iz++) {
-    const z = (iz - c) * cell;
-    for (let ix = xs.lo; ix <= xs.hi; ix++) if (inShape(shape, (ix - c) * cell, z)) out[n++] = iz * size + ix;
-  }
+  runs(ground, shape, (iz, ix0, ix1) => { for (let i = iz * size + ix0, end = iz * size + ix1; i <= end; i++) out[n++] = i; });
   return out.slice(0, n);
 }
 

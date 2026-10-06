@@ -24,6 +24,7 @@ export default function create(ctx) {
 
   const tool = markerTool(ctx, {
     id: 'start', label: 'Start point', icon: '⚑', layer: 'start', kind: 'start', drag: 'follow',
+    about: 'Where new players appear: click to move it, drag its rim for the size of the disc',
 
     target: start,
 
@@ -38,6 +39,7 @@ export default function create(ctx) {
     ring: () => ({ r: Math.max(start()?.r ?? 0, 0.6), color: START_COLOR }),
 
     hints: {
+      intro: 'Start point: click or drag to move it · drag the rim of its disc to set the radius',
       create: 'Click: move the start point here · drag: it follows the pointer',
       item: 'Drag: move the start point',
       selected: 'Drag: move the start point · drag a rim handle: the radius of the disc',

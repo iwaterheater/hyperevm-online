@@ -13,9 +13,10 @@ import { leaveField } from './ui/dom.js';
 // reads it for play-testing.
 
 const TOKEN_KEY = 'hypercat-editor-token';   // sessionStorage, shared with the game in play mode
-const DRAFT_KEY = 'hypercat-editor-draft';   // localStorage, written by io.js; removed here after a save
+const DRAFT_KEY = 'hypercat-editor-draft';   // localStorage, written by io.js; removed here after a save - see net.draftKept
 const READ_ONLY = 'Read-only: server is not in editor mode';
 const SENDABLE = /^[\x21-\x7e]{1,256}$/;     // what fits a header value and the server's 256 characters
+const RETRY_MAX_S = 2;                       // a 429 that asks for no more than this is waited out, once
 
 // what the server's error codes mean to the person at the keyboard
 const REASONS = {
@@ -98,8 +99,8 @@ export function createNet() {
   };
 
   // One POST and what follows from its answer. body: the JSON text; seen: the change and load counters when that text
-  // was made; again: a 401 may still ask for the token and retry.
-  async function post(body, seen, force, again) {
+  // was made; again: a 401 may still ask for the token and retry; patient: a short 429 may still be waited out.
+  async function post(body, seen, force, again, patient = true) {
     const { store, ui } = ctx;
     const headers = { 'Content-Type': 'application/json', 'X-Editor': '1' };
     const base = force ? '*' : net.baseRev;
@@ -131,8 +132,12 @@ export function createNet() {
       }
       // an edit made while the request was under way is not in the file: the map stays dirty and keeps its draft
       if (untouched) {
+        // The draft is this page's unsaved state, which the file holds now. A save with nothing unsaved ('No changes')
+        // has written nothing of ours: whatever is in storage then - a draft of an earlier session that waits for an
+        // answer, another tab's work - is not ours to remove.
+        const unsaved = store.dirty;
         store.markSaved();
-        clearDraft();
+        if (unsaved && !net.draftKept) clearDraft();
       }
       const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
       const what = data.unchanged ? 'No changes' : `Saved ${time} \u00b7 ${count(store.map.objects.length, 'object')} \u00b7 ${count(store.map.spawns.length, 'spawn')}`;
@@ -144,7 +149,7 @@ export function createNet() {
       net.info = { ...net.info, tokenRequired: true };
       writeToken('');
       const token = again ? await askToken('The server did not accept the editor token.\nEditor token') : null;
-      if (token) return post(body, seen, force, false);
+      if (token) return post(body, seen, force, false, patient);
       ui.toast(again ? 'Not saved: the editor token is needed' : 'Save failed (401): the editor token was not accepted', again ? 'warn' : 'error');
       return false;
     }
@@ -155,11 +160,11 @@ export function createNet() {
         + 'Overwrite replaces the server\'s map with yours.\nReload discards your unsaved edits and loads the server\'s map.',
         [{ id: 'overwrite', label: 'Overwrite', danger: true }, { id: 'reload', label: 'Reload', danger: true }, { id: 'cancel', label: 'Cancel' }],
       );
-      if (answer === 'overwrite') return post(body, seen, true, again);
+      if (answer === 'overwrite') return post(body, seen, true, again, patient);
       if (answer === 'reload') {
         try {
           store.load(await net.loadMap());
-          clearDraft();   // the edits were given up; their draft must not come back on the next start
+          if (!net.draftKept) clearDraft();   // the edits were given up; their draft must not come back on the next start
           ui.toast('Loaded the map from the server');
         } catch (e) {
           ui.toast(`Reload failed: ${e?.message ?? e}`, 'error');
@@ -175,6 +180,17 @@ export function createNet() {
         action: { label: 'Show issues', run: openIssues },
       }, 'error');
       return false;
+    }
+
+    if (res.status === 429 && patient) {
+      // The server takes one changing save a second and says so with Retry-After: 1. A second Mod+S right behind the
+      // first (or a Play behind a save) is not a failure: the answer is waited out and the same request sent once
+      // more. A longer wait is the lock after wrong tokens - that one is told, below.
+      const wait = Number(res.headers.get('Retry-After'));
+      if (Number.isFinite(wait) && wait > 0 && wait <= RETRY_MAX_S) {
+        await new Promise((resolve) => { setTimeout(resolve, wait * 1000 + 50); });
+        return post(body, seen, force, again, false);
+      }
     }
 
     const reason = typeof data?.error === 'string' && Object.hasOwn(REASONS, data.error) ? REASONS[data.error] : '';
@@ -213,6 +229,9 @@ export function createNet() {
   const net = {
     info: { enabled: false, tokenRequired: false, canSave: false, rev: '' },   // the body of GET /api/editor
     baseRev: '',                                                              // rev of the map the store was loaded from or last saved as
+    // Set by io.js while the draft in storage is NOT this page's work: a draft of an earlier session that was offered
+    // and neither restored nor discarded. No save and no reload removes it; only the user's answer does.
+    draftKept: false,
 
     // -> { map, assets, info }. Throws a MapError when the server's map does not load (its .issues say why) and an
     // Error when the server cannot be asked. A server without /api/editor is a read-only one.

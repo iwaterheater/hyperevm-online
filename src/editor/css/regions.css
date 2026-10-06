@@ -19,15 +19,19 @@
 #regions .grip { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 24px; color: var(--dim); cursor: grab; }
 #regions .row:hover .grip { color: var(--text); }
 #regions .row.fallback .grip { visibility: hidden; }
-#regions .name { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-#regions .mood { flex: 0 1 auto; max-width: 62px; overflow: hidden; color: var(--dim); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+/* What gives way in a narrow row, in this order: the mood text (the chip has its colour, the sun button its name),
+   then the name. The level range never does - it is what differs between the rows. */
+#regions .name { flex: 0 1 auto; min-width: 28px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#regions .lv { flex: none; margin-right: auto; color: var(--dim); font-size: 11px; white-space: nowrap; }
+#regions .row.selected .lv { color: var(--text); }
+#regions .mood { flex: 0 1000 auto; min-width: 0; max-width: 62px; overflow: hidden; color: var(--dim); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
 #regions .mood.inherited { font-style: italic; }
 #regions .row .ui-badge { height: 14px; padding: 0 5px; }
 #regions .row .ui-button { width: 20px; height: 20px; padding: 0; color: var(--dim); }
 #regions .row .ui-button:hover { color: var(--text); }
 #regions .row .ui-button[aria-pressed="true"] { color: var(--accent); }
 /* a hidden region is not drawn, a locked one does not answer a click: both read as "set aside" in the list */
-#regions .row.is-hidden .name, #regions .row.is-hidden .ui-swatch, #regions .row.is-hidden .mood { opacity: .45; }
+#regions .row.is-hidden .name, #regions .row.is-hidden .lv, #regions .row.is-hidden .ui-swatch, #regions .row.is-hidden .mood { opacity: .45; }
 #regions .row.is-locked .name { font-style: italic; }
 
 #regions .icon { display: block; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }

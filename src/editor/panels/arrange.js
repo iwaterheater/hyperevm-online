@@ -64,7 +64,7 @@ export default function mount(el, ctx) {
     const entries = pick(current().entries);
     if (!entries.length) return;
     const label = verb(describe(ctx, entries.map((e) => e.item)));
-    if (patch(label, entries, build(entries))) ui.setStatus(label);
+    if (patch(label, entries, build(entries))) ui.setNote(label);
     else ui.toast(nothing);
   }
   const all = (entries) => entries;
@@ -128,7 +128,7 @@ export default function mount(el, ctx) {
       throw err;
     }
     store.commit();
-    ui.setStatus(label);
+    ui.setNote(label);
     ui.toast(`Array: added ${plural(copies.length, 'item')}`);
   }
 
@@ -212,7 +212,7 @@ export default function mount(el, ctx) {
     row('Face', face),
     row('Randomize', rotation),
     row('Scale', scaleMin, h('span', { class: 'ui-dash' }, '\u2013'), scaleMax, scale),
-    row('Height', dropButton),
+    row('Ground', dropButton),      // (not "Height": that is the inspector's word for the vertical scale)
     section('Array',
       row('Count', count),
       row('Step X', stepX),
@@ -276,5 +276,5 @@ export default function mount(el, ctx) {
   ui.on('hiddenModels', later);
   ui.on('itemflags', later);
   refresh();
-  return {};
+  return { update() { later.flush(); } };      // with the frame, as the other panels
 }

@@ -11,14 +11,15 @@
 // degree); Esc or a right-click cancels. The pivot snaps like everything else (ui.snap, Mod inverts).
 //
 // The tool has no layer of its own - a clip may hold four kinds. Instead every item whose layer is hidden or locked is
-// left out (clipboard.instantiate): the ghost shows only what will be pasted, the toast says how many were skipped,
-// and with nothing left the tool is not entered at all.
+// left out (clipboard.instantiate), and so are the spawns, chests and NPCs of a clip while the Game preview hides the
+// markers: the ghost shows only what will be pasted, the toast says how many were skipped and why, and with nothing
+// left the tool is not entered at all.
 import * as THREE from 'three';
 import { h, row, angleField } from '../ui/dom.js';
-import { hintFor } from '../keymap.js';
+import { hintFor, keyText } from '../keymap.js';
 import { COLLECTION, LAYER_OF, qAngle } from '../../map/format.js';
 import { snapPoint, editable } from './common.js';
-import { CLIP_KINDS, clipSize, getStamp, instantiate, listStamps, makeClip, readClip, saveStamp, stampName, writeClip } from '../clipboard.js';
+import { CLIP_KINDS, clipSize, getStamp, instantiate, listStamps, makeClip, pasteOpen, readClip, saveStamp, stampName, writeClip } from '../clipboard.js';
 
 const DEG = Math.PI / 180;
 const PAD = 1.5;               // world units of air between the outermost origins and the outline of the ghost
@@ -40,14 +41,28 @@ export default function create(ctx) {
   // ---------------------------------------------------------------- what can be copied
 
   const copyable = () => store.selected().filter((item) => CLIP_KINDS.includes(store.kindOf(item)));
-  const layerOpen = (kind) => { const l = ui.layers?.[LAYER_OF[kind]]; return !l || (l.visible !== false && !l.locked); };
+  const layerOf = (kind) => ui.layers?.[LAYER_OF[kind]] ?? null;
   // how many items of a clip a paste would bring in right now
-  const pasteable = (clip) => CLIP_KINDS.reduce((n, kind) => n + (layerOpen(kind) ? clip[COLLECTION[kind]].length : 0), 0);
-  // 'Layer locked' / 'Layer hidden': why nothing of a clip can be pasted
+  const pasteable = (clip) => CLIP_KINDS.reduce((n, kind) => n + (pasteOpen(ctx, kind) ? clip[COLLECTION[kind]].length : 0), 0);
+  // Why items of a clip are left out - or nothing of it can be pasted: 'Layer locked', 'Layer hidden', or the Game
+  // preview, which hides the markers.
   const closedReason = (clip) => {
-    const closed = CLIP_KINDS.filter((kind) => clip[COLLECTION[kind]].length && !layerOpen(kind));
-    return closed.some((kind) => ui.layers[LAYER_OF[kind]].locked) || !closed.length ? 'Layer locked' : 'Layer hidden';
+    const closed = CLIP_KINDS.filter((kind) => clip[COLLECTION[kind]].length && !pasteOpen(ctx, kind));
+    if (closed.some((kind) => layerOf(kind)?.locked) || !closed.length) return 'Layer locked';
+    if (closed.some((kind) => layerOf(kind)?.visible === false)) return 'Layer hidden';
+    return 'Markers are hidden in the Game preview';
   };
+
+  // Makes `list` the clipboard. -> whether it reached the browser storage; null when it is no clip - an item of a
+  // file under repair may stand where no map reaches (clipboard.js refuses such a clip) - after saying so.
+  function keep(list) {
+    try {
+      return writeClip(makeClip(ctx, list));
+    } catch {
+      ui.toast('Not copied: an item of the selection stands far outside any map. Give it a position on the island first (the inspector takes X and Z)', 'warn');
+      return null;
+    }
+  }
 
   function copy() {
     if (!store.map) return false;
@@ -56,7 +71,8 @@ export default function create(ctx) {
       ui.toast(store.selection.size ? 'Regions and the start point cannot be copied' : 'Nothing is selected', 'warn');
       return false;
     }
-    const stored = writeClip(makeClip(ctx, list));
+    const stored = keep(list);
+    if (stored === null) return false;
     if (stored) ui.toast(`Copied ${items(list.length)}`);
     else ui.toast(`Copied ${items(list.length)} - for this tab only: the browser storage is full or disabled`, 'warn');
     return true;
@@ -71,7 +87,7 @@ export default function create(ctx) {
       ui.toast(store.selection.size ? 'Nothing here can be cut: regions, the start point and locked layers stay' : 'Nothing is selected', 'warn');
       return false;
     }
-    writeClip(makeClip(ctx, list));
+    if (keep(list) === null) return false;       // nothing is removed that could not be kept
     store.exec(cmd.batch(`Cut ${items(list.length)}`, [cmd.remove(list)]));
     ui.toast(`Cut ${items(list.length)}`);
     return true;
@@ -87,7 +103,11 @@ export default function create(ctx) {
       ui.toast(`Nothing to paste: copy something first${key ? ` (${key})` : ''}`, 'warn');
       return false;
     }
-    if (!pasteable(clip)) { ui.toast(closedReason(clip), 'warn'); return false; }   // the tool is not entered
+    if (!pasteable(clip)) {       // the tool is not entered
+      const why = closedReason(clip);
+      ui.toast(why.startsWith('Markers') ? `${why}: switch the preview back to paste them` : why, 'warn');
+      return false;
+    }
     pending = { clip, label: typeof source?.label === 'string' ? source.label : null };
     ui.set('tool', 'paste');   // setting the active tool again re-arms it: a second Mod+V takes the newest clipboard
     return true;
@@ -220,7 +240,7 @@ export default function create(ctx) {
   function say() {
     if (!job) return;
     const angle = job.rot ? `, turned ${Math.round(job.rot / DEG * 100) / 100}°` : '';
-    ui.setStatus(`${describe()}${angle} - click to place, Shift+click to place again, Q / E to turn, Esc to cancel`);
+    ui.setStatus(`${describe()}${angle} - ${keyText('click to place, Shift+click to place again, Q / E to turn, Esc to cancel')}`);
     if (summary) summary.textContent = describe();
     field?.set(job.rot);
   }
@@ -247,6 +267,15 @@ export default function create(ctx) {
       ? `Pasted ${items(list.length)}, ${made.skipped} skipped (${closedReason(job.clip).toLowerCase()})`
       : `Pasted ${items(list.length)}`);
     if (!keep) leave();
+  }
+
+  // What may be pasted has changed under the ghost: it is read again - or, with nothing left, the tool is left.
+  function rearm() {
+    if (!job) return;
+    const keep = { rot: job.rot, x: job.x, z: job.z }, source = { clip: job.clip, label: job.label };
+    if (arm(source, keep)) { dirty = true; say(); ctx.viewport.invalidate(); return; }
+    ui.toast(closedReason(source.clip), 'warn');
+    leave();
   }
 
   function turn(by) {
@@ -284,14 +313,9 @@ export default function create(ctx) {
         store.on('load', () => { dirty = true; ctx.viewport.invalidate(); }),
         // the pointer left the viewport: the ghost waits at the camera target
         ui.on('cursor', (hit) => { if (hit === null && job && !pressed) toTarget(); }),
-        // a layer was locked, hidden or opened under the ghost: it shows what would be pasted NOW
-        ui.on('layers', () => {
-          if (!job) return;
-          const keep = { rot: job.rot, x: job.x, z: job.z }, source2 = { clip: job.clip, label: job.label };
-          if (arm(source2, keep)) { dirty = true; say(); ctx.viewport.invalidate(); return; }
-          ui.toast(closedReason(source2.clip), 'warn');
-          leave();
-        }),
+        // a layer was locked, hidden or opened under the ghost, or the preview changed: it shows what would be pasted NOW
+        ui.on('layers', rearm),
+        ui.on('preview', rearm),
       ];
       draw();
       say();
@@ -364,7 +388,7 @@ export default function create(ctx) {
       el.append(
         summary,
         row('Rotation', field),
-        h('span', { class: 'ui-hint' }, 'Click: place · Shift+click: place again · Q / E: turn · Esc: cancel'),
+        h('span', { class: 'ui-hint' }, keyText('Click: place · Shift+click: place again · Q / E: turn · Esc: cancel')),
       );
     },
   };

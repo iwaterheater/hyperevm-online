@@ -1,5 +1,6 @@
 import { h, row, button, numberField, angleField, selectField, checkField, textField, colorField, rafThrottle } from '../ui/dom.js';
-import { FIELDS } from '../fields.js';
+import { FIELDS, withEnd } from '../fields.js';
+import { keyText } from '../keymap.js';
 import { editable } from '../tools/common.js';
 import { LIMITS, spawnCount } from '../../map/format.js';
 import { modelInfo } from '../../map/catalog.js';
@@ -341,12 +342,7 @@ export default function mount(el, ctx) {
     const end = (i) => numberControl({ key: f.key, type: 'int', min, max }, {
       liveEdit: false,
       of: (item) => item[f.key]?.[i] ?? null,
-      patchOf: (item, v) => {
-        const pair = Array.isArray(item[f.key]) ? [item[f.key][0], item[f.key][1]] : [v, v];
-        pair[i] = v;
-        if (pair[0] > pair[1]) pair[1 - i] = v;
-        return { [f.key]: pair };
-      },
+      patchOf: (item, v) => ({ [f.key]: withEnd(item[f.key], i, v) }),
     });
     const lo = end(0), hi = end(1);
     lo.field.input.setAttribute('aria-label', `${f.label}, lowest`);
@@ -452,12 +448,12 @@ export default function mount(el, ctx) {
 
     const nodes = [h('div', { class: 'title' }, h('span', { class: 'what' }, title), label && typeof label === 'string' ? h('span', { class: 'label ui-dim', title: label }, label) : null)];
     if (kind === 'map') nodes.push(h('div', { class: 'ui-hint' }, 'Nothing is selected: these are the properties of the map itself.'));
-    if (kind === 'mixed') nodes.push(h('div', { class: 'ui-hint' }, 'Several kinds are selected. Fields appear when the selection is of one kind: click a row to keep it, Alt+click to drop it.'));
+    if (kind === 'mixed') nodes.push(h('div', { class: 'ui-hint' }, keyText('Several kinds are selected. Fields appear when the selection is of one kind: click a row to keep it, Alt+click to drop it.')));
     if (rows.length) {
       nodes.push(h('div', { class: 'ui-list breakdown' }, rows.map((r) => {
         const node = h('div', {
           class: ['ui-item', r.model ? 'model' : 'kind'], dataset: r.model ? { model: r.model } : { kind: r.kind },
-          title: `${r.label}\nClick: keep only these · Alt+click: take them out of the selection`,
+          title: `${r.label}\n${keyText('Click: keep only these · Alt+click: take them out of the selection')}`,
         }, h('span', { class: 'name' }, r.label), r.n === null ? null : h('span', { class: 'count' }, `× ${int(r.n)}`));
         node.addEventListener('click', (ev) => {
           done();

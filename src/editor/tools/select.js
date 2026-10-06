@@ -6,14 +6,15 @@
 //   click again in place  the next item under the cursor (after 400 ms, so a double-click never cycles); Alt+click: at once
 //   drag on the selection move it (snapping per ui.snap, Mod inverts)        Alt+drag: move a copy
 //   drag anywhere else    box select (Shift adds, Alt subtracts; regions are never boxed)
-//   gizmo handle          move along an axis, freely, turn, scale, lift (gizmo.js)
+//   gizmo handle          move along an axis, freely, turn, scale, lift (gizmo.js); a click on a handle that does not
+//                         become a drag goes to what lies under the handle
 //   rim of a camp / the start disc / a circle region   resize it
 //   Q E [ ] arrows X      turn, scale, nudge, switch gizmo axes (tools/common.js)
 //
 // What the cursor is over is decided by the viewport (hit.item / hit.handle): this file never picks by itself.
 // It also owns the edits that act on the selection whatever tool is active: delete, duplicate, select all, group.
 import { h, row, button, checkField, selectField } from '../ui/dom.js';
-import { mod, hintFor } from '../keymap.js';
+import { mod, hintFor, keyText } from '../keymap.js';
 import { dragTracker, dragMove, dragRadius, selectionKey, editable, expandPickable, describe } from './common.js';
 
 const KINDS = ['object', 'spawn', 'chest', 'npc', 'region', 'start'];
@@ -28,6 +29,8 @@ const sameItems = (set, list) => {
   return true;
 };
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// (one line of the status bar at 1440 px; the Help sheet has the rest: Shift, Alt, the click that cycles)
+const INTRO = keyText('Select: click an item · drag on empty ground for a box · drag the selection to move it');
 const withHint = (text, action) => { const key = hintFor(action); return key ? `${text} (${key})` : text; };
 
 // ---------------------------------------------------------------- edits on the selection (any tool)
@@ -35,7 +38,7 @@ const withHint = (text, action) => { const key = hintFor(action); return key ? `
 // Copies of `items` added to the map in place, inside the store group the caller has opened. The start point has no
 // copy. Every group among the items becomes a NEW group, so the copies do not join the originals.
 // -> the copies, in the order of the kinds
-function addClones(ctx, items) {
+export function addClones(ctx, items) {
   const { store, cmd } = ctx, groups = new Set();
   for (const item of items) if (typeof item.g === 'string') groups.add(item.g);
   const ids = store.newGroupIds(groups.size), fresh = new Map([...groups].map((g, i) => [g, ids[i]]));
@@ -73,7 +76,7 @@ export function deleteSelection(ctx) {
   } finally {
     store.commit();
   }
-  ui.setStatus?.(`Deleted ${what}`);
+  ui.setNote?.(`Deleted ${what}`);
   return true;
 }
 
@@ -105,15 +108,24 @@ export async function duplicateSelection(ctx) {
 }
 
 // Select All: every item of the kinds the ACTIVE tool can pick, on visible unlocked layers. -> the number selected
+// In the Select tool that is what a box around the whole map would take: regions are left out there too. A region
+// is a zone, not a thing that stands on the map - "select all, delete" or "select all, nudge" means the scenery and
+// the markers, and must not take the lands of the island along. Regions are all selected with the Region tool
+// active, or one by one by their outline, their label or their row.
 export function selectAll(ctx) {
   const { store, ui } = ctx;
   if (!store.map) return 0;
-  const kinds = ctx.tools?.[ui.tool]?.picks ?? [], items = [];
+  const picks = ctx.tools?.[ui.tool]?.picks ?? [], kinds = ui.tool === 'select' ? picks.filter((kind) => BOX_KINDS.includes(kind)) : picks;
+  const items = [];
   for (const kind of KINDS) {
     if (!kinds.includes(kind)) continue;
     for (const item of store.items(kind)) if (ui.isPickable(kind, item)) items.push(item);
   }
   store.select(items);
+  if (items.length) {
+    const regions = ui.tool === 'select' && store.map.regions.length > 0;
+    ui.setNote?.(`Selected ${describe(ctx, items)}${regions ? ' \u00b7 regions are not part of Select All: pick them by their outline, or take the Region tool' : ''}`);
+  }
   return items.length;
 }
 
@@ -125,7 +137,7 @@ export function groupSelection(ctx) {
   if (!store.map || store.grouping) return false;
   const items = grouped(ctx);   // one item is enough: a group of one is a group (it can be named, found and grown later)
   if (!items.length) {
-    ui.setStatus?.('Nothing to group here: regions, the start point and locked layers are left out');
+    ui.setNote?.('Nothing to group here: regions, the start point and locked layers are left out');
     return false;
   }
   const g = store.newGroupIds(1)[0];
@@ -165,7 +177,7 @@ export default function create(ctx) {
   //   'radius' a rim handle is dragged       'move'  the selection (or a copy) is dragged       'box'  a box select
   //   'dead'   the gesture was cancelled with the button still down: the rest of it is swallowed
   let mode = null;
-  let press = null;       // { x, y, start, item, onSelected, toggle, alt, tracker }
+  let press = null;       // { x, y, start, item, onSelected, toggle, alt, tracker, moved }
   let drag = null;        // what dragMove / dragRadius returned
   let restore = null;     // the selection to put back when a duplicate-drag is cancelled
   let box = null;         // { el, x0, y0, x1, y1, base, add, subtract, stale }
@@ -223,6 +235,17 @@ export default function create(ctx) {
       }
     }
     last = { x, y, at: now, selection: [...store.selection], top: chosen };
+  }
+
+  // A press on a gizmo handle that never became a drag. The gizmo is large - a ring and two arrows around the pivot -
+  // and in a camp of buildings something the user means to click often lies under it (the well between two selected
+  // houses): the click goes there, replacing the selection or toggling with Shift / Mod like any other click.
+  // With nothing under the handle it does nothing: a click on the gizmo is not a click on empty ground.
+  function clickUnder() {
+    const top = ctx.viewport.hitStack(press.x, press.y)?.[0]?.item ?? null;
+    if (!top) return;
+    press.item = top;
+    click();
   }
 
   // ---- box select
@@ -331,8 +354,10 @@ export default function create(ctx) {
 
   return {
     id: 'select', label: 'Select', icon: '↖', layer: null, picks: KINDS.slice(), hidden: false,
+    about: 'Pick, move, turn and scale whatever is on the map',
     get context() { return 'select'; },
 
+    intro: INTRO,          // the status bar shows it while nothing else is said
     activate() {},
 
     deactivate() {
@@ -349,6 +374,11 @@ export default function create(ctx) {
       const handle = hit.handle;
       if (handle?.type === 'gizmo' && ctx.gizmo) {
         ctx.gizmo.begin(handle.index, hit, ev);
+        // until the pointer leaves the click threshold this is still a click - on what lies under the handle
+        press = {
+          x: ev.clientX, y: ev.clientY, start: { x: hit.x, z: hit.z }, item: null, onSelected: false,
+          toggle: !!(ev.shiftKey || mod(ev)), alt: !!ev.altKey, tracker: dragTracker(ev), moved: false,
+        };
         mode = 'gizmo';
         return;
       }
@@ -376,8 +406,11 @@ export default function create(ctx) {
         if (!press.tracker.moved(ev)) return;
         startDrag(ev);
       }
-      if (mode === 'gizmo') ctx.gizmo.move(hit, ev);
-      else if (mode === 'radius' || mode === 'move') drag.move(hit, ev);
+      if (mode === 'gizmo') {
+        if (!press.moved && !press.tracker.moved(ev)) return;   // the same threshold as every other drag of this tool
+        press.moved = true;
+        ctx.gizmo.move(hit, ev);
+      } else if (mode === 'radius' || mode === 'move') drag.move(hit, ev);
       else if (mode === 'box') moveBox(ev);
     },
 
@@ -385,8 +418,13 @@ export default function create(ctx) {
       const was = mode;
       mode = null;
       try {
-        if (was === 'gizmo') ctx.gizmo.end();
-        else if (was === 'radius' || was === 'move') drag?.end();
+        if (was === 'gizmo') {
+          if (press?.moved) ctx.gizmo.end();
+          else {
+            ctx.gizmo.cancel();                              // nothing moved: no step
+            if (ev?.type === 'pointerup') clickUnder();      // (a press that lost its release is no click)
+          }
+        } else if (was === 'radius' || was === 'move') drag?.end();
         else if (was === 'box') { moveBox(ev); applyBox(); }
         else if (was === 'press') click();
       } finally {

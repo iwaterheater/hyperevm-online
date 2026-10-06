@@ -61,6 +61,11 @@ function append(el, children) {
   return el;
 }
 
+// A colour that comes from the map (a region's `color` - a draft or an imported file may hold any string there) as a
+// value for a CSS property: itself when it is '#rrggbb', else 'transparent'. Everything else is refused, because a
+// CSS value is not only a colour: `url(...)` in a background makes the browser fetch whatever address the file names.
+export const safeColor = (color) => (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color : 'transparent');
+
 // h('div', { class: 'ui-row', title: 'Hint', onclick: fn, dataset: { id: 3 } }, 'text', node, [more])
 // class may be an array (falsy entries are dropped); style a string or an object ('--name' keys are custom properties);
 // on<event> adds a listener; a key that is a property of the element is assigned, anything else becomes an attribute.
@@ -321,15 +326,19 @@ export function angleField({ value, min, max, step, onInput, onCommit } = {}) {
 
 // Two whole numbers, low and high: value [min, max]. The pair stays ordered - an end typed past the other takes it along.
 // `mixed` may be one flag for both ends or [low, high]. An end that is mixed takes the value typed into the other.
+// onCommit(pair, { end }): end is the one that was typed (0 = low, 1 = high). An owner that edits SEVERAL items must
+// use it - pair[end] goes to every item, the other end of each item stays its own (withEnd in fields.js); the other
+// number of `pair` is only what this field showed.
 export function intRangeField({ value, min, max, onCommit } = {}) {
   const commit = (i) => (v) => {
     if (Number.isNaN(v)) return;   // a relative change of a mixed end: there is nothing to apply it to
+    const mixed = [lo.value == null, hi.value == null];
     const pair = [lo.value ?? v, hi.value ?? v];
     pair[i] = v;
     if (pair[0] > pair[1]) pair[1 - i] = v;
-    lo.set(pair[0]);
-    hi.set(pair[1]);
-    onCommit?.(pair);
+    lo.set(pair[0], mixed[0] && i !== 0);   // an end nobody typed stays the dash it was: the items still differ there
+    hi.set(pair[1], mixed[1] && i !== 1);
+    onCommit?.(pair, { end: i });
   };
   const lo = numberCore({ value: value?.[0], min, max, step: 1, digits: 0, onCommit: commit(0) });
   const hi = numberCore({ value: value?.[1], min, max, step: 1, digits: 0, onCommit: commit(1) });
@@ -622,11 +631,12 @@ export function createToasts(container, { max = 5 } = {}) {
 // made inert, so Tab stays inside the dialog. A dialog is cancelled by its Cancel button, a click beside it, or the
 // event 'cancel' dispatched on the container - which is how the keymap's Escape closes it without knowing this module.
 //   confirm(text, { ok = 'OK', cancel = 'Cancel', danger = false })  -> Promise<boolean>
-//   choose(text, [{ id, label, danger? }])                           -> Promise<string | null>   (null = cancelled)
+//   choose(text, [{ id, label, danger? }], { sticky = false })       -> Promise<string | null>   (null = cancelled)
 //   prompt(text, value = '', { ok = 'OK', cancel = 'Cancel' })       -> Promise<string | null>
-// text is a string (line breaks are kept) or a node.
+// text is a string (line breaks are kept) or a node. danger: the answer destroys something - it is drawn as such and
+// never has the focus, so Enter cannot give it. sticky: a click beside the dialog does not cancel it.
 export function createModal(container) {
-  let queue = Promise.resolve(), cancelOpen = null;
+  let queue = Promise.resolve(), cancelOpen = null, stickyOpen = false;
 
   const show = (text, build) => {
     const run = () => new Promise((resolve) => {
@@ -641,9 +651,10 @@ export function createModal(container) {
         resolve(result);
       };
       const form = h('form', { class: 'ui-dialog', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'ui-dialog-text' }, text));
-      const { cancelValue, submit, focus } = build(form, finish);
+      const { cancelValue, submit, focus, sticky = false } = build(form, finish);
       form.addEventListener('submit', (ev) => { ev.preventDefault(); submit?.(); });
       cancelOpen = () => finish(cancelValue);
+      stickyOpen = sticky;
       for (const c of inert) c.inert = true;
       container.replaceChildren(form);
       container.hidden = false;
@@ -661,7 +672,7 @@ export function createModal(container) {
   };
 
   container.addEventListener('cancel', () => cancelOpen?.());
-  container.addEventListener('mousedown', (ev) => { if (ev.target === container) cancelOpen?.(); });
+  container.addEventListener('mousedown', (ev) => { if (ev.target === container && !stickyOpen) cancelOpen?.(); });
 
   return {
     get open() { return !!cancelOpen; },
@@ -674,13 +685,13 @@ export function createModal(container) {
         return { cancelValue: false, submit: () => finish(true), focus: danger ? no : yes };
       });
     },
-    choose(text, options = []) {
+    choose(text, options = [], { sticky = false } = {}) {
       return show(text, (form, finish) => {
         const list = options.map((o) => push(o.label ?? o.id, o.danger ? 'danger' : null, () => finish(o.id)));
         buttons(form, list);
         // Enter must never pick a destructive answer by itself: the focus starts on the last harmless one
         const safe = options.map((o, i) => (o.danger ? null : list[i])).filter(Boolean);
-        return { cancelValue: null, focus: safe[safe.length - 1] ?? list[list.length - 1] };
+        return { cancelValue: null, focus: safe[safe.length - 1] ?? list[list.length - 1], sticky: !!sticky };
       });
     },
     prompt(text, value = '', { ok = 'OK', cancel = 'Cancel' } = {}) {

@@ -3,7 +3,7 @@
 //   click on free ground          a new NPC of the kind chosen in the options strip
 //   press and drag on free ground a new NPC that turns to face the pointer - one undo step
 //   click an NPC                  select it (Shift / Mod: add or take it)      double-click: that one NPC alone
-//   drag an NPC                   move the selected NPCs                       Alt+drag: move a copy
+//   drag an NPC                   move the selection                           Alt+drag: move a copy
 //   Alt+click an NPC              copy its kind and facing into the strip
 //   Q E                           turn the selection by 15 degrees (Shift 90, Alt 1); with nothing selected they turn
 //                                 the NPC that is about to be placed
@@ -37,6 +37,7 @@ export default function create(ctx) {
 
   const tool = markerTool(ctx, {
     id: 'npc', label: 'NPC', icon: '♟', layer: 'npcs', kind: 'npc', drag: 'facing',
+    about: 'The people of the town: click to add the one chosen in the options, drag to turn them',
 
     props: () => template.fresh(),
 
@@ -53,7 +54,7 @@ export default function create(ctx) {
     placed(item) {
       if (!item) return;
       const exposed = SERVES.includes(item.kind) && !isSafe(store.map, item.x, item.z);
-      ui.setStatus(`${nameOf(item.kind)} added${exposed ? ': outside every safe region, so monsters can reach the players who visit' : ''}`);
+      ui.setNote(`${nameOf(item.kind)} added${exposed ? ': outside every safe region, so monsters can reach the players who visit' : ''}`);
     },
 
     idleKey(action, ev) {
@@ -63,9 +64,10 @@ export default function create(ctx) {
     },
 
     hints: {
+      intro: 'NPC: click adds the one chosen above, drag turns it · drag an NPC to move it',
       get create() { return `Click: place a ${nameOf(opts.kind)} (${WHAT[opts.kind] ?? 'an NPC'}) · drag: turn to face the pointer · Q E: turn`; },
       item: 'Click: select · drag: move · Shift+click: add · Alt+click: copy its kind and facing · Alt+drag: move a copy',
-      selected: 'Drag: move the selected NPCs · Q E: turn · Alt+drag: move a copy',
+      selected: 'Drag: move the selection · Q E: turn · Alt+drag: move a copy',
     },
 
     options(el, keep) {

@@ -19,13 +19,16 @@
 #status .ground { width: 84px; overflow: hidden; text-overflow: ellipsis; }
 #status .ground.block { color: var(--warn); }
 
-/* ---- what gives way. The selection label shrinks first (the Inspector says the same in full); the status text keeps
-   its room: tool hints and progress arrive there. Narrower windows drop the totals, then the revision. */
+/* ---- what gives way. The selection label shrinks first (the Inspector says the same in full; its tooltip too); the
+   status text gets every pixel that is left: tool instructions, progress and the notes about what has just happened
+   arrive there, and most of them are long (the tooltip of the cell has a line that is cut). Narrower windows drop
+   the triangle and draw-call numbers (the frame rate stays), then the totals, then the revision. */
 #status .region, #status .selection, #status .totals, #status .text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-#status .region { flex: 0 0 auto; max-width: 190px; }
-#status .selection { flex: 0 1 auto; min-width: 80px; max-width: 260px; color: var(--text); }
+#status .region { flex: 0 1 auto; max-width: 190px; }
+#status .selection { flex: 0 4 auto; min-width: 80px; max-width: 260px; color: var(--text); }
 #status .totals { flex: 0 0 auto; }
 #status .text { flex: 1 0 150px; color: var(--text); }
+#status .text.note { color: var(--accent); }
 
 @media (max-width: 1400px) {
   #status .totals { display: none; }
@@ -41,5 +44,9 @@
 #status .snap .ui-button.active { color: var(--text); background: color-mix(in srgb, var(--accent) 24%, var(--panel)); border-color: var(--accent); }
 #status .snap .ui-select { width: 54px; height: 18px; padding-left: 5px; font-size: 11px; }
 #status .perf { width: 184px; justify-content: flex-end; font-size: 10px; white-space: pre; }
+@media (max-width: 1700px) {      /* after the rule above: the cell shrinks to the frame rate, the status text takes the room */
+  #status .perf { width: auto; }
+  #status .perf .load { display: none; }
+}
 #status .help { width: 18px; height: 18px; color: var(--dim); font-weight: 700; border: 1px solid var(--line); border-radius: 50%; }
 #status .help:hover { color: var(--text); }

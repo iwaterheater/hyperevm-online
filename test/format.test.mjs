@@ -178,6 +178,35 @@ test('qPos and qScale round to their grid and never return -0', () => {
   for (const v of [0.57, 12.34, -99.99, 259.01]) assert.equal(qPos(qPos(v)), qPos(v));
 });
 
+test('a finite number stays finite on the grid: no overflow to Infinity, which JSON would write as null', () => {
+  for (const v of [1e15, 1e100, 1e306, 1e308, Number.MAX_VALUE, -1e308]) {
+    assert.equal(qPos(v), v, `qPos(${v})`);
+    assert.equal(qScale(v), v, `qScale(${v})`);
+    assert.ok(Number.isFinite(qAngle(v)) && Math.abs(qAngle(v)) <= Math.PI, `qAngle(${v})`);
+    assert.ok(Number.isFinite(toDeg(qAngle(toRad(v)))), `an angle of ${v} degrees`);
+  }
+  assert.equal(qPos(123456789012.345), 123456789012.35, 'a large number that still has hundredths is rounded as ever');
+  assert.equal(qPos(Infinity), Infinity);                        // what is not a number of the map is passed through,
+  assert.ok(Number.isNaN(qPos(NaN)) && Number.isNaN(qAngle(Infinity)));   // for the decoder and validate() to refuse
+
+  // a hand-edited file: it decodes (the editor's Import and a draft pass check: false), every value is a number that
+  // validate() can call out of range - and the map can be written and read again, which is what a draft is
+  const file = sample();
+  file.objects[0].x = 1e308;
+  file.objects[0].ry = 1e307;
+  file.spawns[0].x = -1e308;
+  file.chests[0].z = 1e308;
+  file.regions[0].shape.r = 1e308;
+  const map = normalize(file, { check: false });
+  assert.deepEqual([map.objects.find((o) => o.x > 1).x, map.spawns[0].x, map.chests[0].z, map.regions[0].shape.r], [1e308, -1e308, 1e308, 1e308]);
+  assert.ok(map.objects.every((o) => Number.isFinite(o.ry)));
+  assert.ok(validate(map).filter((i) => i.level === 'error').length >= 4);
+  const text = JSON.stringify(serialize(map, { check: false }));
+  assert.ok(!text.includes('null'), 'nothing the JSON writer had to give up on');
+  const again = normalize(JSON.parse(text), { check: false });
+  assert.equal(stringifyMap(serialize(again, { check: false })), stringifyMap(serialize(map, { check: false })));
+});
+
 test('qAngle wraps into (-180, 180]: 180 stays 180, -180 becomes 180', () => {
   assert.equal(toDeg(qAngle(toRad(180))), 180);
   assert.equal(toDeg(qAngle(toRad(-180))), 180);

@@ -11,6 +11,7 @@ import { GROUND_TYPES, regionIndex, regionLabel, spawnCount } from '../../map/fo
 // the status text (ui.setStatus) · snap · fps, triangles, draw calls · help.
 
 const PERF_MS = 250;    // the frame numbers change on every frame: four readings a second are plenty
+const NOTE_MS = 6000;   // a note (ui.setNote) that nothing else has ended goes by itself after this
 const NOUN = {
   object: ['object', 'objects'], spawn: ['spawn', 'spawns'], chest: ['chest', 'chests'],
   npc: ['NPC', 'NPCs'], region: ['region', 'regions'], start: ['start point', 'start points'],
@@ -46,6 +47,7 @@ export default function mount(el, ctx) {
   const selection = text('selection', 'Selection');
   const totals = text('totals', 'Objects and monsters on the map');
   const status = text('text', null);
+  status.setAttribute('role', 'status');
 
   // ---- snap
   const snapHint = hintFor('snap.toggle');
@@ -59,7 +61,10 @@ export default function mount(el, ctx) {
   step.el.setAttribute('aria-label', 'Snap step');
 
   // ---- the last frame
-  const perf = text('perf ui-mono', 'Frames per second · triangles · draw calls of the last frame');
+  // in a window that is not wide the bar keeps the frame rate and gives the room of the other two numbers to the
+  // status text (status.css); the tooltip of the cell always has all three
+  const fps = h('span', { class: 'fps' }), load = h('span', { class: 'load' });
+  const perf = h('span', { class: 'cell perf ui-mono' }, fps, load);
   const helpHint = hintFor('help.toggle');
   const help = button('?', () => actions.run('help.toggle'), { title: `Keyboard shortcuts${helpHint ? ` (${helpHint})` : ''}` });
   help.classList.add('flat', 'icon', 'help');
@@ -128,7 +133,7 @@ export default function mount(el, ctx) {
       only = item;
       n++;
     }
-    if (!n) { put(selection, 'Nothing selected'); return; }
+    if (!n) { put(selection, 'Nothing selected'); selection.title = 'Selection'; return; }
     const kinds = KIND_ORDER.filter((kind) => counts[kind]);
     let label = kinds.map((kind) => plural(counts[kind], kind)).join(' + ');
     if (n === 1 && kinds[0] !== 'start') {   // one item: say which
@@ -137,6 +142,7 @@ export default function mount(el, ctx) {
       if (typeof name === 'string' && name) label += `: ${name}`;
     }
     put(selection, label);
+    selection.title = `Selection: ${label}`;      // the cell gives way first in a narrow bar: its text is here in full
   }
   const selectionSoon = rafThrottle(syncSelection);
 
@@ -154,13 +160,36 @@ export default function mount(el, ctx) {
   }
 
   function syncPerf() {
-    const vp = ctx.viewport, info = vp?.info, fps = vp?.fps;
-    put(perf, `${fps > 0 ? int(fps) : '—'} fps · ${short(info?.triangles ?? 0)} tris · ${int(info?.calls ?? 0)} calls`);
+    const vp = ctx.viewport, info = vp?.info, rate = vp?.fps;
+    const frames = `${rate > 0 ? int(rate) : '—'} fps`, rest = ` · ${short(info?.triangles ?? 0)} tris · ${int(info?.calls ?? 0)} calls`;
+    put(fps, frames);
+    put(load, rest);
+    const title = `Frames per second · triangles · draw calls of the last frame\n${frames}${rest}`;
+    if (perf.title !== title) perf.title = title;
+  }
+
+  // The status text, and the note that covers it for a moment (ui.setNote). The line is cut when it is longer than
+  // its cell - instructions of a tool often are - so the cell's tooltip always has the whole of it.
+  // With neither, the bar shows what the active tool is for (tool.intro): there is always a line that says what a
+  // click and a drag do, whoever cleared the status last.
+  let noteTimer = 0;
+  const intro = () => { try { return ctx.tools?.[ui.tool]?.intro ?? ''; } catch { return ''; } };   // a getter of somebody else's module
+  function syncText() {
+    const value = String(ui.note || ui.status || intro() || '');
+    put(status, value);
+    if (status.title !== value) status.title = value;
+    status.classList.toggle('note', !!ui.note);
+  }
+  // A note ends with the next thing that happens: it described the one before.
+  function dropNote() {
+    clearTimeout(noteTimer);
+    noteTimer = 0;
+    if (ui.note) ui.set('note', '');
   }
 
   // ---------------------------------------------------------------- wiring
 
-  store.on('load', () => { regions = null; syncSave(); syncSelection(); syncTotals(); syncCursor(); });
+  store.on('load', () => { regions = null; dropNote(); syncSave(); syncSelection(); syncTotals(); syncCursor(); });
   store.on('history', syncSave);
   store.on('selection', selectionSoon);
   store.on('change', (change) => {
@@ -175,7 +204,19 @@ export default function mount(el, ctx) {
     if (store.selection.size === 1) selectionSoon();   // the label of the one selected item may have changed
   });
   ui.on('cursor', cursorSoon);
-  ui.on('status', (value) => put(status, value == null ? '' : String(value)));
+  ui.on('status', syncText);
+  ui.on('note', (value) => {
+    clearTimeout(noteTimer);
+    noteTimer = value ? setTimeout(dropNote, NOTE_MS) : 0;
+    syncText();
+  });
+  // every edit, undo and redo emits 'history'; the note was written after the events of what it describes
+  store.on('history', dropNote);
+  store.on('selection', dropNote);
+  ui.on('tool', () => { dropNote(); syncText(); });
+  // being read (the pointer rests on it for its tooltip): it waits
+  status.addEventListener('pointerenter', () => clearTimeout(noteTimer));
+  status.addEventListener('pointerleave', () => { if (ui.note) noteTimer = setTimeout(dropNote, NOTE_MS / 3); });
   ui.on('snap', syncSnap);
   ui.on('issues', syncIssues);
   ui.on('readOnly', syncSave);
@@ -187,7 +228,7 @@ export default function mount(el, ctx) {
   syncTotals();
   syncSnap();
   syncPerf();
-  put(status, ui.status ?? '');
+  syncText();
 
   let wait = 0;
   return {

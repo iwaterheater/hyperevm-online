@@ -110,10 +110,11 @@ export function createStore({ maxUndoBytes = 64e6 } = {}) {
   // 'selection' is emitted only when the set is another set than `before`.
   const announce = (before) => { if (selection !== before && !sameSet(selection, before)) events.emit('selection'); };
 
-  function push(label, commands) {
+  // found: the selection the step was made with (a Set that is never mutated: keeping the reference costs nothing).
+  function push(label, commands, found) {
     let bytes = STEP_BYTES;
     for (const c of commands) bytes += Number.isFinite(c.bytes) ? c.bytes : 0;
-    undoStack.push({ id: ++stepIds, label, commands, bytes });
+    undoStack.push({ id: ++stepIds, label, commands, bytes, selection: found });
     undoBytes += bytes;
     redoStack = [];
     // the newest step always stays, however large: the last edit can always be undone
@@ -138,6 +139,10 @@ export function createStore({ maxUndoBytes = 64e6 } = {}) {
 
   // Runs one step backwards (undo) or forwards (redo): one 'change' per command, then the selection rule of the editor -
   // the selection becomes what the step touched and still exists; a step that touched no item leaves it alone.
+  // "Touched" is what the step was applied to, which can be more than what it changed: Align on three objects moves
+  // two of them (the third stood there already), and undoing it must give the three back, or the next button works on
+  // two. A command only knows what it changed - so when everything the step changed was part of the selection the step
+  // was made with, it was an edit OF that selection, and the whole of it comes back.
   function replay(step, back) {
     const before = selection, touched = new Set();
     const commands = back ? step.commands.slice().reverse() : step.commands;
@@ -152,8 +157,10 @@ export function createStore({ maxUndoBytes = 64e6 } = {}) {
       }
     } finally { replaying = false; }
     if (touched.size) {
+      let whole = step.selection ?? null;
+      if (whole) for (const item of touched) if (!whole.has(item)) { whole = null; break; }
       const next = new Set();
-      for (const item of touched) if (kinds.has(item)) next.add(item);
+      for (const item of whole ?? touched) if (kinds.has(item)) next.add(item);
       selection = next;
     }
     announce(before);
@@ -293,7 +300,7 @@ export function createStore({ maxUndoBytes = 64e6 } = {}) {
       }
       const change = settle(command.do(map), 'do');
       if (isEmptyChange(change)) return change;
-      push(command.label, [command]);
+      push(command.label, [command], before);
       events.emit('change', change);
       announce(before);
       events.emit('history');
@@ -315,10 +322,10 @@ export function createStore({ maxUndoBytes = 64e6 } = {}) {
     commit() {
       busy('commit');
       if (!group) return false;
-      const { label, commands } = group;
+      const { label, commands, selection: found } = group;
       group = null;
       const kept = commands.length > 0 && !reverted(commands);
-      if (kept) push(label ?? commands[0].label, commands);
+      if (kept) push(label ?? commands[0].label, commands, found);
       events.emit('history');
       return kept;
     },

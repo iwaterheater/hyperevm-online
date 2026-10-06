@@ -231,13 +231,16 @@ function allowedFactor(ctx, items, f) {
 //   nudge.left / right / up / down   -X / +X / -Z / +Z by the snap step (Shift x 10)
 //   axes.toggle              gizmo axes world <-> local
 // With ui.axes === 'local' turning and scaling leave the positions alone: every item turns and grows on its own spot.
+// It is the WHOLE selection in every tool. A marker tool picks only its own kind, but what is selected - by a panel,
+// by Select All, by the tool before - is what is highlighted and what the inspector shows, and the keys, a drag from
+// a selected item, Delete and Arrange all edit those same items.
 // Each key press is one undo step. -> true when the key was consumed; false leaves it to the next key table (an arrow
 // with nothing selected pans the camera).
 export function selectionKey(ctx, action, ev) {
   const { store, ui, cmd } = ctx;
   if (action === 'axes.toggle') {
     ui.set('axes', ui.axes === 'local' ? 'world' : 'local');
-    ui.setStatus?.(`Gizmo axes: ${ui.axes}`);
+    ui.setNote?.(`Gizmo axes: ${ui.axes}`);
     return true;
   }
   const dot = typeof action === 'string' ? action.indexOf('.') : -1;
@@ -258,7 +261,7 @@ export function selectionKey(ctx, action, ev) {
     if (way !== 'down' && way !== 'up') return false;
     const scale = allowedFactor(ctx, items, way === 'up' ? 1.1 : 0.9);
     if (scale === 1) {
-      ui.setStatus?.('Scale limit reached');
+      ui.setNote?.('Scale limit reached');
       return true;
     }
     label = `Scale ${what}`;

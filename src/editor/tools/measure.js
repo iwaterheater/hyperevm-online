@@ -17,7 +17,7 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { h, row, button } from '../ui/dom.js';
-import { chordLabel } from '../keymap.js';
+import { chordLabel, keyText } from '../keymap.js';
 import { snapPoint } from './common.js';
 
 const MAX_POINTS = 200;        // one label per segment: more than this is a drawing, not a measurement
@@ -297,6 +297,8 @@ export default function create(ctx) {
 
   return {
     id: 'measure', label: 'Measure', icon: '↔', layer: null, picks: [], hidden: false,
+    about: 'Measure distances and areas: click the points',
+    intro: 'Measure: click points on the ground',
     // always a path: Backspace takes a point back and never reaches "delete the selection", however often it is pressed
     get context() { return 'path'; },
 
@@ -409,7 +411,7 @@ export default function create(ctx) {
       strip = {
         count: out(), total: out(), radius: out(), area: out(),
         back: button(['Undo point', key('Backspace')], back, { title: 'Take the last point back' }),
-        clear: button(['Clear', key('Enter')], clear, { title: 'Clear the measurement (Enter or Esc)' }),
+        clear: button(['Clear', key('Enter')], clear, { title: keyText('Clear the measurement (Enter or Esc)') }),
         hint: h('span', { class: 'ui-hint' }),
       };
       el.append(

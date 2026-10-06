@@ -118,7 +118,7 @@ export default function mount(el, ctx) {
       }
       again.focus();
     }
-    ui.setStatus(request.at ? `Playing from the camera (${request.at[0]}, ${request.at[1]})` : 'Playing from the start point');
+    ui.setNote(request.at ? `Playing from the camera (${request.at[0]}, ${request.at[1]})` : 'Playing from the start point');
     return true;
   }
 

@@ -16,12 +16,12 @@
 // store 'load'.
 import { MOB_KEYS, MOB_TYPES, WANDER_R } from '../../shared.js';
 import { LIMITS, regionColor } from '../../map/format.js';
-import { h, row, section, button, numberField, selectField, rafThrottle, leaveField } from '../ui/dom.js';
-import { mod } from '../keymap.js';
-import { FIELDS, typesPatch } from '../fields.js';
+import { h, row, section, button, numberField, selectField, rafThrottle, leaveField, safeColor } from '../ui/dom.js';
+import { mod, keyText } from '../keymap.js';
+import { FIELDS, typesPatch, withEnd } from '../fields.js';
 import { editable, describe } from '../tools/common.js';
 import {
-  campColor, campText, cleanTemplate, filterRows, levelText, populate, sortRows, spawnRows, threatOf, totalsByRegion, typeKeys,
+  campColor, campText, cleanTemplate, filterRows, holdRows, levelText, populate, shortName, sortRows, spawnRows, threatOf, totalsByRegion, typeKeys,
 } from '../spawnstats.js';
 
 // [key, header, tooltip] - the columns of the table. Every column but the first is a value that can be edited.
@@ -57,6 +57,7 @@ export default function mount(el, ctx) {
   const filter = { text: '', region: null };
   let anchor = null;             // the camp a Shift+click extends from
   let card = null;               // the open editor: { pop, items, sync, release }
+  let held = null;               // while the editor is open: the spawns of the table in the order it had when it opened
   let fromPanel = false;         // the selection is being changed by a click in this table: do not scroll under the cursor
   let revealSoon = false;        // a camp was selected before its row existed: scroll to it once the table has it
   let entries = new Map();       // spawn -> { tr, cells, sig }: rows are reused while their camp lives
@@ -140,7 +141,7 @@ export default function mount(el, ctx) {
     h('div', { class: 'go' }, popGo, popWhy));
   populateBox.classList.add('populate');
 
-  const hint = h('div', { class: 'ui-hint help' }, 'Click a camp to select and frame it · click a value to edit it · Shift or Ctrl / ⌘ click for several');
+  const hint = h('div', { class: 'ui-hint help' }, keyText('Click a camp to select and frame it · click a value to edit it · Mod+click adds one, Shift+click a range'));
   const root = h('div', { class: 'root' }, h('div', { class: 'bar' }, search, regionPick), note, wrap, empty, foot, totalsBox, populateBox, hint);
   el.replaceChildren(root);
 
@@ -178,7 +179,10 @@ export default function mount(el, ctx) {
 
   function renderTable() {
     const map = store.map;
-    shown = map ? sortRows(filterRows(rows, filter), sort.key, sort.dir) : [];
+    const sorted = map ? sortRows(filterRows(rows, filter), sort.key, sort.dir) : [];
+    // While a value is being edited the rows stand still: the map follows every key, and a table sorted by that very
+    // column would move the row - and close the editor - between the first digit and the second.
+    shown = card && held ? holdRows(rows, sorted, held, card.items) : sorted;
     const byLevel = !!ui.overlays?.levelColors, next = new Map(), sel = store.selection, open = layerOpen();
     const editing = card ? new Set(card.items) : null;
     for (const r of shown) {
@@ -255,7 +259,7 @@ export default function mount(el, ctx) {
     totalsList.replaceChildren(...regionsTopFirst().map((region) => {
       const t = byRegion.get(region), none = !t || t.camps === 0;
       const kinds = none ? [] : Object.keys(t.byType).map((key) => h('span', { class: 'kind', title: `About ${num(t.byType[key], 1)} ${MOB_TYPES[key].name}` },
-        h('span', { class: 'dot', style: { background: hex(MOB_TYPES[key].color) } }), `${num(t.byType[key], 1)} ${MOB_TYPES[key].name.split(' ').pop()}`));
+        h('span', { class: 'dot', style: { background: hex(MOB_TYPES[key].color) } }), `${num(t.byType[key], 1)} ${shortName(key)}`));
       const line = h('div', {
         class: ['zone', none && 'none', filter.region === region && 'on'],
         title: none ? `${regionName(region)}: no camps` : `${regionName(region)}: click to show only its camps`,
@@ -266,7 +270,7 @@ export default function mount(el, ctx) {
         },
       },
         h('div', { class: 'zone-line' },
-          h('span', { class: 'ui-swatch', style: { background: regionColor(map, region) } }),
+          h('span', { class: 'ui-swatch', style: { background: safeColor(regionColor(map, region)) } }),   // from the file: never a raw CSS value
           h('span', { class: 'zone-name' }, regionName(region)),
           region.safe ? h('span', { class: 'ui-badge ok' }, 'safe') : null,
           h('span', { class: 'zone-n' }, none ? '—' : `${plural(t.camps, 'camp')} · ${t.monsters}`),
@@ -410,6 +414,7 @@ export default function mount(el, ctx) {
   }
 
   function sortBy(key) {
+    closeCard();       // the order is asked for anew: nothing holds the rows any more
     if (sort.key !== key) sort = { key, dir: 1 };
     else if (sort.dir > 0) sort = { key, dir: -1 };
     else sort = { key: 'index', dir: 1 };      // the third click: back to map order
@@ -422,11 +427,13 @@ export default function mount(el, ctx) {
     const c = card;
     if (!c) return;
     card = null;
+    held = null;
     if (c.pop.contains(document.activeElement)) leaveField();      // what is being typed is committed, not lost
     c.release();
     try { if (c.pop.matches(':popover-open')) c.pop.hidePopover(); } catch { /* a browser without popovers: it is a plain box */ }
     c.pop.remove();
     for (const entry of entries.values()) entry.tr.classList.remove('editing');
+    refresh();         // the rows were held in place while it was open: now the table sorts and filters again
   }
 
   // Beside the panel, level with the row: the table stays readable while its values are edited.
@@ -446,6 +453,7 @@ export default function mount(el, ctx) {
   // Opens the editor for `spawn` - or for every selected camp when it is one of them - with the field of column `key`
   // ready to type into.
   function openCard(spawn, key, tr) {
+    const order = shown.map((r) => r.spawn);      // from one value to the next the rows stay as they are, too
     closeCard();
     const chosen = store.selection.has(spawn) ? editable(ctx, store.selected('spawn')) : [];
     const items = chosen.includes(spawn) ? chosen : editable(ctx, [spawn]);
@@ -492,12 +500,8 @@ export default function mount(el, ctx) {
     // ---- levels: the two ends are edited one by one, so that camps with different ranges keep what was not typed
     const setLevel = (end) => (v, { relative } = {}) => {
       const patches = items.map((item) => {
-        const lvl = [item.lvl[0], item.lvl[1]];
-        const next = relative ? clamp(Math.round(applyRel(lvl[end], relative)), LIMITS.level) : v;
-        if (!Number.isFinite(next)) return {};
-        lvl[end] = next;
-        if (lvl[0] > lvl[1]) lvl[1 - end] = next;      // the pair stays ordered: the other end comes along
-        return { lvl };
+        const next = relative ? clamp(Math.round(applyRel(item.lvl[end], relative)), LIMITS.level) : v;
+        return Number.isFinite(next) ? { lvl: withEnd(item.lvl, end, next) } : {};      // the pair stays ordered
       });
       step(`Change the levels of ${describe(ctx, items)}`, cmd.setEach(items, patches));
       sync();
@@ -576,6 +580,7 @@ export default function mount(el, ctx) {
     box.addEventListener('toggle', (ev) => { if (ev.newState === 'closed' && card?.pop === box) closeCard(); });
 
     card = { pop: box, items, sync, release: () => { for (const off of subs) off(); for (const n of numbers) n.reset(); } };
+    held = order;
     if (popover) {
       el.append(box);
       try { box.showPopover(); } catch { /* shown as a plain box */ }

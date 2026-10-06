@@ -12,13 +12,21 @@
 //   triangles   Map<modelId, triangles of one instance>
 //
 // Codes
-//   item-in-collider   a chest, an NPC or the centre of a spawn inside the collider of an object
-//   unreachable        a chest, an NPC or the centre of a spawn that cannot be walked to from the start disc
+//   item-in-collider   a chest or an NPC inside the collider of an object; a spawn only when its monsters have nowhere
+//                      else to appear (radius 0, or a disc without one open spot)
+//   unreachable        a chest or an NPC that cannot be walked to from the start disc; a spawn when NO open spot of its
+//                      disc can be
+// A camp spreads its monsters over its whole disc (spawnHome), so a centre that stands in a tree is harmless: for a
+// spawn with a radius both checks ask about the disc, not about the centre.
 //   region-hidden      a region that is the winning one at no vertex of the ground grid
+//   object-blocked     ONE row for all the objects that stand on ground nobody can walk on (water, lava ...): after a
+//                      pond was painted over a wood, this is where the trees in it are found. It may be meant - a
+//                      pier, a rock in a lake - so it only says so.
 //   heavy-model        one model above MODEL_TRIANGLES triangles in total
 //   many-triangles     more than TOTAL_TRIANGLES instanced triangles in total
 //   model-failed       a model that failed to load (drawn as a magenta box)
-import { GROUND_TYPES, groundIx, groundX, inShape, shapeBounds, shapeCentre } from '../map/format.js';
+import { GROUND_TYPES, LIMITS, groundIx, isBlocked, shapeBounds, shapeCentre } from '../map/format.js';
+import { runs } from './raster.js';
 
 export const PLAYER_R = 0.4;              // what view.collide() pushes out of obstacles
 export const REACH = 1.5;                 // an item counts as reached when a walkable cell this close to it was
@@ -57,13 +65,18 @@ function insideCollider(obs, x, z) {
 }
 
 // The cells of a 1-unit grid a player can stand on and get to from the start disc.
-// -> { reached(x, z) -> boolean, seeds: number } - reached: a walked cell lies within REACH of the point.
+// -> { seeds, reached(x, z, r = 0), open(x, z, r) }
+//    reached  a walked cell lies within REACH of the point - or, for a disc, anywhere in it (within max(r, REACH))
+//    open     a cell a player could stand on, walked to or not, lies within r of the point
 // A cell is closed when it is beyond the map radius, on ground that blocks, or covered by an obstacle grown by the
 // player's radius. The flood is 8-connected: a 1-unit grid cannot tell a tight diagonal passage from a wall, and a
 // warning that cries wolf is worth less than one that misses a hairline gap.
+// The grid never reaches beyond the ground: there is nothing to stand on out there, and the ground is what bounds the
+// work - a radius can be any number in a file that is being repaired, and a grid of its size would be the freeze.
 function flood(map, obs) {
-  const R = Math.ceil(map.radius / STEP), n = 2 * R + 1, state = new Uint8Array(n * n);   // 0 open, 1 closed, 2 reached
   const g = map.ground, size = g.size, r2 = map.radius * map.radius;
+  const reach = Math.min(map.radius, (size - 1) / 2 * g.cell + g.cell);
+  const R = Math.max(0, Math.ceil(reach / STEP)), n = 2 * R + 1, state = new Uint8Array(n * n);   // 0 open, 1 closed, 2 reached
   const sound = g.cells.length === size * size;
   for (let j = 0; j < n; j++) {
     const z = (j - R) * STEP, row = sound ? groundIx(g, z) * size : 0;
@@ -117,27 +130,30 @@ function flood(map, obs) {
       }
     }
   }
+  // is there a cell within `reach` of (x, z) that is walked to (walked: true) or at least open (walked: false)?
+  const any = (x, z, reach, walked) => {
+    if (!finite(x) || !finite(z) || !(reach >= 0)) return false;
+    const i0 = Math.max(0, Math.ceil((x - reach) / STEP) + R), i1 = Math.min(n - 1, Math.floor((x + reach) / STEP) + R);
+    const j0 = Math.max(0, Math.ceil((z - reach) / STEP) + R), j1 = Math.min(n - 1, Math.floor((z + reach) / STEP) + R);
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const dx = (i - R) * STEP - x, dz = (j - R) * STEP - z, s = state[j * n + i];
+        if ((walked ? s === 2 : s !== 1) && dx * dx + dz * dz <= reach * reach) return true;
+      }
+    }
+    return false;
+  };
   return {
     seeds,
-    reached(x, z) {
-      if (!finite(x) || !finite(z)) return false;
-      const i0 = Math.max(0, Math.ceil((x - REACH) / STEP) + R), i1 = Math.min(n - 1, Math.floor((x + REACH) / STEP) + R);
-      const j0 = Math.max(0, Math.ceil((z - REACH) / STEP) + R), j1 = Math.min(n - 1, Math.floor((z + REACH) / STEP) + R);
-      for (let j = j0; j <= j1; j++) {
-        for (let i = i0; i <= i1; i++) {
-          const dx = (i - R) * STEP - x, dz = (j - R) * STEP - z;
-          if (state[j * n + i] === 2 && dx * dx + dz * dz <= REACH * REACH) return true;
-        }
-      }
-      return false;
-    },
+    reached: (x, z, r = 0) => any(x, z, Math.max(finite(r) ? r : 0, REACH), true),
+    open: (x, z, r) => any(x, z, r, false),
   };
 }
 
 // The indices of the regions that win at no vertex of the ground grid: covered completely by later regions, off the
 // grid, or smaller than a ground cell. Later regions win, so they claim their vertices first.
 function hiddenRegions(map) {
-  const g = map.ground, size = g.size, c = (size - 1) / 2, out = [];
+  const g = map.ground, size = g.size, out = [];
   if (!Number.isInteger(size) || size < 1 || !(g.cell > 0)) return out;
   const claimed = new Uint8Array(size * size);
   for (let r = map.regions.length - 1; r >= 0; r--) {
@@ -145,18 +161,15 @@ function hiddenRegions(map) {
     if (!s || (s.type === 'circle' ? !(finite(s.x) && finite(s.z) && finite(s.r)) : !(s.type === 'poly' && Array.isArray(s.points) && s.points.length >= 3))) continue;
     const b = shapeBounds(s);
     if (!finite(b.minX) || !finite(b.maxX) || !finite(b.minZ) || !finite(b.maxZ)) continue;
-    const ix0 = Math.max(0, Math.ceil(b.minX / g.cell + c)), ix1 = Math.min(size - 1, Math.floor(b.maxX / g.cell + c));
-    const iz0 = Math.max(0, Math.ceil(b.minZ / g.cell + c)), iz1 = Math.min(size - 1, Math.floor(b.maxZ / g.cell + c));
+    // row by row (raster.js): a region with many points costs its edges per row of the grid, not per vertex
     let wins = 0;
-    for (let iz = iz0; iz <= iz1; iz++) {
-      const z = groundX(g, iz);
-      for (let ix = ix0; ix <= ix1; ix++) {
-        const k = iz * size + ix;
-        if (claimed[k] || !inShape(s, groundX(g, ix), z)) continue;
+    runs(g, s, (iz, ix0, ix1) => {
+      for (let k = iz * size + ix0, end = iz * size + ix1; k <= end; k++) {
+        if (claimed[k]) continue;
         claimed[k] = 1;
         wins++;
       }
-    }
+    });
     if (!wins) out.push(r);
   }
   return out.reverse();
@@ -170,31 +183,40 @@ export function editorChecks(map, { obstacles = null, missing = null, triangles 
   const at = (kind, index, p) => (finite(p.x) && finite(p.z) ? { kind, index, x: p.x, z: p.z } : { kind, index });
   const obs = readObstacles(obstacles);
 
-  // what a player walks up to: [kind, list key, what to call one]
+  // what a player walks up to: [kind, list key, what to call one]. `r` is the disc a spawn fills with its monsters;
+  // a chest, an NPC and a spawn of radius 0 are one point.
   const targets = [];
-  for (const [kind, key, name] of [['chest', 'chests', 'This chest'], ['npc', 'npcs', 'This NPC'], ['spawn', 'spawns', 'The centre of this spawn']]) {
-    map[key].forEach((item, index) => targets.push({ kind, index, item, path: `${key}[${index}]`, name }));
+  for (const [kind, key, name] of [['chest', 'chests', 'This chest'], ['npc', 'npcs', 'This NPC'], ['spawn', 'spawns', 'This spawn']]) {
+    map[key].forEach((item, index) => {
+      targets.push({ kind, index, item, path: `${key}[${index}]`, name, r: kind === 'spawn' && item.r > 0 ? item.r : 0 });
+    });
   }
+  // A radius outside the format's limits is an error validate() has listed already; where a player can walk is not
+  // asked of a map without a usable size (the answer would be about another island than the one being repaired).
+  const sized = finite(map.radius) && map.radius >= LIMITS.radius[0] && map.radius <= LIMITS.radius[1];
+  const walk = targets.length && sized ? flood(map, obs) : null;
 
   // ---- item-in-collider
   if (obs.nCircles || obs.nBoxes) {
     for (const t of targets) {
-      if (insideCollider(obs, t.item.x, t.item.z)) {
-        warn('item-in-collider', t.path, `${t.name} is inside the collider of an object.`, at(t.kind, t.index, t.item));
+      if (!insideCollider(obs, t.item.x, t.item.z)) continue;
+      if (!t.r) warn('item-in-collider', t.path, `${t.name} is inside the collider of an object.`, at(t.kind, t.index, t.item));
+      else if (walk && !walk.open(t.item.x, t.item.z, t.r)) {      // (no walk grid: a disc cannot be judged, so it is not accused)
+        warn('item-in-collider', t.path, `${t.name} has no open spot in its disc: its centre is inside the collider of an object.`, at(t.kind, t.index, t.item));
       }
     }
   }
 
   // ---- unreachable
-  if (targets.length) {
-    const walk = flood(map, obs);
+  if (walk) {
     if (!walk.seeds) {
       warn('unreachable', 'start', 'The start disc has no ground a player can stand on: nothing can be reached from it.', at('start', 0, map.start));
     } else {
       for (const t of targets) {
-        if (!walk.reached(t.item.x, t.item.z)) {
-          warn('unreachable', t.path, `${t.name} cannot be reached on foot from the start point.`, at(t.kind, t.index, t.item));
-        }
+        if (walk.reached(t.item.x, t.item.z, t.r)) continue;
+        warn('unreachable', t.path,
+          t.r ? `No part of this spawn's disc can be reached on foot from the start point.` : `${t.name} cannot be reached on foot from the start point.`,
+          at(t.kind, t.index, t.item));
       }
     }
   }
@@ -205,6 +227,17 @@ export function editorChecks(map, { obstacles = null, missing = null, triangles 
     warn('region-hidden', `regions[${index}]`,
       'This region wins at no point of the ground grid: later regions cover it, or it is smaller than a ground cell.',
       at('region', index, shapeCentre(region.shape)));
+  }
+
+  // ---- object-blocked: one row, however many they are (a lake painted over a wood drowns hundreds of trees)
+  {
+    let n = 0;
+    for (const obj of map.objects) if (finite(obj.x) && finite(obj.z) && isBlocked(map, obj.x, obj.z)) n++;
+    // no item and no point of its own: the Issues panel knows which objects are meant and selects them all
+    if (n) {
+      warn('object-blocked', 'objects',
+        `${count(n)} object${n === 1 ? ' stands' : 's stand'} on ground that cannot be walked on (water, lava and the like): move or delete what is not meant to be there.`);
+    }
   }
 
   // ---- heavy-model, many-triangles

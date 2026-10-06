@@ -32,12 +32,18 @@ export function expectedByType(spawn) {
   return out;
 }
 
-// 'Skeleton Minion' for one type, 'chaser 3 : runner 2' for a mix - the wording of the marker labels.
+// 'Skeleton Minion' -> 'Minion': what a monster type is called where there is room for one word (the weights of the
+// Spawn strip, the totals of the Spawns panel, a mix in a label). The file's own key ('chaser') is never shown: no
+// panel says which monster it is.
+export const shortName = (key) => (MOB_TYPES[key]?.name ?? String(key)).split(' ').pop();
+
+// 'Skeleton Minion' for one type, 'Minion 3 : Rogue 2' for a mix (weights) - the wording of the marker labels, the
+// status bar, the Spawns table and the Populate form.
 export function mixText(types) {
   const keys = typeKeys(types);
   if (!keys.length) return 'no monsters';
   if (keys.length === 1) return MOB_TYPES[keys[0]].name;
-  return keys.map((key) => `${key} ${types[key]}`).join(' : ');
+  return keys.map((key) => `${shortName(key)} ${types[key]}`).join(' : ');
 }
 
 export const levelText = (lvl) => (lvl[0] === lvl[1] ? `Lv ${lvl[0]}` : `Lv ${lvl[0]}–${lvl[1]}`);
@@ -200,6 +206,26 @@ export function sortRows(rows, key = 'index', dir = 1) {
     respawn: (a, b) => a.respawn - b.respawn,
   }[key] ?? (() => 0);
   return rows.slice().sort((a, b) => sign * by(a, b) || sign * (a.index - b.index));
+}
+
+// The table while one of its rows is being edited: the rows stand still. A value that is typed is in the map after every
+// key ("1", then "12"), and a table that sorted by that value would send the row away between two keys - and the editor
+// that hangs beside it with it.
+//   rows   every camp (spawnRows)           shown  what the sort and the filter would show now
+//   held   the spawns of the table in the order it had when the editor opened
+//   keep   the camps under edit: they stay even when the filter no longer matches them
+// -> the rows of `held` that still exist and pass (or are kept), in that order, then whatever is new in `shown`.
+export function holdRows(rows, shown, held, keep = []) {
+  const all = new Map(rows.map((r) => [r.spawn, r])), passes = new Set(shown.map((r) => r.spawn)), stay = new Set(keep);
+  const out = [], seen = new Set();
+  for (const spawn of held) {
+    const r = all.get(spawn);
+    if (!r || seen.has(spawn) || !(passes.has(spawn) || stay.has(spawn))) continue;
+    seen.add(spawn);
+    out.push(r);
+  }
+  for (const r of shown) if (!seen.has(r.spawn)) out.push(r);     // a camp that appeared meanwhile (an undo, a paste)
+  return out;
 }
 
 // A filter text as the panel's search box takes it: words that must all be found in the camp's region name or among

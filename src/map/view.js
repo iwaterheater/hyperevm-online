@@ -1055,7 +1055,9 @@ export class MapView {
     const put = (c) => {
       const i0 = Math.floor((c.x - c.ex) / GRID), i1 = Math.floor((c.x + c.ex) / GRID);
       const j0 = Math.floor((c.z - c.ez) / GRID), j1 = Math.floor((c.z + c.ez) / GRID);
-      if (!((i1 - i0 + 1) * (j1 - j0 + 1) <= BIG)) { this.big.push(c); return; }
+      // Beyond 2^53 a cell index no longer counts up (i + 1 === i): the loops below would never end. A collider that
+      // far out - a file with x: 1e300 that the editor has open to be repaired - goes on the plain list instead.
+      if (!((i1 - i0 + 1) * (j1 - j0 + 1) <= BIG) || !Number.isSafeInteger(i1) || !Number.isSafeInteger(j1) || !Number.isSafeInteger(i0) || !Number.isSafeInteger(j0)) { this.big.push(c); return; }
       for (let i = i0; i <= i1; i++) {
         for (let j = j0; j <= j1; j++) {
           const key = cellKey(i, j), cell = this.grid.get(key);

@@ -1,5 +1,5 @@
 import { h, button } from '../ui/dom.js';
-import { LAYER_OF, validate } from '../../map/format.js';
+import { LAYER_OF, hasBoss, isBlocked, validate } from '../../map/format.js';
 import { editorChecks } from '../checks.js';
 
 // The Issues panel (#validation): everything that is wrong with the map, or merely odd.
@@ -21,6 +21,29 @@ const OPEN_UP_TO = 6;   // a group with at most this many rows starts open
 
 const plural = (n, word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+// '61 and 100', '3, 61 and 100'; beyond six the count of the rest
+const listed = (numbers) => {
+  const shown = numbers.slice(0, 6).map(String), rest = numbers.length - shown.length;
+  if (rest > 0) return `${shown.join(', ')} and ${rest} more`;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown.join('');
+};
+
+// An issue about a whole list names no item ("More than one spawn has a boss", path 'spawns'), and its row would be
+// a dead end: the mapper is left to find the camps by hand. For these codes the panel knows which items are meant.
+//   code -> (map) => { kind, items, what }   what: how the row names them, in the words of the other panels
+const ABOUT = {
+  'multi-boss': (map) => {
+    const items = map.spawns.filter(hasBoss);
+    return { kind: 'spawn', items, what: `Camps ${listed(items.map((s) => map.spawns.indexOf(s) + 1))}` };
+  },
+  'object-blocked': (map) => {
+    const items = map.objects.filter((o) => isBlocked(map, o.x, o.z));
+    return { kind: 'object', items, what: plural(items.length, 'object') };
+  },
+};
+// What the other panels call the item of an issue - or null, and the row shows the file path alone. The Spawns table
+// numbers its camps from 1 ("Camp 99"); the path of the same camp counts from 0 ("spawns[98]").
+const nameOf = (issue) => (issue.kind === 'spawn' && Number.isInteger(issue.index) ? `Camp ${issue.index + 1}` : null);
 
 export default function mount(el, ctx) {
   const { store, ui, actions } = ctx;
@@ -97,7 +120,8 @@ export default function mount(el, ctx) {
     // the item an issue names is looked up now, while the indices are those of this very map
     entries = [...found, ...extra].map((issue) => {
       const item = issue.kind && Number.isInteger(issue.index) ? store.items(issue.kind)[issue.index] ?? null : null;
-      return { issue, item };
+      const about = item === null && Object.hasOwn(ABOUT, issue.code) ? ABOUT[issue.code](map) : null;
+      return { issue, item, about: about?.items.length ? about : null };
     });
     const errors = entries.filter((e) => e.issue.level === 'error').length, warnings = entries.length - errors;
     if (ui.issues?.errors !== errors || ui.issues?.warnings !== warnings) ui.set('issues', { errors, warnings });
@@ -111,32 +135,35 @@ export default function mount(el, ctx) {
   }
 
   function focus(entry) {
-    const { issue, item } = entry;
-    const live = item && store.kindOf(item) === issue.kind ? item : null;   // still in the map
-    if (live) {
-      store.select([live]);
-      const layer = LAYER_OF[issue.kind], l = ui.layers?.[layer];
+    const { issue, item, about } = entry, kind = about?.kind ?? issue.kind;
+    // the item of the issue - or, for an issue about a whole list, the items it means - that are still in the map
+    const live = (about ? about.items : item ? [item] : []).filter((it) => store.kindOf(it) === kind);
+    if (live.length) {
+      store.select(live);
+      const layer = LAYER_OF[kind], l = ui.layers?.[layer];
       if (l && (!l.visible || l.locked)) ui.toast(`Layer ${l.visible ? 'locked' : 'hidden'}: ${layer}`, 'warn');
     }
     if (finite(issue.x) && finite(issue.z)) ctx.viewport.focus({ x: issue.x, z: issue.z });
-    else if (live) ctx.viewport.focus([live]);
-    ui.setStatus(issue.message);
+    else if (live.length) ctx.viewport.focus(live);
+    ui.setNote(about ? `${issue.message} ${about.what}: selected.` : issue.message);
   }
 
   function rowOf(entry) {
-    const { issue } = entry, there = entry.item !== null || (finite(issue.x) && finite(issue.z));
+    const { issue, about } = entry, there = entry.item !== null || about !== null || (finite(issue.x) && finite(issue.z));
+    const name = about?.what ?? nameOf(issue);
     const node = h('div', {
       class: ['ui-item', 'row', !there && 'plain'], role: there ? 'button' : null,
-      title: there ? `${issue.path}\nClick: select it and go there` : issue.path,
+      title: `${name ? `${name} \u00b7 ` : ''}${issue.path}${there ? `\nClick: select ${about ? 'them' : 'it'} and go there` : ''}`,
       dataset: { code: issue.code, path: issue.path },
-    }, h('span', { class: 'message' }, issue.message), h('span', { class: 'path ui-mono' }, issue.path));
+    }, h('span', { class: 'message' }, issue.message), h('span', { class: 'path ui-mono' }, name ? `${name} \u00b7 ${issue.path}` : issue.path));
     if (there) node.addEventListener('click', () => focus(entry));
     return node;
   }
 
   function render() {
     showState();
-    const next = entries.map((e) => `${e.issue.level}\n${e.issue.code}\n${e.issue.path}\n${e.issue.message}`).join('\n\n');
+    // `checked` is part of it: a first run that finds nothing must still turn "Not checked yet" into "No issues"
+    const next = `${checked}\n\n${entries.map((e) => `${e.issue.level}\n${e.issue.code}\n${e.issue.path}\n${e.issue.message}\n${e.about?.what ?? ''}`).join('\n\n')}`;
     if (next === signature) return;
     signature = next;
 

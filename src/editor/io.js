@@ -16,9 +16,15 @@ import { h, button, leaveField } from './ui/dom.js';
 //
 // The draft: 3 s after the last change the map is written to localStorage['hypercat-editor-draft'] as
 // { rev, at, map } - never while an edit is open, and never while nothing is unsaved (Save removes the draft itself,
-// in net.js, and a timer that fires just after must not bring it back). It is offered once, on the first map the
-// editor loads. Restoring is exactly an import, so a draft made while the map had errors - the states in which Save
-// is disabled and the draft is the only copy - comes back with its errors listed.
+// in net.js, and a timer that fires just after must not bring it back). It is offered on the first map the editor
+// loads. Restoring is exactly an import, so a draft made while the map had errors - the states in which Save is
+// disabled and the draft is the only copy - comes back with its errors listed.
+//
+// A draft is unsaved work, possibly the only copy of it: it leaves the storage when the user says Restore or Discard,
+// and for no other reason. A draft that was offered and not answered (Esc) is KEPT: it stays where it is, a button in
+// the menu bar ("Draft 14:02?") asks again at any time, no save, revert or reload removes it (net.draftKept), and this
+// page writes no draft of its own over it - so the question comes back by itself once, as soon as this page has
+// unsaved changes that would need the place.
 //
 // Backups are the server's business: it copies the map file into map/backups/ before every save that changes it, and
 // no endpoint serves them, so there is nothing for this module to list.
@@ -90,6 +96,8 @@ export default function mount(el, ctx) {
   let quotaToasted = false;     // 'Draft not saved' is said once, not every three seconds
   let offering = false;         // the restore question is open: the draft it asks about must not be overwritten
   let ownDraft = false;         // this page has written a draft that - as far as it knows - is still in storage
+  let kept = null;              // { draft, map }: the draft of an earlier session, offered and not answered yet
+  let reminded = false;         // ... and the question was repeated once, when this page had changes of its own
 
   // The small note beside the buttons: "Draft 14:02" while the unsaved state of the map is safe in storage.
   const draftNote = h('span', { class: 'ui-hint', hidden: true });
@@ -98,9 +106,24 @@ export default function mount(el, ctx) {
     draftNote.textContent = at ? `Draft ${clock(at)}` : '';
     draftNote.title = at ? 'Your unsaved changes are kept in this browser as a draft: it is offered when the editor opens again' : '';
   };
+  // The button of a kept draft: the question it stands for can be answered at any time.
+  const keptButton = button('', () => { if (settled()) askKept(); });
+  keptButton.classList.add('kept');
+  keptButton.hidden = true;
+  const keep = (value) => {
+    kept = value;
+    net.draftKept = !!value;        // net.js removes the draft after a save - but never this one
+    keptButton.hidden = !value;
+    keptButton.textContent = value ? `Draft ${clock(value.draft.at)}?` : '';
+    keptButton.title = value
+      ? `An unsaved draft from ${clock(value.draft.at)} is waiting for your answer: click to restore or discard it.\n`
+        + 'Until then it is kept as it is, and the changes you make now are NOT kept as a draft.'
+      : '';
+  };
   const clearDraft = () => {
     try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage disabled: there is no draft */ }
     ownDraft = false;
+    keep(null);
     showDraft(0);
   };
   // -> { rev, at, map } as it was stored, or null. The storage may be disabled or hold anything.
@@ -112,7 +135,8 @@ export default function mount(el, ctx) {
     } catch { return null; }
   };
 
-  function writeDraft() {
+  // ask: false when the page is being hidden or closed - no time for a question.
+  function writeDraft(ask = true) {
     clearTimeout(draftTimer);
     draftTimer = 0;
     if (!store.map || offering) return;
@@ -121,6 +145,15 @@ export default function mount(el, ctx) {
       // nothing is unsaved (a save, or every edit undone): a draft of ours still in storage holds changes that are
       // gone. A draft from an earlier session that was offered and neither restored nor discarded is not ours: it stays.
       if (ownDraft) clearDraft();
+      return;
+    }
+    if (kept) {
+      // The storage holds the draft that still waits for its answer, and it is never written over. Now that this page
+      // has unsaved work of its own, which needs the place, the question is asked a second time - once.
+      if (ask && !reminded) {
+        reminded = true;
+        askKept();
+      }
       return;
     }
     let text;
@@ -149,7 +182,7 @@ export default function mount(el, ctx) {
     draftTimer = setTimeout(writeDraft, ms);
   }
   // The tab is being hidden or closed with a draft still due: write it now, the timer may never fire.
-  const flushDraft = () => { if (draftTimer) writeDraft(); };
+  const flushDraft = () => { if (draftTimer) writeDraft(false); };
 
   // Loads a decoded map as unsaved work - the one path of Import, New and a restored draft.
   const loadUnsaved = (map) => {
@@ -172,16 +205,33 @@ export default function mount(el, ctx) {
     try {
       if (canonical(map) === canonical(store.map)) { clearDraft(); return; }     // it is the map that was just loaded
     } catch { /* cannot tell: ask */ }
+    // from here on the draft is the user's: only Restore or Discard takes it out of the storage
+    keep({ draft, map });
+    askKept();
+  }
 
-    const sameRev = draft.rev === (net.baseRev ?? ''), when = clock(draft.at);
-    const text = sameRev
+  // The question about the kept draft: Restore, Discard - or Escape, which leaves it kept.
+  function askKept() {
+    if (!kept || offering) return;
+    const { draft, map } = kept, when = clock(draft.at);
+    const sameRev = draft.rev === (net.baseRev ?? '');   // asked again later, this page may have saved in between
+    const unsaved = !!store.map && store.dirty;       // ... or have changes of its own by now
+    let text = sameRev
       ? `Restore the unsaved draft from ${when}?\n\nIt holds changes that were never saved to the server (${sizeOf(map)}).`
       : `An unsaved draft from ${when} was found, but the map on the server has changed since it was made.\n\n`
         + `Restore anyway brings the draft back (${sizeOf(map)}); saving it will then ask before it overwrites the server's map.`;
+    if (unsaved) {
+      text += '\n\nRestoring it replaces the map in the editor: the changes you have made since this page opened are lost, and so is the undo history. '
+        + 'Discard deletes the draft for good; your changes are then kept as the new draft.';
+    }
     offering = true;
-    ui.choose(text, [{ id: 'discard', label: 'Discard', danger: true }, { id: 'restore', label: sameRev ? 'Restore' : 'Restore anyway' }]).then((answer) => {
+    // sticky: a stray click beside the dialog must not answer for the user; Escape means "not now"
+    ui.choose(text, [{ id: 'discard', label: 'Discard', danger: true }, { id: 'restore', label: sameRev ? 'Restore' : 'Restore anyway' }], { sticky: true }).then((answer) => {
       offering = false;
       if (answer === 'restore') {
+        if (store.grouping) { ui.toast(BUSY, 'warn'); return; }      // (the dialog is modal: nothing can have opened an edit)
+        keep(null);
+        ownDraft = true;                    // what is in storage is the state of this page now
         loadUnsaved(map);
         // the draft was made from that revision: a save must meet the conflict dialog, not overwrite silently
         if (!sameRev) net.baseRev = draft.rev;
@@ -190,7 +240,13 @@ export default function mount(el, ctx) {
       } else if (answer === 'discard') {
         clearDraft();
         ui.toast('Draft discarded');
-      } else ui.toast('The draft is kept until your next edit; reload the page to be asked again');
+        if (store.map && store.dirty) writeDraft();     // the place is free: the changes of this page go there now
+      } else {
+        ui.toast({
+          text: `The draft from ${when} is kept: "${keptButton.textContent}" in the menu bar asks again. Until you answer, your new changes are not kept as a draft`,
+          action: { label: 'Answer now', run: () => { if (settled()) askKept(); } },
+        }, unsaved ? 'warn' : 'info');
+      }
     }).catch((err) => {
       offering = false;
       console.error('[editor] the draft offer failed', err);
@@ -249,7 +305,7 @@ export default function mount(el, ctx) {
       if (!settled()) return false;       // an edit was opened while the file was being read
       if (store.dirty && !(await ui.confirm(
         `Replace the map in the editor with ${name}?\n\nYour unsaved changes will be lost, and so will the undo history.`,
-        { ok: 'Import', cancel: 'Cancel' },
+        { ok: 'Import', cancel: 'Cancel', danger: true },     // Cancel has the focus: Enter loses nothing
       ))) return false;
       if (!settled()) return false;
       loadUnsaved(map);
@@ -301,13 +357,14 @@ export default function mount(el, ctx) {
     const dirty = store.dirty;
     if (dirty && !(await ui.confirm(
       'Revert to the saved map?\n\nEvery change since the last save will be lost, and so will the undo history.',
-      { ok: 'Revert', cancel: 'Cancel' },
+      { ok: 'Revert', cancel: 'Cancel', danger: true },       // Cancel has the focus: Enter loses nothing
     ))) return false;
     reverting = true;
     try {
       const map = await net.loadMap();
       store.load(map);
-      clearDraft();       // the changes were given up: their draft must not come back on the next start
+      // the changes were given up: their draft must not come back on the next start. A kept draft is not theirs.
+      if (!kept) clearDraft();
       ui.toast(dirty ? 'Reverted to the saved map' : 'Loaded the map from the server');
       return true;
     } catch (err) {
@@ -351,7 +408,7 @@ export default function mount(el, ctx) {
   newButton.title = 'Start an empty island (the map on the server changes only when you save)';
   importButton.title = 'Load a map file (.json) into the editor as unsaved work. You can also drop the file on the window';
   exportButton.title = 'Download the map as a .json file, exactly as Save would write it';
-  el.replaceChildren(newButton, importButton, exportButton, revertButton, draftNote, picker);
+  el.replaceChildren(newButton, importButton, exportButton, revertButton, draftNote, keptButton, picker);
 
   // An id somebody registered already is left alone (registering twice throws).
   const offer = (id, fn) => { if (!actions.has(id)) actions.register(id, fn); };
