@@ -244,6 +244,7 @@ The toolbar also switches overlays (grid, colliders, the threat rings of all cam
 - **Drafts.** Three seconds after the last change the unsaved map is kept in the browser's storage, also when it has errors and cannot be saved. The next time the editor opens it offers to restore the draft. A save removes the draft of the changes it saved. A draft that was offered and not answered (`Esc`) is never thrown away for you: it stays in storage through saves, reverts and reloads, a **Draft 14:02?** button in the menu bar asks again at any time, and the editor asks once more by itself when you have new unsaved changes - until you answer, those are not kept as a draft. Only **Restore** or **Discard** ends it.
 - Saving twice within a second is fine: the server takes one changing save a second, and the editor waits that second out instead of reporting an error.
 - **Export** downloads the map as a `.json` file exactly as Save would write it; **Import** loads such a file as unsaved work; **Revert** loads the server's map again; **New** starts an empty island. None of them touches the server's map until you save.
+- **Maps** is the map library: named copies of a map kept on the server in `map/library/`, to go back to an earlier version or to compare two. **Keep a copy…** stores the map in the editor under a name. A click on an entry opens it in the editor – the game keeps running its own map, marked **live** in the list, until you press Save, which makes the opened one the live map. Switching from one library map to another asks nothing as long as you have not edited the one that is open. To put the first one back, open the copy you kept of it and save again. A map file dropped into `map/library/` shows up in the list; to remove an entry, delete its file.
 - The map that ships with the game lives in git as `map/world.json`: to change it for everybody, save it in the editor and commit the file.
 
 ### Play-testing
@@ -265,7 +266,7 @@ EDITOR_TOKEN=<token> npm run dev
 | --- | --- |
 | `--editor` or `MAP_EDITOR=1` | Editor mode: the server accepts saves and play-test characters. With `NODE_ENV=production` it is ignored unless `EDITOR_TOKEN` is set |
 | `EDITOR_TOKEN` | 24 to 256 characters. Whoever knows it may save, from anywhere. It does not switch editor mode on by itself |
-| `MAP_FILE` | The map file to serve and to save (default `map/world.json`); its backups go into `backups/` beside it |
+| `MAP_FILE` | The map file to serve and to save (default `map/world.json`); its backups go into `backups/` beside it and its library is `library/` beside it |
 | `DATA_DIR` | Where player progress is kept (default `data`) |
 
 To try things without touching the real map or the real players: `MAP_FILE=/tmp/world.json DATA_DIR=/tmp/data PORT=3000 npm run dev` on a copy of the map.
@@ -278,6 +279,7 @@ editor.html       The map editor page
 server.js         HTTP static server + WebSocket game server; loads the map and, in editor mode, saves it
 map/world.json    The world: terrain, scenery, regions, monster camps, chests, townsfolk, start point
 map/backups/      The map before each save (created by the server, git-ignored)
+map/library/      The map library: named copies of the map, listed in the editor's Maps menu
 src/main.js       Client: rendering, input, networking, HUD
 src/cat.js        The cat: a Blender model of rigid parts (assets/cat/hypercat.glb), animated in code; weapons, armour and the shield, tinted by tier
 art/              The Blender sources: the cat, its weapons and its armour (hypercat.blend), the skill effects (fx.blend)

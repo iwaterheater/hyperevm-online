@@ -23,6 +23,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SAVE_FILE = path.join(path.resolve(ROOT, process.env.DATA_DIR || 'data'), 'players.json');
 const MAP_FILE = path.resolve(ROOT, process.env.MAP_FILE || 'map/world.json');
 const BACKUP_DIR = path.join(path.dirname(MAP_FILE), 'backups');
+const LIBRARY_DIR = path.join(path.dirname(MAP_FILE), 'library');
 const VIEW_R = 65;
 
 // The world is a data file. Only in editor mode can it be saved over HTTP: without a token by this machine alone, with
@@ -216,24 +217,34 @@ function getEditor(req, res) {
   json(res, 200, { enabled: EDITOR, tokenRequired: TOKEN_MODE, canSave: EDITOR && (TOKEN_MODE || localRequest(req)), rev });
 }
 
-// The checks of a save, in this order. Nothing of the body is read before the last of them has passed.
-function postMap(req, res) {
-  const refuse = (status, error, headers) => json(res, status, { ok: false, error }, headers);
-  if (!EDITOR) { refuse(403, 'editor-off'); return; }
+// The checks of a request that only the editor may make - a save, and everything about the map library -, in this
+// order. -> true, or false when the request has been answered.
+function editorRequest(req, res) {
+  const refuse = (status, error, headers) => { json(res, status, { ok: false, error }, headers); return false; };
+  if (!EDITOR) return refuse(403, 'editor-off');
   if (TOKEN_MODE) {
     // the token comes first and a correct one always passes; the Origin is not looked at (a proxy rewrites Host, and a
     // token is not a credential the browser attaches by itself)
     if (!tokenOk(req.headers['x-editor-token'])) {
-      if (tokenFailure(req.socket.remoteAddress)) refuse(429, 'rate', { 'Retry-After': 60 });
-      else refuse(401, 'token');
-      return;
+      return tokenFailure(req.socket.remoteAddress) ? refuse(429, 'rate', { 'Retry-After': 60 }) : refuse(401, 'token');
     }
-  } else if (!localRequest(req)) { refuse(403, 'not-local'); return; }
-  if (req.headers['x-editor'] !== '1') { refuse(403, 'header'); return; }   // a custom header: no plain form can send it
-  if (!TOKEN_MODE && !originOk(req)) { refuse(403, 'origin'); return; }
+  } else if (!localRequest(req)) return refuse(403, 'not-local');
+  if (req.headers['x-editor'] !== '1') return refuse(403, 'header');   // a custom header: no plain form can send it
+  return true;
+}
+// ... and of one that carries a map. Nothing of the body is read before the last of them has passed.
+function mapRequest(req, res) {
+  const refuse = (status, error, headers) => { json(res, status, { ok: false, error }, headers); return false; };
+  if (!editorRequest(req, res)) return false;
+  if (!TOKEN_MODE && !originOk(req)) return refuse(403, 'origin');
   const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
-  if (type !== 'application/json' || req.headers['content-encoding'] !== undefined) { refuse(415, 'content-type'); return; }
-  if (Number(req.headers['content-length']) > LIMITS.bodyBytes) { refuse(413, 'too-large', { Connection: 'close' }); return; }
+  if (type !== 'application/json' || req.headers['content-encoding'] !== undefined) return refuse(415, 'content-type');
+  if (Number(req.headers['content-length']) > LIMITS.bodyBytes) return refuse(413, 'too-large', { Connection: 'close' });
+  return true;
+}
+
+function postMap(req, res) {
+  if (!mapRequest(req, res)) return;
   readBody(req, res, guarded(res, (body) => {
     const [status, answer, headers] = saveMap(body, req.headers['x-base-rev']);
     json(res, status, answer, headers);
@@ -271,12 +282,13 @@ let savedAt = -Infinity;      // when the last save was accepted (performance.no
 let saves = 0;                // accepted saves since this server started
 let sessionBackup = null;     // the backup made by the first of them: the map as this editing session found it
 
-// From the bytes of a request to its answer, [status, body, headers]. One synchronous function, so saves cannot interleave.
-function saveMap(body, baseRev) {
-  const refuse = (status, error, more, headers) => [status, { ok: false, error, ...more }, headers];
+// The map a request carries: { next, canonical, text, issues } - or { refused: [status, body] } when its bytes are
+// not a map the game can load. The text is the server's own canonical one, never the bytes of the request.
+function readMap(body) {
+  const refused = (status, error, more) => ({ refused: [status, { ok: false, error, ...more }] });
   let file;
-  try { file = JSON.parse(UTF8.decode(body)); } catch { return refuse(400, 'bad-json'); }
-  if (typeof file !== 'object' || file === null || Array.isArray(file)) return refuse(400, 'bad-json');
+  try { file = JSON.parse(UTF8.decode(body)); } catch { return refused(400, 'bad-json'); }
+  if (typeof file !== 'object' || file === null || Array.isArray(file)) return refused(400, 'bad-json');
 
   rescanAssets();
   let next, issues;
@@ -288,10 +300,17 @@ function saveMap(body, baseRev) {
     issues = err.issues;
   }
   const errors = issues.filter((i) => i.level === 'error');
-  if (errors.length) return refuse(422, 'invalid', { issues: errors.slice(0, 50) });
+  if (errors.length) return refused(422, 'invalid', { issues: errors.slice(0, 50) });
+  const canonical = serialize(next);
+  return { next, canonical, text: stringifyMap(canonical), issues };
+}
 
-  // the server writes its own canonical text, never the bytes of the request
-  const canonical = serialize(next), text = stringifyMap(canonical);
+// From the bytes of a request to its answer, [status, body, headers]. One synchronous function, so saves cannot interleave.
+function saveMap(body, baseRev) {
+  const refuse = (status, error, more, headers) => [status, { ok: false, error, ...more }, headers];
+  const read = readMap(body);
+  if (read.refused) return read.refused;
+  const { next, canonical, text, issues } = read;
   const alive = () => mobs.reduce((n, m) => n + (m.dead ? 0 : 1), 0);
   if (text === mapText) return [200, { ok: true, unchanged: true, rev, monsters: alive(), backup: null, warnings: issues }];
   if (baseRev !== '*' && baseRev !== rev) return refuse(409, 'conflict', { rev });   // somebody else saved in between
@@ -342,9 +361,9 @@ function backupMapFile() {
   return name;
 }
 
-// Atomic: the text goes into a temp file beside the map, reaches the disk, and replaces the map in one rename.
-function writeMapFile(data) {
-  const tmp = `${MAP_FILE}.tmp`;
+// Atomic: the text goes into a temp file beside the file, reaches the disk, and replaces the file in one rename.
+function writeFileAtomic(file, data) {
+  const tmp = `${file}.tmp`;
   let fd = null;
   try {
     fd = fs.openSync(tmp, 'w');
@@ -352,13 +371,14 @@ function writeMapFile(data) {
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = null;
-    fs.renameSync(tmp, MAP_FILE);
+    fs.renameSync(tmp, file);
   } catch (err) {
     if (fd !== null) try { fs.closeSync(fd); } catch { /* nothing to close */ }
     try { fs.unlinkSync(tmp); } catch { /* never created */ }
     throw err;
   }
 }
+const writeMapFile = (data) => writeFileAtomic(MAP_FILE, data);
 
 // Keeps the 20 newest backups, the oldest one of each of the last 14 days, and what this run started from.
 // (With "the 20 newest" alone, twenty presses of Ctrl+S would erase every backup older than a few minutes.)
@@ -378,9 +398,85 @@ function pruneBackups() {
   }
 }
 
+// ---------------------------------------------------------------- the map library
+
+// Named copies of a map, kept beside it in library/ for the editor's Maps menu: a version to go back to, a variant to
+// compare with. <id>.json holds a map exactly as a save writes it, so a library map is also a file to import, and a
+// map file put into the folder under such a name is a library map. Nothing here touches the map the game runs: the
+// editor loads a library map as unsaved work, and it goes live only when it is saved.
+const LIBRARY_ID = /^[a-z0-9][a-z0-9-]{0,47}$/, LIBRARY_MAX = 100;
+const libraryFile = (id) => path.join(LIBRARY_DIR, `${id}.json`);
+const libraryInfo = new Map();   // id -> { key, info }: a file is read again only when its time or its size changed
+
+// What the library holds, newest first: { id, name, at, objects, spawns, rev }. `rev` is the revision the file would
+// have as the live map, so the editor can tell which entry is the map the game runs.
+function listLibrary() {
+  let entries;
+  try { entries = fs.readdirSync(LIBRARY_DIR, { withFileTypes: true }); } catch { return []; }
+  const maps = [], size = (list) => (Array.isArray(list) ? list.length : 0);
+  for (const entry of entries) {
+    const id = entry.name.slice(0, -5);
+    if (!entry.isFile() || !entry.name.endsWith('.json') || !LIBRARY_ID.test(id)) continue;
+    try {
+      const file = libraryFile(id), stat = fs.statSync(file), key = `${stat.mtimeMs}:${stat.size}`;
+      let known = libraryInfo.get(id);
+      if (known?.key !== key) {
+        const text = fs.readFileSync(file, 'utf8'), raw = JSON.parse(text);
+        known = { key, info: {
+          id, name: String(raw?.name ?? '').slice(0, 64), at: Math.round(stat.mtimeMs), objects: size(raw?.objects), spawns: size(raw?.spawns),
+          rev: sha256(text).digest('hex').slice(0, 16),
+        } };
+        libraryInfo.set(id, known);
+      }
+      maps.push(known.info);
+    } catch { /* gone in between, or not JSON: not a map to offer */ }
+  }
+  return maps.sort((a, b) => b.at - a.at || (a.id < b.id ? -1 : 1));
+}
+
+// GET /api/maps lists the library; GET /api/maps?id=<id> is one of its maps, as the file holds it.
+function getLibrary(req, res) {
+  if (!editorRequest(req, res)) return;
+  const id = new URL(req.url, 'http://x').searchParams.get('id');
+  if (id === null) { json(res, 200, { ok: true, maps: listLibrary() }); return; }
+  if (!LIBRARY_ID.test(id)) { json(res, 400, { ok: false, error: 'bad-id' }); return; }
+  let data;
+  try { data = fs.readFileSync(libraryFile(id)); } catch { json(res, 404, { ok: false, error: 'not-found' }); return; }
+  res.writeHead(200, { 'Content-Type': JSON_TYPE, 'Content-Length': data.length, 'Cache-Control': 'no-store' }).end(data);
+}
+
+// POST /api/maps?id=<id> keeps the map of the body in the library under that id. An id that is taken is refused
+// unless the request says X-Overwrite: 1.
+function postLibrary(req, res) {
+  if (!mapRequest(req, res)) return;
+  const id = new URL(req.url, 'http://x').searchParams.get('id') ?? '';
+  if (!LIBRARY_ID.test(id)) { json(res, 400, { ok: false, error: 'bad-id' }, { Connection: 'close' }); return; }
+  readBody(req, res, guarded(res, (body) => {
+    const [status, answer] = keepMap(id, body, req.headers['x-overwrite'] === '1');
+    json(res, status, answer);
+  }));
+}
+
+function keepMap(id, body, overwrite) {
+  const read = readMap(body);
+  if (read.refused) return read.refused;
+  const file = libraryFile(id), replaced = fs.existsSync(file);
+  if (replaced && !overwrite) return [409, { ok: false, error: 'exists' }];
+  if (!replaced && listLibrary().length >= LIBRARY_MAX) return [409, { ok: false, error: 'library-full' }];
+  try {
+    fs.mkdirSync(LIBRARY_DIR, { recursive: true });
+    writeFileAtomic(file, read.text);
+  } catch (err) {
+    console.error('keeping a library map failed:', err);
+    return [500, { ok: false, error: 'write-failed', code: err.code }];
+  }
+  return [200, { ok: true, id, replaced }];
+}
+
 // /api/* is matched by path and method before any file is looked for. No endpoint lists or serves backups.
 const API = {
   '/api/map': { GET: getMap, POST: postMap },
+  '/api/maps': { GET: getLibrary, POST: postLibrary },
   '/api/assets': { GET: getAssets },
   '/api/editor': { GET: getEditor },
 };

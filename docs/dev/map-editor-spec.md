@@ -1348,10 +1348,31 @@ a matching `If-None-Match` (a replaced model must not stay stale for a day).
 | `GET /api/assets` | 200 `{ packs: { medieval: string[], halloween: string[], dungeon: string[] } }`. For each `PACKS` entry with a `dir` (no request input): `readdirSync(dir, { withFileTypes: true })`, keep `isFile()` names matching `/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.(gltf\|glb)$/` with the pack's `ext`, extension stripped, sorted. Scanned at start-up; re-scanned at most once per 2 s in editor mode (on this route and before a POST is validated); `models` (§7.2) is rebuilt after every scan. `Cache-Control: no-store`. |
 | `GET /api/editor` | 200 `{ enabled, tokenRequired, canSave, rev }`. `canSave` = editor mode is on AND (token mode OR `localRequest(req)`) for THIS request — no Origin and no token check (a same-origin GET carries no `Origin`). `Cache-Control: no-store`. |
 | `POST /api/map` | save, see below |
+| `GET /api/maps`, `GET /api/maps?id=<id>`, `POST /api/maps?id=<id>` | the map library, see below |
 | `OPTIONS /api/*` | 405, `Allow: GET, POST` (cross-origin preflights fail) |
 | any other `/api/*` | 404 `{ ok: false, error: 'not-found' }`; a wrong method on a known route is 405 with `Allow` |
 
 No endpoint lists or serves backups.
+
+**Map library** (`/api/maps`). Named copies of a map, kept in `library/` beside `MAP_FILE` (`map/library/`, tracked by
+git): a version to go back to, a variant to compare with. `<id>.json` holds a map exactly as a save writes it, so a
+library map is also a file to import, and a map file put into the folder under such a name is a library map. An id
+matches `/^[a-z0-9][a-z0-9-]{0,47}$/`; anything else in the folder - other names, directories, files that are not
+JSON - is ignored. Nothing here touches the live map, its file or its backups: the editor loads a library map as
+unsaved work and it goes live only through `POST /api/map`.
+
+Every library request passes steps 2-4 of the save gate first (editor mode, tokenless: `localRequest` / token mode:
+the token, then `X-Editor: 1`) - reading too: a library is work in progress, not the published map. A GET does not
+ask for the Origin (a same-origin GET carries none; no foreign page can send `X-Editor` without a preflight, and
+every preflight fails). A POST asks for all of steps 2-7, like a save.
+
+| Request | Response |
+| --- | --- |
+| `GET /api/maps` | 200 `{ ok: true, maps: [{ id, name, at, objects, spawns, rev }] }`, newest first (`at` = the file's modification time in ms; `name`, `objects`, `spawns` read from the file; `rev` = the revision the file's text would have as the live map, so the entry that equals the live map can be marked). A missing folder is an empty library; listing never creates it. A file is read again only when its time or size changed. |
+| `GET /api/maps?id=<id>` | 200, the bytes of `library/<id>.json`; 400 `{ ok: false, error: 'bad-id' }`; 404 `{ ok: false, error: 'not-found' }` |
+| `POST /api/maps?id=<id>` | body = a map in file form. 400 `bad-id` (before the body is read) / `bad-json`; 422 `invalid` with `issues`, exactly as a save; 409 `{ ok: false, error: 'exists' }` when the id is taken and the request has no `X-Overwrite: 1`; 409 `library-full` at 100 maps; 500 `write-failed`. Success: the server's own canonical text is written atomically (temp file + rename) and the answer is 200 `{ ok: true, id, replaced }`. |
+
+There is no endpoint that deletes a library map: a file is removed from the folder by hand (or with git).
 
 **Save gate.**
 
@@ -2003,6 +2024,16 @@ thumbnails (§10.19). Hidden models (`chest`, `chest_gold`, `coin`) are not list
   - 422: toast with the first three issues and a link that opens the Issues panel.
   - 401: ask for the token (`net.token()`), retry once. 403 / 413 / 415 / 429 / 5xx: an error toast with the code.
 - **Revert to saved**: confirm when dirty, then `net.loadMap()` → `store.load`.
+- **Maps** (`file.library`): a popover in `#menu-io` that lists the map library (§7.5) when it opens - id, sizes, time,
+  and a `live` badge on the entry whose `rev` is `net.info.rev`. A click on an entry loads it exactly like an import
+  (`normalize(raw, { check: false })`, confirm when dirty, `store.load(map, { dirty: true })`): the game keeps its own
+  map until Save makes this one live. Until its first edit such a map is not unsaved WORK - the library has it - so
+  it is replaced by New, Import, Revert or another entry without a question, writes no draft (opening it removes
+  this page's own draft) and does not hold the tab open; the first `change` event ends that. The `live` entry loads
+  like Revert instead (`net.loadMap()`, not dirty).
+  **Keep a copy…** prompts for a name (turned into an id: lower case, digits, single dashes), POSTs the map in the
+  editor, and asks before it replaces an entry of that name; a map with errors is refused by the server as on Save.
+  `actions.run('file.library', id)` opens that entry directly. The button is disabled in read-only mode.
 - **Export JSON**: downloads `stringifyMap(serialize(store.map, { check: false }))` as `<map name>.json`.
 - **Import JSON**: file picker → `JSON.parse` → `normalize(raw, { check: false })`; a `MapError` (a DECODE error,
   §4.4) shows the first 10 issues and nothing is loaded; success → `store.load(map, { dirty: true })`. RANGE errors do

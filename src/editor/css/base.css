@@ -146,6 +146,13 @@ body {
 #menu-file { flex: 0 1 auto; }
 #menu-io { padding-left: 10px; border-left: 1px solid var(--line); color: var(--dim); }
 #menu-io .kept { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }   /* a draft that waits for an answer (io.js) */
+#menu-io .maps { width: 320px; white-space: normal; }                         /* the map library (io.js) */
+#menu-io .maps .ui-list { max-height: 50vh; margin: 8px 0; overflow-y: auto; }
+#menu-io .maps .ui-item { flex-direction: column; align-items: stretch; gap: 1px; width: 100%; padding: 5px 6px; border: 0; font: inherit; text-align: left; color: var(--text); background: none; }
+#menu-io .maps .ui-item:hover { background: var(--panel-2); }
+#menu-io .maps .ui-item.selected { background: var(--tint); }
+#menu-io .maps .ui-item .id { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+#menu-io .maps .ui-item .ui-dim { font-size: 11px; }
 #menu-play { margin-left: auto; color: var(--dim); }
 #menu-file .brand { margin-right: 4px; color: var(--dim); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
 #menu-file .name { flex: 0 1 auto; width: 220px; min-width: 60px; }

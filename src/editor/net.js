@@ -1,7 +1,8 @@
 import { normalize, serialize, validate } from '../map/format.js';
 import { leaveField } from './ui/dom.js';
 
-// The editor's side of the server API: load the map and the asset list, save the map, keep the token of token mode.
+// The editor's side of the server API: load the map and the asset list, save the map, read and fill the map library,
+// keep the token of token mode.
 //
 //   const net = createNet();
 //   const { map, assets, info } = await net.loadAll();   // needs nothing but the server: it runs before ui and store exist
@@ -32,6 +33,10 @@ const REASONS = {
   'write-failed': 'the server could not write the file',
   internal: 'server error',
   'not-found': 'this server has no map API',
+  token: 'the editor token was not accepted',
+  'bad-id': 'that name cannot be used',
+  'library-full': 'the library is full: remove a file from the library folder first',
+  invalid: 'the map has errors',
 };
 
 // the rev of the map a response carries: the plain header first, the ETag as a fallback (a proxy may weaken or drop either)
@@ -51,6 +56,9 @@ async function getJson(url) {
     throw new Error(`${url} did not answer with JSON.`);
   }
 }
+
+// what an answer that refuses says, in those words; '' for a code this page does not know
+const reasonOf = (data) => (typeof data?.error === 'string' && Object.hasOwn(REASONS, data.error) ? REASONS[data.error] : '');
 
 const count = (n, word) => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
 const lines = (issues, max = 3) => {
@@ -193,7 +201,7 @@ export function createNet() {
       }
     }
 
-    const reason = typeof data?.error === 'string' && Object.hasOwn(REASONS, data.error) ? REASONS[data.error] : '';
+    const reason = reasonOf(data);
     ui.toast(`Save failed (${res.status})${reason ? `: ${reason}` : ''}`, 'error');
     return false;
   }
@@ -224,6 +232,27 @@ export function createNet() {
     }
     const seen = { changes, loads };
     return post(JSON.stringify(serialize(store.map, { check: false })), seen, force, true);   // validated just above
+  }
+
+  // One request about the map library, sent as the editor's own: X-Editor and, in token mode, the token.
+  // -> the Response when its status is 200 or one of `also`; anything else throws an Error that says why.
+  async function libraryFetch(url, init = {}, also = []) {
+    const headers = { Accept: 'application/json', 'X-Editor': '1', ...init.headers };
+    if (net.info.tokenRequired) {
+      const token = await net.token();
+      if (!token) throw new Error('the editor token is needed');
+      headers['X-Editor-Token'] = token;
+    }
+    let res;
+    try {
+      res = await fetch(url, { cache: 'no-store', ...init, headers });
+    } catch {
+      throw new Error('the server cannot be reached');
+    }
+    if (res.status === 200 || also.includes(res.status)) return res;
+    if (res.status === 401) writeToken('');   // the next attempt asks for it again
+    const data = await res.json().catch(() => null);
+    throw new Error(reasonOf(data) || `the server answered ${res.status}`);
   }
 
   const net = {
@@ -274,6 +303,39 @@ export function createNet() {
           .finally(() => { saving = null; });
       }
       return saving;
+    },
+
+    // ---- the map library: named copies of a map on the server (GET and POST /api/maps). Each of the three says what
+    // went wrong in the message of the Error it throws.
+
+    // -> [{ id, name, at, objects, spawns, rev }], newest first
+    async library() {
+      const res = await libraryFetch('/api/maps');
+      const maps = (await res.json().catch(() => null))?.maps;
+      if (!Array.isArray(maps)) throw new Error('The server did not answer with a list of maps.');
+      return maps.filter((m) => typeof m?.id === 'string');
+    },
+
+    // -> the map kept under `id`, decoded like an imported file: DECODE errors throw a MapError, RANGE errors come along
+    async libraryMap(id) {
+      const res = await libraryFetch(`/api/maps?id=${encodeURIComponent(id)}`, {}, [404]);
+      if (res.status === 404) throw new Error(`"${id}" is no longer in the library`);
+      let raw;
+      try { raw = await res.json(); } catch { throw new Error(`"${id}" is not a JSON file.`); }
+      return normalize(raw, { check: false });
+    },
+
+    // Keeps `map` in the library under `id`. -> { ok: true, replaced } | { ok: false, exists: true } when the id is
+    // taken and `overwrite` was not set. A map with errors is refused by the server, as on Save.
+    async keep(id, map, overwrite = false) {
+      const res = await libraryFetch(`/api/maps?id=${encodeURIComponent(id)}`, {
+        method: 'POST', body: JSON.stringify(serialize(map, { check: false })),
+        headers: { 'Content-Type': 'application/json', ...(overwrite ? { 'X-Overwrite': '1' } : {}) },
+      }, [409]);
+      const data = await res.json().catch(() => null);
+      if (res.status === 409 && data?.error === 'exists') return { ok: false, exists: true };
+      if (res.status !== 200) throw new Error(reasonOf(data) || `the server answered ${res.status}`);
+      return { ok: true, replaced: data?.replaced === true };
     },
 
     // -> the editor token, or null. Asks for it once, and only in token mode; after that sessionStorage has it.

@@ -494,6 +494,123 @@ check('old backups are pruned: the 20 newest stay, and the oldest of each of the
   });
 });
 
+// ---------------------------------------------------------------- the map library
+
+// A request about the library as the editor's own page sends it; `headers` replace or remove single ones.
+const lib = (s, method, id, { body, headers = {} } = {}) => call(s, method, `/api/maps${id === undefined ? '' : `?id=${id}`}`, {
+  headers: { 'X-Editor': '1', Origin: `http://localhost:${s.port}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+  body,
+});
+
+check('the map library: a copy is kept under a name, listed, read back and replaced only when asked to', () => withServer({}, async (s) => {
+  const folder = path.join(s.dir, 'library');
+  const empty = await lib(s, 'GET');
+  assert.equal(empty.status, 200);
+  assert.equal(empty.headers['cache-control'], 'no-store');
+  assert.deepEqual(empty.json, { ok: true, maps: [] });
+  assert.ok(!fs.existsSync(folder), 'reading the library must not create its folder');
+
+  const rev = await revOf(s);
+  const kept = await lib(s, 'POST', 'first-draft', { body: BAKED });
+  assert.equal(kept.status, 200);
+  assert.deepEqual(kept.json, { ok: true, id: 'first-draft', replaced: false });
+  assert.ok(fs.readFileSync(path.join(folder, 'first-draft.json'), 'utf8') === BAKED, 'the library file is not the canonical text');
+  assert.deepEqual(fs.readdirSync(folder), ['first-draft.json'], 'a temp file was left behind');
+  // keeping a copy is not a save: the live map, its file and its backups are as they were
+  assert.equal(await revOf(s), rev);
+  assert.ok(fs.readFileSync(s.mapFile, 'utf8') === BAKED);
+  assert.ok(!fs.existsSync(s.backups));
+
+  // the server writes its own text, never the bytes of the request
+  await lib(s, 'POST', 'other', { body: JSON.stringify(JSON.parse(renamed('Other World'))) });
+  const other = await lib(s, 'GET', 'other');
+  assert.equal(other.status, 200);
+  assert.equal(other.headers['content-type'], 'application/json; charset=utf-8');
+  assert.ok(other.body.toString() === renamed('Other World'));
+
+  const list = (await lib(s, 'GET')).json.maps;
+  assert.deepEqual(list.map((m) => m.id).sort(), ['first-draft', 'other']);
+  const first = list.find((m) => m.id === 'first-draft');
+  assert.deepEqual(first, { id: 'first-draft', name: 'Hypercat World', at: first.at, objects: FILE.objects.length, spawns: FILE.spawns.length, rev });
+  assert.ok(Math.abs(first.at - Date.now()) < 60000);
+  assert.equal(list.find((m) => m.id === 'other').name, 'Other World');
+  assert.notEqual(list.find((m) => m.id === 'other').rev, rev);
+
+  // a name that is taken
+  const taken = await lib(s, 'POST', 'first-draft', { body: renamed('Second') });
+  assert.equal(taken.status, 409);
+  assert.deepEqual(taken.json, { ok: false, error: 'exists' });
+  assert.ok(fs.readFileSync(path.join(folder, 'first-draft.json'), 'utf8') === BAKED);
+  const replaced = await lib(s, 'POST', 'first-draft', { body: renamed('Second'), headers: { 'X-Overwrite': '1' } });
+  assert.deepEqual(replaced.json, { ok: true, id: 'first-draft', replaced: true });
+  assert.equal((await lib(s, 'GET')).json.maps.find((m) => m.id === 'first-draft').name, 'Second');
+
+  // a map file put into the folder by hand is a library map; anything else in there is nobody's business
+  fs.writeFileSync(path.join(folder, 'by-hand.json'), BAKED);
+  fs.writeFileSync(path.join(folder, 'Notes.json'), BAKED);
+  fs.writeFileSync(path.join(folder, 'broken.json'), '{ not json');
+  fs.writeFileSync(path.join(folder, 'readme.txt'), 'hello');
+  fs.mkdirSync(path.join(folder, 'folder.json'));
+  assert.deepEqual((await lib(s, 'GET')).json.maps.map((m) => m.id).sort(), ['by-hand', 'first-draft', 'other']);
+}));
+
+check('the map library: what is not a library name, not a map, or not there is refused', () => withServer({}, async (s) => {
+  for (const id of ['', 'Upper', '-dash', 'a_b', 'a.b', '..', '..%2Fworld', '%2e%2e%2fworld', 'a/b', 'a'.repeat(49), 'world.json']) {
+    const read = await lib(s, 'GET', id);
+    assert.equal(read.status, 400, `GET ${id}`);
+    assert.deepEqual(read.json, { ok: false, error: 'bad-id' });
+    assert.equal((await lib(s, 'POST', id, { body: '{' })).status, 400, `POST ${id}`);   // (a small body: see the save gate)
+  }
+  assert.equal((await lib(s, 'POST', undefined, { body: '{' })).status, 400);
+  assert.ok(!fs.existsSync(path.join(s.dir, 'library')));
+
+  const missing = await lib(s, 'GET', 'nothing-here');
+  assert.equal(missing.status, 404);
+  assert.deepEqual(missing.json, { ok: false, error: 'not-found' });
+
+  assert.deepEqual((await lib(s, 'POST', 'junk', { body: '{ not json' })).json, { ok: false, error: 'bad-json' });
+  const invalid = await lib(s, 'POST', 'junk', { body: edited((f) => { f.radius = 5; }) });
+  assert.equal(invalid.status, 422);
+  assert.equal(invalid.json.error, 'invalid');
+  assert.ok(invalid.json.issues.length > 0);
+  assert.deepEqual((await lib(s, 'GET')).json.maps, []);
+
+  const wrong = await call(s, 'DELETE', '/api/maps?id=junk');
+  assert.equal(wrong.status, 405);
+  assert.equal(wrong.headers.allow, 'GET, POST');
+}));
+
+check('the map library is the editor\'s: the gate of a save stands before it, for reading too', async () => {
+  await withServer({ args: [] }, async (s) => {
+    assert.deepEqual((await lib(s, 'GET')).json, { ok: false, error: 'editor-off' });
+    assert.equal((await lib(s, 'POST', 'copy', { body: '{' })).status, 403);
+  });
+  await withServer({ setup: (s) => { fs.mkdirSync(path.join(s.dir, 'library')); fs.writeFileSync(path.join(s.dir, 'library', 'old.json'), BAKED); } }, async (s) => {
+    for (const [headers, error] of [[{ Host: 'evil.example' }, 'not-local'], [{ 'X-Forwarded-For': '10.0.0.7' }, 'not-local'], [{ 'X-Editor': undefined }, 'header']]) {
+      for (const id of [undefined, 'old']) {
+        const res = await lib(s, 'GET', id, { headers });
+        assert.equal(res.status, 403, `${JSON.stringify(headers)} ${id}`);
+        assert.deepEqual(res.json, { ok: false, error });
+      }
+      assert.deepEqual((await lib(s, 'POST', 'copy', { body: '{', headers })).json, { ok: false, error });
+    }
+    // writing asks for everything a save asks for
+    assert.deepEqual((await lib(s, 'POST', 'copy', { body: '{', headers: { Origin: 'http://evil.example' } })).json, { ok: false, error: 'origin' });
+    assert.deepEqual((await lib(s, 'POST', 'copy', { body: '{', headers: { 'Content-Type': 'text/plain' } })).json, { ok: false, error: 'content-type' });
+    assert.deepEqual(fs.readdirSync(path.join(s.dir, 'library')), ['old.json']);
+    // a page of this server reads without an Origin: a same-origin GET carries none
+    assert.equal((await lib(s, 'GET', 'old', { headers: { Origin: undefined } })).status, 200);
+  });
+  const token = 'a-token-of-twenty-four-chars-or-more';
+  await withServer({ env: { EDITOR_TOKEN: token } }, async (s) => {
+    assert.deepEqual((await lib(s, 'GET')).json, { ok: false, error: 'token' });
+    assert.equal((await lib(s, 'POST', 'copy', { body: '{', headers: { 'X-Editor-Token': 'wrong' } })).status, 401);
+    const far = { 'X-Editor-Token': token, Host: 'maps.example', 'X-Forwarded-For': '10.0.0.7', Origin: 'https://maps.example' };
+    assert.deepEqual((await lib(s, 'POST', 'copy', { body: BAKED, headers: far })).json, { ok: true, id: 'copy', replaced: false });
+    assert.deepEqual((await lib(s, 'GET', undefined, { headers: far })).json.maps.map((m) => m.id), ['copy']);
+  });
+});
+
 check('a save restarts the monsters only when spawns, safe regions or the radius changed', () => withServer({}, async (s) => {
   const camp = FILE.spawns[0];
   const c = await join(s, { test: { at: [camp.x, camp.z], god: true, lvl: 40 } });
