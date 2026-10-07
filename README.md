@@ -38,17 +38,29 @@ PORT=3000 npm start
 | `Tab` | Select the next nearest monster |
 | `Esc` | Clear the target |
 | `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack) |
-| `1` – `8` | Skills, in the order they were learned; they cost mana and most have a cast time or a cooldown. The cat stands still while casting |
-| `Q` / `E` | Drink a health / mana potion from the bag. Potions share a cooldown of 6 seconds |
-| `I` | Inventory: the five equipment slots and the bag. Click an item to wear or drink it, click a worn item to take it off, right-click an item twice to destroy it; hover for its stats and what it would change |
+| `1` – `9`, `0` | The ten slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and most have a cast time or a cooldown; the cat stands still while casting. A click on a slot does the same |
+| `I` | Inventory: the character's numbers, the cat with its five equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
 | `C` | Character status window: attributes and combat stats, with what the equipment adds |
-| `K` | Skill book: everything the class can learn. Buying skills and choosing a profession only works next to the Sage in town |
+| `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
+| `H` / `F1` | Help: every control |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
 | `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
 | `T` | Trade (stand next to the Trader in town): buy potions and gear, sell anything from the bag |
 | `Enter` | Open chat / send message |
 | `M` | Mute sound |
+
+The windows also open from the strip of buttons under the radar: Character, Inventory, Skills, Help - and Trader while he is in reach. A button is lit while its window is open. On a screen narrower than 1820 pixels one window is open at a time, in the middle between the chat and the radar; a wider one shows the inventory beside the status window or the Trader's list.
+
+### Action bar
+
+Ten slots in the middle of the lower edge, on the keys `1` – `9` and `0`, with the Attack button (`F`) to their left. A slot holds a skill or an item:
+
+- **A skill** is cast by its key, exactly as a click on the slot does. The slot shows what it costs, its cooldown, and when the mana does not suffice.
+- **A potion** is drunk; the slot shows how many the bag holds and the cooldown all potions share, and stays - greyed - when the last one is gone.
+- **A piece of gear** is put on. Pressing the key again leaves it on (a second press in a fight must not strip the cat); it is taken off in the inventory. A worn piece is marked.
+
+Drag a learned skill from the skill book (`K`) or an item from the inventory (`I`) onto a slot; drag one slot onto another to swap them; drag a slot off the bar, or right-click it, to clear it. A character without a bar of its own - a new one, or one saved before the bar existed - gets its learned skills from slot 1 on and its health and mana potions on `9` and `0`. A skill learned later goes into the first empty slot. The bar is saved with the character on the server.
 
 ## The world
 
@@ -113,12 +125,18 @@ Press `C` for the character status window. Every class has six fixed base attrib
 
 - Every kill gives experience and **SP** (skill points).
 - Skills are bought from the Sage with SP once the character's level is high enough, and can be upgraded through several ranks.
-- Active skills go onto keys `1`–`8`; passive skills raise stats permanently.
+- Active skills go onto the [action bar](#action-bar); passive skills raise stats permanently.
 - Monsters can be stunned, put to sleep, slowed and made to bleed; the Skeleton King ignores stuns and sleep.
 
 ### Items and equipment
 
 Press `I` for the inventory: a bag of 30 slots and five equipment slots — weapon, head, body, hands, feet. What a cat wears is drawn on it, each piece in the colour of its tier, for everybody to see.
+
+The window has three parts side by side:
+
+- **The character's numbers**: health and mana, the six attributes and the combat stats of the status window (`C`), with what the equipment adds. While the cursor rests on a piece of gear in the bag, the rows it would change show the value before and after.
+- **The paper doll**: the cat itself as the world shows it, alive and wearing what it wears; drag it to turn it. Head, body, hands and feet stand in a column on its left, the weapon by its paw on the right. An empty slot shows the outline of what belongs in it.
+- **The bag**: a grid of six by five cells with the count of used slots above it and the gold below, and tabs that show all of it, only the gear or only the potions.
 
 | Tier | Level | Armour (P. Def: head / body / hands / feet) | Sword · Daggers · Bow (P. Atk) | Staff (M. Atk) | From |
 | --- | --- | --- | --- | --- | --- |
@@ -130,7 +148,7 @@ Press `I` for the inventory: a bag of 30 slots and five equipment slots — weap
 - **Armour** can be worn by any class. Besides P. Def, helmets give M. Def (3 / 6 / 10 / 15), gloves Accuracy (1 – 4) and boots Speed (2 – 8).
 - **Weapons** come in four families — swords, daggers (+10 – 40 Critical), bows and staves — and any class may wield any of them. The cat holds what is equipped, and how it fights follows the weapon, not the class: a bow shoots from afar in anyone's paws, everything else strikes up close. With an empty weapon slot the cat fights with the basic weapon of its class, as before (the Knight keeps his shield as long as he holds a sword).
 - The bonus of an item is added to the base value of the class, so it grows with the level, and the Blacksmith's upgrade (`B`), passive skills and buffs multiply a weapon item like the basic weapon. The tooltip of an item shows what wearing it would change in the numbers of the status window.
-- **Potions** stack up to 99: Lesser Health Potion (80 HP), Health Potion (250 HP), Lesser Mana Potion (50 MP), Mana Potion (160 MP). `Q` drinks a health potion and `E` a mana potion — the strongest in the bag that would not be wasted; all potions share a 6-second cooldown.
+- **Potions** stack up to 99: Lesser Health Potion (80 HP), Health Potion (250 HP), Lesser Mana Potion (50 MP), Mana Potion (160 MP). They are drunk with a click in the bag or from a slot of the action bar - each kind of potion takes a slot of its own; all potions share a 6-second cooldown.
 - **Loot** goes straight into the bag of whoever lands the killing blow, with a line in the chat. A minion leaves a piece of gear about one time in sixteen, a warrior one time in five, and the chance grows a little with the monster's level; the tier matches the level of the monster (now and then one tier lower). The Skeleton King leaves a Hypurr piece and three potions to everyone who wounded him. Chests sometimes hold a potion and seldom a piece of gear — the richer the chest, the better. Loot that does not fit into a full bag is lost.
 - A new character starts with five Lesser Health Potions. Dying loses no items.
 
@@ -278,7 +296,7 @@ src/shared.js     Constants, tables (monsters, classes, skills, items) and formu
 tools/bake-map.mjs      Wrote the first map/world.json from the old world generator; refuses to overwrite an edited map without --force
 tools/check-imports.mjs Checks every import and page reference of this bundler-less project (npm run check)
 tools/build-fx.py       Builds the skill-effect shapes in art/fx.blend and exports assets/fx/fx.glb; run inside Blender
-test/             Tests of the map format, the items, the server and the editor's logic (npm test)
+test/             Tests of the map format, the items, the action bar, the server and the editor's logic (npm test)
 data/             Saved player progress (created at runtime, git-ignored)
 ```
 
@@ -289,6 +307,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Items are one table, `ITEMS` in `src/shared.js`, used by the server, the client and the tests alike; `statsOf()` in the same file turns class, level, skills, buffs and equipment into combat stats, so the server's damage and the client's status window always agree.
 - Every item request — wear, take off, drink, buy, sell, destroy — names the stack by its place in the bag and by its item, and the server checks all of it: the stack is there, the class and the level fit, the Trader is in reach, the gold and the room in the bag suffice, the cat is alive. A request that cannot be done is answered with a line the player sees; nothing changes on the client until the server says so.
 - The owner of a bag receives it, and what it wears, only when they change. Other players get one number per cat — which pieces it wears and of which tier — and nothing of anybody's bag.
+- The action bar is ten slots, each empty or the id of an active skill or of an item. The client sends a new arrangement whole (`{ t: 'bar', bar: [...] }`); the server keeps what `cleanBar()` in `src/shared.js` makes of it - anything that is not an active skill or an item becomes an empty slot - and sends the kept bar back to its owner, as it does when it slots a newly learned skill.
 - Player movement is simulated on the client for responsiveness; the server sanity-checks the speed and snaps cheaters back.
 - The world is one file. The server reads `map/world.json` when it starts and refuses to run with a map that does not validate; the client fetches the same map from `/api/map` and draws it. Scenery is drawn as instanced batches, one per model, so thousands of trees and walls stay cheap to draw.
 - From the map the server takes where monsters live (camps: a disc, a count, a mix of monster types, a level range, a respawn time), where chests and townsfolk stand, where new cats appear and which regions are safe. Monsters never appear on water or lava, or inside a safe region.
@@ -297,8 +316,8 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Melee monsters telegraph their attacks: they stop, raise the weapon and the hit lands 0.4 seconds later, so it can be dodged.
 - Combat is target-based, as in classic MMORPGs: the server checks that the selected monster is alive and within reach before a swing or a bolt lands.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
-- A character saved before the game had items loads with an empty bag; whatever a save holds that is not a known item is left out when it is read.
-- Progress (class, level, XP, SP, skills, gold, weapon upgrade, bag and equipment) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
+- A character saved before the game had items loads with an empty bag; whatever a save holds that is not a known item is left out when it is read. One saved before the action bar gets the default bar.
+- Progress (class, level, XP, SP, skills, gold, weapon upgrade, bag, equipment and action bar) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 
 ## Playing with friends over the internet
 
@@ -309,6 +328,7 @@ The server is a single Node.js process, so any host that can run Node and accept
 - One server process holds the whole world; there is no sharding or horizontal scaling.
 - No accounts, no PvP, no parties. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
 - Every piece of armour is one model in four tints, and all tiers of a weapon share the model of the class's basic weapon.
+- The HUD is laid out for a window at least 1280 pixels wide and 720 high; in a smaller one the windows reach over the chat and the radar.
 - Clerics can only heal and bless players standing near them; there is no targeting of other players yet.
 - The cat and a handful of built-in models (the fountain, lamp posts, bushes, crystals, spikes, the ring of the King's lair) are built from code; everything else is imported models placed by the map.
 - The ground is flat: a grid of ground types two units wide, with no heights. Hills are models.

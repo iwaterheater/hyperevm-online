@@ -822,11 +822,11 @@ const seed = (characters) => (s) => {
   fs.writeFileSync(path.join(s.dataDir, 'players.json'), JSON.stringify(characters));
 };
 
-// Joins and follows a client: its latest private state, its bag and equipment (which travel only when they change),
-// the other players it sees, and every event it was sent.
+// Joins and follows a client: its latest private state, its bag, equipment and action bar (which travel only when they
+// change; `bars` counts how often the bar came), the other players it sees, and every event it was sent.
 async function enter(s, msg) {
   const c = await join(s, msg);
-  const f = { c, me: null, inv: null, eq: null, others: [], mobs: [], events: [], snaps: 0, send: (m) => c.send(m) };
+  const f = { c, me: null, inv: null, eq: null, bar: null, bars: 0, others: [], mobs: [], events: [], snaps: 0, send: (m) => c.send(m) };
   c.ws.on('message', (data) => {
     const m = JSON.parse(data);
     if (m.t !== 's') return;
@@ -834,6 +834,7 @@ async function enter(s, msg) {
     f.me = m.me; f.others = m.p; f.mobs = m.m;
     if (m.me.inv) f.inv = m.me.inv;
     if (m.me.eq) f.eq = m.me.eq;
+    if (m.me.bar) { f.bar = m.me.bar; f.bars++; }
     f.events.push(...m.e);
   });
   // waits until fn() returns something truthy, and resolves with it
@@ -861,7 +862,7 @@ async function enter(s, msg) {
     await f.until('a snapshot', () => f.snaps > n);
   };
   f.w = await c.take('w');
-  await f.until('the first snapshot', () => f.inv && f.eq);
+  await f.until('the first snapshot', () => f.inv && f.eq && f.bar);
   return f;
 }
 
@@ -1185,3 +1186,128 @@ check('items: any class wields any weapon - it stays through a change of profess
     assert.equal(lookOf(row[12]).weapon, 1, 'an iron one');
   });
 });
+
+// ---------------------------------------------------------------- the action bar
+
+const EMPTY_BAR = Array(10).fill(null);
+const barOf = (...head) => [...head, ...EMPTY_BAR].slice(0, 10);
+
+check('action bar: an old save and a new cat get the default one; an arrangement is validated, saved and read back', async () => {
+  const veteran = { ...OLD, skills: { power_strike: 2, stun_strike: 1, weapon_mastery: 1 }, inv: [['iron_sword', 1], ['hp_large', 2], ['mp_small', 1]] };
+  const mine = ['stun_strike', 'iron_sword', null, 'hp_large', null, null, null, null, 'power_strike', 'fireball'];
+  const first = await withServer({ setup: seed({ old: veteran, bare: OLD }) }, async (s) => {
+    // a save from before the bar: the learned skills from slot 1 on, and the potions it carries on the last two
+    const old = await enter(s, { token: 'old' });
+    assert.deepEqual(old.bar, ['power_strike', 'stun_strike', null, null, null, null, null, null, 'hp_large', 'mp_small']);
+    const bare = await enter(s, { token: 'bare' });
+    assert.deepEqual(bare.bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small'], 'the free skill of the class, and the lesser potions');
+    const fresh = await enter(s, { token: 'fresh', cls: 'mystic' });
+    assert.deepEqual(fresh.bar, ['bolt', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+    // the bar travels when it changes, not with every snapshot
+    const n = old.snaps;
+    await old.until('more snapshots', () => old.snaps > n + 3);
+    assert.equal(old.me.bar, undefined);
+    assert.equal(old.bars, 1);
+
+    // an arrangement comes back as the server keeps it: a skill of another class and an item not in the bag stay
+    // (the slot shows them as such), what is no active skill and no item is gone, and so is an eleventh slot
+    await old.send({ t: 'bar', bar: [...mine.slice(0, 9), 'fireball', 'bolt'] });
+    await old.until('the bar back', () => old.bars === 2);
+    assert.deepEqual(old.bar, mine);
+    await old.send({ t: 'bar', bar: ['weapon_mastery', 'no_such_thing', 7, ['bolt'], { id: 'bolt' }, '__proto__', 'constructor', 'hp_small'] });
+    await old.until('the bar back', () => old.bars === 3);
+    assert.deepEqual(old.bar, [null, null, null, null, null, null, null, 'hp_small', null, null]);
+    for (const junk of [undefined, null, 'bolt', 7, {}, { length: 10 }]) await old.send({ t: 'bar', bar: junk });
+    await old.until('six empty bars back', () => old.bars >= 4 && old.bar.every((slot) => slot === null));
+    await old.settled();
+    assert.deepEqual(old.bar, EMPTY_BAR);
+    // nobody else is told, and the two others keep theirs
+    assert.equal(bare.bars, 1);
+    assert.equal(fresh.bars, 1);
+    await old.send({ t: 'bar', bar: mine });
+    await old.until('the last arrangement', () => old.bar[0] === 'stun_strike');
+    await old.settled();
+  });
+  const file = savedPlayers(first);
+  assert.deepEqual(file.old.bar, mine);
+  assert.deepEqual(file.bare.bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+  assert.deepEqual(file.fresh.bar, ['bolt', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+
+  // the next run of the server reads what this one wrote, and what somebody wrote into the file by hand
+  file.junk = { ...OLD, bar: ['power_strike', 'no_such_thing', 'armor_mastery', 5, 'mp_large', null, null, null, null, null, 'bolt', 'bolt'] };
+  file.short = { ...OLD, skills: { power_strike: 1 }, bar: ['hp_small'] };
+  file.broken = { ...OLD, bar: 'all of it' };
+  await withServer({ setup: seed(file) }, async (s) => {
+    const old = await enter(s, { token: 'old' });
+    assert.deepEqual(old.bar, mine);
+    assert.equal(old.bars, 1);
+    assert.deepEqual((await enter(s, { token: 'junk' })).bar, barOf('power_strike', null, null, null, 'mp_large'));
+    // a saved bar is the player's own: a skill it has learned and taken off is not put back; a bar that is no list is replaced
+    assert.deepEqual((await enter(s, { token: 'short' })).bar, barOf('hp_small'));
+    assert.deepEqual((await enter(s, { token: 'broken' })).bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+  });
+});
+
+check('action bar: a newly learned skill takes the first empty slot - once, and never one the player filled', async () => {
+  const sage = FILE.npcs.find((n) => n.kind === 'sage');
+  const at = [sage.x + 1, sage.z + 1];
+  const pupil = { ...OLD, level: 20, xp: 0, sp: 5000, skills: { power_strike: 1 } };
+  const run = await withServer({ setup: seed({ pupil, crowded: { ...pupil, bar: Array(10).fill('hp_small') } }) }, async (s) => {
+    const p = await enter(s, { token: 'pupil', at });
+    assert.deepEqual(p.bar, barOf('power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small'));
+    await p.send({ t: 'bar', bar: barOf(null, 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small') });
+    await p.until('the bar back', () => p.bars === 2);
+    await p.send({ t: 'learn', s: 'stun_strike' });
+    await p.event('learned');
+    await p.until('the new skill on the bar', () => p.bars === 3);
+    assert.deepEqual(p.bar, barOf('stun_strike', 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small'));
+    // a second rank and a passive skill change nothing on the bar
+    await p.send({ t: 'learn', s: 'stun_strike' });
+    await p.event('learned');
+    await p.send({ t: 'learn', s: 'weapon_mastery' });
+    await p.event('learned');
+    await p.settled();
+    assert.equal(p.bars, 3);
+    // taken off the bar, a skill stays off - whatever is learned next
+    await p.send({ t: 'bar', bar: barOf(null, 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small') });
+    await p.until('the bar back', () => p.bars === 4);
+    await p.send({ t: 'learn', s: 'war_cry' });
+    await p.event('learned');
+    await p.until('War Cry on the bar', () => p.bars === 5);
+    assert.deepEqual(p.bar, barOf('war_cry', 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small'));
+    // a profession brings its free skill onto the bar as well
+    await p.send({ t: 'prof', cls: 'knight' });
+    await p.until('the knight', () => p.me.cls === 'knight');
+    await p.until('Provoke on the bar', () => p.bars === 6);
+    assert.deepEqual(p.bar, barOf('war_cry', 'power_strike', 'provoke', null, null, null, null, null, 'hp_small', 'mp_small'));
+    await p.settled();
+
+    // a full bar is left alone: the skill is learned and waits in the skill book
+    const c = await enter(s, { token: 'crowded', at });
+    await c.send({ t: 'learn', s: 'stun_strike' });
+    await c.event('learned');
+    await c.settled();
+    assert.equal(c.me.skills.stun_strike, 1);
+    assert.deepEqual(c.bar, Array(10).fill('hp_small'));
+    assert.equal(c.bars, 1);
+  });
+  assert.deepEqual(savedPlayers(run).pupil.bar, barOf('war_cry', 'power_strike', 'provoke', null, null, null, null, null, 'hp_small', 'mp_small'));
+});
+
+check('action bar: a play-test character and a second tab get one too, and neither is saved', () => withServer({ setup: seed({ one: OLD }) }, async (s) => {
+  const test = await enter(s, { test: { lvl: 30, cls: 'cleric' } });
+  assert.deepEqual(test.bar, ['bolt', 'mend', 'frost_bolt', 'starfall', 'healing_circle', 'blessing_might', 'blessing_ward', 'resurrection', 'hp_small', 'mp_small']);
+  const tab = await enter(s, { token: 'one' }), guest = await enter(s, { token: 'one' });
+  await guest.send({ t: 'bar', bar: ['hp_small'] });
+  await guest.until('the bar back', () => guest.bars === 2);
+  assert.deepEqual(guest.bar, barOf('hp_small'));
+  await guest.settled();
+  assert.equal(tab.bars, 1, 'the first tab of the same browser keeps its own bar');
+  await guest.c.close();
+  await tab.settled();
+  await tab.c.close();
+  await sleep(200);
+  await s.stop();
+  assert.deepEqual(savedPlayers(s).one.bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+  assert.deepEqual(Object.keys(savedPlayers(s)), ['one']);
+}));
