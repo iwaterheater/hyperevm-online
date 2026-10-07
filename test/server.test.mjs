@@ -1086,7 +1086,8 @@ check('items: wearing and taking off - class and level rules, the swap, the stat
   await w.until('the watcher sees all three', () => lookOf(seen()[12]).weapon === 1);
   assert.deepEqual(lookOf(seen()[12]), { weapon: 1, offhand: -1, head: 1, body: -1, hands: -1, feet: 1, family: 'sword' });
   // what the watcher gets is the look and nothing more: no bag, no item ids
-  assert.equal(seen().length, 13);
+  assert.equal(seen().length, 15);   // after the look: how the cat stands with the others, and what holds it (PvP)
+  assert.deepEqual(seen().slice(13), [0, 0]);
   assert.ok(seen().every((v) => typeof v === 'number'));
 
   // off again; a full bag refuses
@@ -1600,4 +1601,135 @@ check('action bar: a play-test character and a second tab get one too, and neith
   await s.stop();
   assert.deepEqual(savedPlayers(s).one.bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
   assert.deepEqual(Object.keys(savedPlayers(s)), ['one']);
+}));
+
+
+// ---------------------------------------------------------------- PvP
+
+// Two steps apart on open ground far from the town, on a map without monsters: nothing but the cats decides a fight.
+const FIELD = [100, 100], BESIDE = [101, 100];
+const NO_MONSTERS = edited((file) => { file.spawns = []; });
+const cat = (name, level, more = {}) => ({ ...OLD, name, level, xp: 50, gold: 500, inv: [], ...more });
+// Swings at `id` until done() says so. The server takes one blow per swing of the weapon and drops the rest.
+async function fight(p, id, done, what) {
+  for (let i = 0; i < 400 && !done(); i++) {
+    await p.send({ t: 'a', id });
+    await sleep(100);
+  }
+  assert.ok(done(), what);
+}
+const seen = (p, id) => p.others.find((row) => row[0] === id);   // how p sees the cat `id`: its row of the snapshot
+
+check('pvp: an attack flags the attacker, and beating a cat that fought back is a PvP win that costs the loser nothing', async () => {
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ s: cat('Strong', 30), w: cat('Weak', 3) }) }, async (s) => {
+    const strong = await enter(s, { token: 's', name: 'Strong', at: FIELD }), weak = await enter(s, { token: 'w', name: 'Weak', at: BESIDE });
+    assert.deepEqual([strong.me.pvp, strong.me.pk, strong.me.karma, strong.me.st], [0, 0, 0, 0]);
+    // the weak one starts it: purple at once, to itself and to the other; the one it hit is still peaceful
+    await weak.send({ t: 'a', id: strong.w.id });
+    await weak.until('the flag', () => weak.me.st === 1);
+    await strong.until('the purple name', () => seen(strong, weak.w.id)?.[13] === 1);
+    assert.equal(strong.me.st, 0);
+    // hitting back flags as well, and the kill is a fight won
+    await fight(strong, weak.w.id, () => weak.me.dead, 'the weak cat did not fall');
+    assert.deepEqual(await strong.event('pvp'), { k: 'pvp', n: 'Weak', pk: 0 });
+    await strong.until('the count', () => strong.me.pvp === 1);
+    assert.deepEqual([strong.me.pk, strong.me.karma, strong.me.st], [0, 0, 1]);
+    assert.deepEqual(await weak.event('died'), { k: 'died', xp: 0, by: 'Strong' });
+    await weak.until('the flag gone with the fall', () => weak.me.st === 0);
+    assert.deepEqual([weak.me.xp, weak.me.pvp, weak.me.pk], [50, 0, 0]);
+    await strong.c.take('c', (m) => m.sys && m.m === 'Weak was defeated by Strong');
+    // the one that was hit is told by whom, so that its client can turn to face the attacker
+    assert.ok(weak.events.some((ev) => ev.k === 'hurt' && ev.o === strong.w.id));
+    await strong.settled();
+  });
+  const file = savedPlayers(s);
+  assert.deepEqual([file.s.pvp, file.s.pk, file.s.karma], [1, 0, 0]);
+  assert.deepEqual([file.w.pvp, file.w.pk, file.w.karma, file.w.xp], [0, 0, 0, 50]);
+});
+
+check('pvp: killing a cat that never fought back is murder - PK, karma and a red name', async () => {
+  const { karmaGain } = await import('../src/shared.js');
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ s: cat('Strong', 30), l: cat('Lamb', 3) }) }, async (s) => {
+    const strong = await enter(s, { token: 's', name: 'Strong', at: FIELD }), lamb = await enter(s, { token: 'l', name: 'Lamb', at: BESIDE });
+    await fight(strong, lamb.w.id, () => lamb.me.dead, 'the lamb did not fall');
+    assert.deepEqual(await strong.event('pvp'), { k: 'pvp', n: 'Lamb', pk: 1 });
+    await strong.until('the karma', () => strong.me.karma > 0);
+    assert.deepEqual([strong.me.pvp, strong.me.pk, strong.me.karma, strong.me.st], [0, 1, karmaGain(1), 2]);
+    assert.equal(karmaGain(1), 240);
+    assert.ok(karmaGain(2) > karmaGain(1));
+    assert.deepEqual(await lamb.event('died'), { k: 'died', xp: 0, by: 'Strong' });
+    await lamb.c.take('c', (m) => m.sys && m.m === 'Lamb was murdered by Strong');
+    await strong.settled();
+  });
+  assert.deepEqual([savedPlayers(s).s.pvp, savedPlayers(s).s.pk, savedPlayers(s).s.karma], [0, 1, 240]);
+});
+
+check('pvp: a safe region shelters every cat but an outlaw, whom the Trader turns away and anyone may hunt', async () => {
+  const { xpNext, DEATH_XP_LOSS, KARMA_DEATH } = await import('../src/shared.js');
+  const beside = [AT_TRADER[0] + 1, AT_TRADER[1]];
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ h: cat('Hunter', 30), o: cat('Outlaw', 3, { karma: 300, pk: 1 }), b: cat('Bystander', 3) }) }, async (s) => {
+    const hunter = await enter(s, { token: 'h', name: 'Hunter', at: AT_TRADER });
+    const outlaw = await enter(s, { token: 'o', name: 'Outlaw', at: beside }), bystander = await enter(s, { token: 'b', name: 'Bystander', at: beside });
+    assert.deepEqual([outlaw.me.st, outlaw.me.karma, outlaw.me.pk], [2, 300, 1]);
+    await outlaw.send({ t: 'buy', id: 'hp_small', n: 1 });
+    assert.equal((await outlaw.event('err')).m, 'The Trader does not deal with outlaws');
+    // in the town nobody can be attacked, and nobody is flagged for trying - not even by the outlaw
+    for (let i = 0; i < 12; i++) {
+      await hunter.send({ t: 'a', id: bystander.w.id });
+      await outlaw.send({ t: 'a', id: bystander.w.id });
+      await sleep(100);
+    }
+    await hunter.settled();
+    assert.equal(hunter.me.st, 0);
+    assert.ok(!bystander.events.some((ev) => ev.k === 'hurt') && !bystander.me.dead);
+    // the outlaw has no such shelter; hunting it flags nobody, and its fall is a fight won
+    await fight(hunter, outlaw.w.id, () => outlaw.me.dead, 'the outlaw did not fall');
+    const lost = Math.min(50, Math.round(xpNext(3) * DEATH_XP_LOSS));
+    assert.deepEqual(await outlaw.event('died'), { k: 'died', xp: lost, by: 'Hunter' });
+    await hunter.until('the count', () => hunter.me.pvp === 1);
+    assert.deepEqual([hunter.me.pk, hunter.me.karma, hunter.me.st], [0, 0, 0]);
+    await outlaw.until('less karma', () => outlaw.me.karma === 300 - KARMA_DEATH);
+    await hunter.settled();
+  });
+  assert.deepEqual([savedPlayers(s).h.pvp, savedPlayers(s).o.karma, savedPlayers(s).o.pk], [1, 180, 1]);
+});
+
+check('pvp: an outlaw works its karma off on monsters', () => withServer({
+  setup: seed({ o: cat('Outlaw', 40, { cls: 'wizard', skills: { fireball: 1 }, weapon: 10, karma: 300, pk: 1 }) }),
+}, async (s) => {
+  const { karmaBurn, SKILLS } = await import('../src/shared.js');
+  const camp = FILE.spawns.find((spawn) => !spawn.types.boss);
+  const p = await enter(s, { token: 'o', name: 'Outlaw', at: [camp.x, camp.z] });
+  const near = () => p.mobs.filter((m) => Math.hypot(m[3] - camp.x, m[4] - camp.z) < SKILLS.fireball.range)[0];
+  for (let i = 0; i < 120 && p.me.karma === 300; i++) {
+    const m = near();
+    if (m) await p.send({ t: 'sk', s: 'fireball', tid: m[0] });
+    await sleep(350);
+  }
+  assert.ok(p.me.karma < 300, 'no monster fell');
+  const burnt = 300 - p.me.karma;
+  assert.ok(burnt >= karmaBurn(camp.lvl[0]) && (burnt - 8) % 2 === 0, `burnt ${burnt}`);
+  assert.equal(p.me.st, 2);
+}));
+
+check('pvp: a cat put to sleep can neither move nor strike until a blow wakes it', () => withServer({
+  map: NO_MONSTERS, setup: seed({ m: cat('Mage', 25, { cls: 'wizard', skills: { slumber: 1 } }), v: cat('Victim', 25) }),
+}, async (s) => {
+  const mage = await enter(s, { token: 'm', name: 'Mage', at: FIELD }), victim = await enter(s, { token: 'v', name: 'Victim', at: BESIDE });
+  await mage.send({ t: 'sk', s: 'slumber', tid: victim.w.id });
+  await victim.until('sleep', () => victim.me.cc & 2);
+  assert.equal(mage.me.st, 1);   // the spell was an attack
+  assert.equal(seen(mage, victim.w.id)[14] & 2, 2);
+  // asleep: a step is not taken and a blow is not struck
+  await victim.send({ t: 'm', x: BESIDE[0] + 2, y: 0, z: BESIDE[1], yaw: 0, s: 1 });
+  for (let i = 0; i < 8; i++) { await victim.send({ t: 'a', id: mage.w.id }); await sleep(100); }
+  await mage.settled();
+  assert.deepEqual(seen(mage, victim.w.id).slice(1, 4), [BESIDE[0], 0, BESIDE[1]]);
+  assert.equal(victim.me.st, 0);
+  assert.ok(!mage.events.some((ev) => ev.k === 'hurt'));
+  // the first blow that lands wakes it, and it walks again
+  await fight(mage, victim.w.id, () => victim.events.some((ev) => ev.k === 'hurt'), 'no blow landed');
+  await victim.until('awake', () => !(victim.me.cc & 2));
+  await victim.send({ t: 'm', x: BESIDE[0] + 2, y: 0, z: BESIDE[1], yaw: 0, s: 1 });
+  await mage.until('the step', () => seen(mage, victim.w.id)[1] === BESIDE[0] + 2);
 }));

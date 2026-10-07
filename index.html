@@ -49,6 +49,9 @@
 
   #target { top: 16px; left: 50%; transform: translateX(-50%); width: 260px; display: none; text-align: center; }
   #target .title { margin-bottom: 4px; }
+  #tgAttack { display: none; margin-top: 8px; padding: 4px 16px; font-size: 12px; font-weight: 700; letter-spacing: .04em; color: #ffd0d6;
+    background: rgba(255, 90, 106, .16); border: 1px solid rgba(255, 90, 106, .6); border-radius: 999px; box-shadow: none; }
+  #tgAttack:hover { background: rgba(255, 90, 106, .32); transform: none; }
   #notice { position: absolute; top: 31%; left: 0; right: 0; text-align: center; font-size: 17px; font-weight: 700; color: #ffb3c4;
     text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity .25s; }
   #notice.on { opacity: 1; }
@@ -115,6 +118,7 @@
   #ghost { position: fixed; z-index: 6; margin: -32px 0 0 -32px; pointer-events: none; opacity: .9; transform: scale(.85);
     box-shadow: 0 6px 18px rgba(0, 0, 0, .6); }
   #buffs { position: absolute; top: 131px; left: 16px; display: flex; gap: 6px; font-size: 12px; }
+  #buffs span.bad { border-color: rgba(255, 90, 106, .7); color: #ffb3c4; }
   #buffs span { padding: 3px 8px; border-radius: 999px; background: rgba(6, 24, 21, .7); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold); }
 
   /* skills window */
@@ -179,6 +183,8 @@
   /* the numbers of the status window, one value a row */
   #bagStats { width: 160px; font-size: 12px; }
   #bagStats .who { font-size: 14px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bagStats .rep { margin-bottom: 4px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c9b8ff; }
+  #bagStats .rep b { color: #ff5a6a; }
   #bagStats .sub { margin-bottom: 4px; font-size: 11px; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #bagStats h3 { margin: 6px 0 1px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -395,6 +401,7 @@
     <div class="title" id="tgName"></div>
     <div class="bar"><i id="tgFill"></i></div>
     <div class="label"><span id="tgState"></span><span id="tgHp"></span></div>
+    <button id="tgAttack" title="Attack this cat (Ctrl + click on it does the same)">Attack</button>
   </div>
   <div id="banner"></div>
   <div id="notice"></div>
@@ -445,11 +452,15 @@
       <div><kbd>X</kbd></div><span>Sit down to rest: health and mana come back much faster</span>
       <div><kbd>RMB</kbd> drag / wheel</div><span>Turn the camera / zoom</span>
       <h3>Fighting</h3>
-      <div><kbd>Click</kbd> / <kbd>Tab</kbd></div><span>Select a monster / the next nearest one</span>
+      <div><kbd>Click</kbd> / <kbd>Tab</kbd></div><span>Select a monster or a cat / the next nearest monster</span>
       <div><kbd>F</kbd></div><span>Attack the target and keep hitting it; so does a click on the selected monster, or a right click on any</span>
       <div><kbd>1</kbd> – <kbd>9</kbd>, <kbd>0</kbd></div><span>The ten slots of the action bar: cast the skill, drink the potion or wear the gear in the slot</span>
       <div><kbd>Shift</kbd></div><span>Dash, once the Rogue has learned Shadow Step</span>
       <div><kbd>Esc</kbd></div><span>Close the open window, else clear the target</span>
+      <h3>Fighting other cats</h3>
+      <div><kbd>Ctrl</kbd> + click</div><span>Attack a cat, outside the safe places. So does the Attack button under its name. Attacking turns your name purple for a while: anyone may fight a purple cat</span>
+      <div>PvP</div><span>Beating a cat that fought back, or an outlaw, is a fight won</span>
+      <div>PK</div><span>Killing a cat that never fought back is murder: it leaves karma and a red name. An outlaw is safe nowhere, loses experience when it falls, and gets nothing from the Trader. Monsters work karma off</span>
       <h3>Action bar</h3>
       <div>Drag</div><span>A learned skill from the skill book, or an item from the inventory, onto a slot. Drag a slot onto another to swap them</span>
       <div>Right click</div><span>Clear a slot; so does dragging it off the bar</span>

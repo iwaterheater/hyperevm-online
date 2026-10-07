@@ -14,6 +14,7 @@ import {
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
+  CAT_R, PVP_PEACE, PVP_OUTLAW, PVP_COLORS, PVP_TITLES,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
@@ -333,6 +334,9 @@ loading.track('effects', fx.ready);
 
 // ---------------------------------------------------------------- avatars (cats)
 
+// As a target a cat is what a monster is: it has a height, a radius, and marks over its head while it is stunned,
+// asleep or slowed. `st` is how it stands with the other cats (PVP_PEACE, flagged, outlaw).
+const CAT_TOP = 2.4, CAT_DEF = { r: CAT_R };
 function makeAvatar(cls = 'fighter') {
   const cat = createCat(CLASSES[cls]);
   const root = new THREE.Group();   // never rotates, so labels and bars stay screen-aligned
@@ -347,13 +351,15 @@ function makeAvatar(cls = 'fighter') {
     root, cat, cls, look: 0, orb, swingT: -1, swingKind: 0, castT: -1, castDur: 1, castSkill: '', bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
     speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0, drawT: -1, drawDur: 1,
+    name: 'Cat', top: CAT_TOP, def: CAT_DEF, st: PVP_PEACE, flags: 0, status: null,
   };
 }
 
 function setLabel(a, text, color) {
-  if (a.labelKey === text) return;
+  const key = `${text}|${color}`;
+  if (a.labelKey === key) return;
   if (a.label) disposeSprite(a.label);
-  a.labelKey = text;
+  a.labelKey = key;
   a.label = textSprite(text, color);
   a.label.position.y = 3.15;
   a.root.add(a.label);
@@ -440,6 +446,7 @@ camera.position.set(me.x, groundY(me.x, me.z) + 1.2, me.z + 0.4);   // the openi
 const stats = {
   hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, sp: 0, level: 1, gold: 0, weapon: 1, cls: 'fighter', skills: {}, buffs: [], dead: false,
   inv: [], eq: {}, bar: Array(BAR_SIZE).fill(null),
+  pvp: 0, pk: 0, karma: 0, st: PVP_PEACE, cc: 0, slow: 1,   // PvP: fights won, murders, karma, standing; and what holds the cat
 };
 // every derived stat of this character (P.Atk, Atk.Spd, Speed...), recomputed whenever the server state changes
 let sheet = statsOf('fighter', 1);
@@ -448,7 +455,7 @@ const local = {
   dashDir: new THREE.Vector2(0, 1), aim: new THREE.Vector2(0, 1), zone: '',
 };
 
-// ring on the ground under the selected monster: yellow when selected, red while attacking it
+// ring on the ground under the selected monster or cat: yellow when selected, red while attacking it
 const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
 targetRing.visible = false;
 scene.add(targetRing);
@@ -622,10 +629,10 @@ function onSnapshot(s) {
 
   syncViews(others, s.p,
     ([, x, y, z, yaw, , , , , , , cls]) => Object.assign(makeAvatar(CLASS_KEYS[cls]), { x, y, z, yaw }),
-    (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit, cls, look]) => {
-      Object.assign(a, { tx: x, ty: y, tz: z, tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit });
+    (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit, cls, look, st = 0, flags = 0]) => {
+      Object.assign(a, { tx: x, ty: y, tz: z, tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
       setLook(a, CLASS_KEYS[cls], look);
-      setLabel(a, `${names.get(id) || 'Cat'} · ${CLASSES[a.cls].name} ${level}`);
+      setLabel(a, `${a.name} · ${CLASSES[a.cls].name} ${level}`, PVP_COLORS[st]);   // purple while it is flagged, red for an outlaw
     },
     removeAvatar);
 
@@ -654,7 +661,10 @@ function onSnapshot(s) {
   for (const ev of s.e) onEvent(ev);
 }
 
-// A bolt that homes in on a monster; purely visual, the server decides the damage. A skill's bolt is larger than that
+// Whatever an id names that can be aimed at: a monster, another cat, or this one (ids come from one counter).
+const viewOf = (id) => mobViews.get(id) || others.get(id) || (id && id === myId ? me : undefined);
+
+// A bolt that homes in on a monster or a cat; purely visual, the server decides the damage. A skill's bolt is larger than that
 // of a plain attack and may carry the skill's colour.
 const BOLT_LOOK = { power_shot: [1.7, 0xffd76a], pinning_shot: [1.4, 0xa9d8ff], fireball: [1.25] };
 function spawnBolt(x, z, id, kind, skill) {
@@ -687,7 +697,7 @@ function onEvent(ev) {
       if (!fightStyle(others.get(ev.o).cls, others.get(ev.o).family).ranged) fx.swing(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
       break;
     case 'skill': {   // the server accepted a skill: show what it does
-      const k = SKILLS[ev.s], a = ev.o === myId ? me : others.get(ev.o), tv = mobViews.get(ev.tid);
+      const k = SKILLS[ev.s], a = ev.o === myId ? me : others.get(ev.o), tv = viewOf(ev.tid);
       if (!k || !a) break;
       if (k.kind === 'strike') {
         if (ev.o !== myId) Object.assign(a, { swingT: 0, swingKind: 2 });
@@ -715,15 +725,16 @@ function onEvent(ev) {
     case 'orb':
       spawnProjectile(orbs, orbPool, ev.x, ev.z, ev.dx, ev.dz, 10, 3.5);
       break;
-    case 'hit': {
-      const v = mobViews.get(ev.id);
-      if (v) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
+    case 'hit': {   // a blow that landed, on a monster or on a cat
+      const v = viewOf(ev.id);
+      if (v?.skeleton) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
+      else if (v && v !== me) burst(ev.x, v.y + 1, ev.z, 0xff4d7a, 8, 5);   // this cat's own wounds are shown by 'hurt'
       if (ev.o === myId) floatText(ev.x, (v ? v.top : 2) + 0.5, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
       sfx(520, 0.05, 'square', 0.025);
       break;
     }
-    case 'miss': {   // this player's attack missed (Accuracy against the monster's Evasion)
-      const v = mobViews.get(ev.id);
+    case 'miss': {   // this player's attack missed (Accuracy against the target's Evasion)
+      const v = viewOf(ev.id);
       if (v && ev.o === myId) floatText(v.x, v.top + 0.5, v.z, 'Miss', '#aab4b8');
       break;
     }
@@ -764,8 +775,16 @@ function onEvent(ev) {
       floatText(me.x, 3.3, me.z, `+${ev.n}`, '#8ee68e');
       break;
     case 'died':
-      $('deadText').textContent = `You lost ${ev.xp} experience. Respawning…`;   // at the start point, wherever the map has it
+      // at the start point, wherever the map has it; a fight between cats costs no experience, unless an outlaw lost it
+      $('deadText').textContent = `${ev.by ? `${ev.by} has struck you down. ` : ''}${ev.xp || !ev.by ? `You lost ${ev.xp} experience. ` : ''}Respawning…`;
       break;
+    case 'pvp': {   // this cat has brought another one down: a fight won, or a murder
+      const text = ev.pk ? `You murdered ${ev.n} · PK ${stats.pk} · karma ${stats.karma}` : `You defeated ${ev.n} · PvP ${stats.pvp}`;
+      banner(ev.pk ? `You murdered ${ev.n}` : `You defeated ${ev.n}`);
+      chatLine('', text, true);
+      sfx(ev.pk ? 110 : 523, 0.5, ev.pk ? 'sawtooth' : 'triangle', 0.08, ev.pk ? -50 : 400);
+      break;
+    }
     case 'open': {
       const c = map.chests[ev.i];
       if (!c) break;
@@ -808,7 +827,7 @@ function onEvent(ev) {
       sfx(1200, 0.08, 'sine', 0.05, 600);
       break;
     case 'hurt':
-      if (!targetId) setTarget(nearbyMobs(6)[0] || 0, false);   // being hit selects the attacker
+      if (!targetId) setTarget(others.has(ev.o) ? ev.o : nearbyMobs(6)[0] || 0, false);   // being hit selects the attacker
       me.sitting = false;
       local.invuln = 0.5;
       shake = 0.6;
@@ -838,8 +857,10 @@ const typing = () => document.activeElement === $('chatInput') || document.activ
 
 // orbit camera: drag with the right mouse button to turn it, wheel to zoom
 const cam = { yaw: 0, pitch: 0.9, dist: 16.5, drag: null };
-// combat: the selected monster, and whether the cat is auto-attacking it
-let targetId = 0, attacking = false;
+// combat: the selected monster or cat, and whether this cat is auto-attacking it. `forced` is the peaceful cat the
+// player has decided to attack - that takes a deliberate act (Ctrl + click, or the Attack button of its frame), so
+// nobody turns into a murderer by a slip of the mouse.
+let targetId = 0, attacking = false, forced = 0;
 
 let noticeTimer = 0;
 function notice(text) {
@@ -849,12 +870,12 @@ function notice(text) {
   noticeTimer = setTimeout(() => $('notice').classList.remove('on'), 1300);
 }
 
-// the monster under the cursor, if any
+// the monster or the cat under the cursor, if any
 const pickV = new THREE.Vector3();
-function pickMob(clientX, clientY) {
+function pickTarget(clientX, clientY) {
   let best = 0, bestD = Infinity;
-  for (const [id, v] of mobViews) {
-    if (!v.root.visible || v.killed) continue;
+  for (const [id, v] of [...mobViews, ...others]) {
+    if (!v.root.visible || v.killed || v.dead) continue;
     pickV.set(v.x, groundY(v.x, v.z) + v.top * 0.5, v.z);
     const pixelsPerUnit = innerHeight / (0.89 * camera.position.distanceTo(pickV));   // 0.89 = 2 * tan(fov / 2)
     pickV.project(camera);
@@ -865,9 +886,24 @@ function pickMob(clientX, clientY) {
   return best;
 }
 
-function setTarget(id, attack) {
+// Whether the cat `a` may be attacked now; `say` tells the player why not. An outlaw always may. Anyone else not in a
+// safe place, and a peaceful cat only once the player has forced the attack (a flagged one is fair game).
+function catFoe(a, id, say) {
+  let why = '';
+  if (a.st === PVP_OUTLAW) why = '';
+  else if (isSafe(map, me.x, me.z) || isSafe(map, a.x, a.z)) why = 'No fighting in a safe place';
+  else if (a.st === PVP_PEACE && forced !== id) why = 'Ctrl + click to attack a peaceful cat';
+  if (why && say) notice(why);
+  return !why;
+}
+// a monster is always a foe
+const isFoe = (id, say) => !others.has(id) || catFoe(others.get(id), id, say);
+
+function setTarget(id, attack, force = false) {
+  if (id !== targetId) forced = 0;
   targetId = id;
-  attacking = !!id && attack;
+  if (force && others.has(id)) forced = id;
+  attacking = !!id && attack && isFoe(id, true);
   if (attacking) me.sitting = false;
 }
 
@@ -883,7 +919,8 @@ function nearbyMobs(range) {
 
 function attackKey() {
   if (!targetId) setTarget(nearbyMobs(26)[0] || 0, true);
-  else attacking = !attacking;
+  else if (attacking) attacking = false;
+  else setTarget(targetId, true, keys.has('ControlLeft') || keys.has('ControlRight'));
   if (!targetId) notice('No monsters nearby');
   else if (attacking) me.sitting = false;
 }
@@ -910,7 +947,7 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (state !== 'playing') return;
-  if (e.code === 'Tab' || e.code === 'F1') e.preventDefault();   // F1 is the browser's own help
+  if (e.code === 'Tab' || e.code === 'F1' || (e.code === 'KeyF' && e.ctrlKey)) e.preventDefault();   // F1 is the browser's own help, Ctrl + F its search
   if (e.repeat) return;
   keys.add(e.code);
   fresh.add(e.code);
@@ -947,16 +984,17 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   if (state !== 'playing') return;
   if (e.button === 2) { cam.drag = { moved: 0, x: e.clientX, y: e.clientY }; return; }
   if (e.button !== 0) return;
-  // left click: select a monster; clicking the selected one again starts the attack
-  const id = pickMob(e.clientX, e.clientY);
-  if (id) setTarget(id, id === targetId);
+  // left click: select a monster or a cat; clicking the selected one again starts the attack. With Ctrl (or Alt) held
+  // it attacks at once, and a peaceful cat too.
+  const id = pickTarget(e.clientX, e.clientY), force = e.ctrlKey || e.altKey;
+  if (id) setTarget(id, id === targetId || force, force);
 });
 addEventListener('mouseup', (e) => {
   if (e.button !== 2 || !cam.drag) return;
-  // a right click without dragging attacks the monster under the cursor
+  // a right click without dragging attacks the monster or the cat under the cursor
   if (cam.drag.moved < 6 && state === 'playing') {
-    const id = pickMob(cam.drag.x, cam.drag.y);
-    if (id) setTarget(id, true);
+    const id = pickTarget(cam.drag.x, cam.drag.y);
+    if (id) setTarget(id, true, e.ctrlKey || e.altKey);
   }
   cam.drag = null;
 });
@@ -965,6 +1003,8 @@ renderer.domElement.addEventListener('wheel', (e) => {
   cam.dist = Math.max(7, Math.min(30, cam.dist * Math.exp(e.deltaY * 0.0012)));
 }, { passive: false });
 addEventListener('contextmenu', (e) => e.preventDefault());
+// the Attack button of a cat's target frame: the deliberate act it takes to attack a peaceful cat, without the keyboard
+$('tgAttack').addEventListener('click', () => { setTarget(targetId, true, true); $('tgAttack').blur(); });
 $('playBtn').addEventListener('click', connect);
 $('reloadBtn').addEventListener('click', () => location.reload());
 // the way back to the map editor: it opens, or moves its camera, at the spot where the cat stands
@@ -1057,9 +1097,13 @@ function updateLocal(dt) {
   fx.hideAim();
   me.shootPose -= dt;
 
-  let tv = mobViews.get(targetId);
-  if (targetId && (!tv || tv.killed)) { setTarget(0, false); tv = null; }   // the target died or walked out of view
+  let tv = mobViews.get(targetId) || others.get(targetId);
+  if (targetId && (!tv || tv.killed || tv.dead)) { setTarget(0, false); tv = null; }   // the target died or walked out of view
   if (stats.dead) { me.speed = 0; me.castT = -1; me.drawT = -1; me.sitting = false; attacking = false; clearPresses(); return; }
+  // stunned or asleep: the cat stands where it is until that has passed (the server would not hear of anything else)
+  if (stats.cc & 3) { me.speed = 0; me.castT = -1; me.drawT = -1; clearPresses(); return; }
+  // a fight with a cat ends where it may not go on: one of the two has reached a safe place, or the flag has run out
+  if (attacking && tv?.cat && !catFoe(tv, targetId, true)) attacking = false;
   const cls = CLASSES[stats.cls], style = fightStyle(stats.cls, heldFamily(stats.cls, stats.eq));   // a bow shoots, whoever holds it
 
   // where area skills will land: the terrain under the cursor (the last such point while the cursor is on the sky)
@@ -1098,7 +1142,7 @@ function updateLocal(dt) {
   } else if (me.castT >= 0 || me.sitting) {
     me.speed = 0;   // rooted while casting or resting
   } else {
-    const move = sheet.move * testSpeed;
+    const move = sheet.move * testSpeed * (stats.slow || 1);   // slowed by another cat's frost
     me.x += moveDir.x * move * dt;
     me.z += moveDir.y * move * dt;
     me.speed = moving ? move : 0;
@@ -1162,6 +1206,7 @@ function updateLocal(dt) {
       else if ((local.cds[pick] || 0) > time) warn(`${s.name} is not ready yet`);
       else if (stats.mp < s.mp) warn('Not enough mana');
       else if (targeted && !tv) warn('Select a target first');
+      else if (targeted && tv.cat && !catFoe(tv, targetId, fresh.has(code))) { /* told why */ }
       else if (s.kind === 'strike' && !inReach) attacking = true;   // run up to the target first; the skill fires on arrival
       else if (targeted && s.range && tDist > s.range) warn('The target is too far away');
       else if (s.cast) {
@@ -1225,6 +1270,10 @@ function updateAvatar(a, dt, isMe) {
   a.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
   a.cat.group.rotation.y = a.yaw - cam.yaw;
   if (a.swingT >= 0 && (a.swingT += dt / 0.4) >= 1) a.swingT = -1;
+  // stunned, asleep or slowed by another cat: the marks a monster wears, made the first time a cat needs them
+  const flags = isMe ? stats.cc : a.flags;
+  if (flags && !a.status) a.status = fx.status(a.root, a.top, a.def.r);
+  a.status?.update(flags, time);
   const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
   a.orb.visible = a.castT >= 0;
   a.orb.material = orbMat(a.castSkill);
@@ -1282,7 +1331,7 @@ function updateViews(dt) {
 
   // projectiles are simulated locally for looks; the server decides the damage
   bullets = bullets.filter((b) => {
-    const v = mobViews.get(b.id), m = b.mesh.position;
+    const v = viewOf(b.id), m = b.mesh.position;
     let done = !v;
     if (v) {
       const dx = v.x - m.x, dz = v.z - m.z, d = Math.hypot(dx, dz) || 0.001, step = b.speed * dt;
@@ -1297,10 +1346,10 @@ function updateViews(dt) {
     return !done;
   });
 
-  const tv = mobViews.get(targetId);
+  const tv = mobViews.get(targetId) || others.get(targetId);
   targetRing.visible = !!tv;
   if (tv) {
-    targetRing.scale.setScalar(tv.skeleton.group.scale.y * 0.75 + 0.35);
+    targetRing.scale.setScalar(tv.skeleton ? tv.skeleton.group.scale.y * 0.75 + 0.35 : 1.05);
     layOnGround(targetRing, tv.x, tv.z, targetRing.scale.x / 2, 0.07);
     targetRing.material.color.setHex(attacking ? 0xff4d5e : 0xffd76a);
   }
@@ -1802,13 +1851,20 @@ function statGrid(cells, cls = 'grid') {
   return box;
 }
 
+// The PvP record in one line: fights won, murders, and the karma that is still to be worked off.
+function reputation() {
+  const line = el('div', 'rep', `PvP ${stats.pvp} · PK ${stats.pk}`);
+  if (stats.karma) line.append(el('b', '', ` · Karma ${stats.karma}`));
+  return line;
+}
+
 // The first part of the inventory: the numbers of the status window, a value a row. While the cursor is on a piece
 // of gear in the bag that the character could wear, the combat rows show what wearing it would make of them.
 function renderBagStats() {
   const hover = tipAnchor && $('bagGrid').contains(tipAnchor) ? tipAnchor.dataset.item : null;
   const tried = hover && ITEMS[hover].slot && !equipError(stats.cls, stats.level, hover) ? hover : null;
   const who = names.get(myId) || 'Cat';
-  const key = [who, stats.cls, stats.level, stats.hp, stats.maxHp, stats.mp, stats.maxMp, stats.weapon, tried,
+  const key = [who, stats.cls, stats.level, stats.hp, stats.maxHp, stats.mp, stats.maxMp, stats.weapon, tried, stats.pvp, stats.pk, stats.karma,
     JSON.stringify(stats.skills), JSON.stringify(stats.buffs), JSON.stringify(stats.eq)].join('|');
   if (key === statsKey) return;
   statsKey = key;
@@ -1823,6 +1879,7 @@ function renderBagStats() {
   });
   $('bagStats').replaceChildren(
     el('div', 'who', who), el('div', 'sub', `${CLASSES[stats.cls].name} · level ${stats.level}`),
+    reputation(),
     statGrid([statCell('HP', `${stats.hp} / ${stats.maxHp}`), statCell('MP', `${stats.mp} / ${stats.maxMp}`)]),
     el('h3', '', 'Attributes'), statGrid(ATTR_NAMES.map((n) => statCell(n, sheet[n])), 'grid two'),
     el('h3', tried ? 'try' : '', tried ? `With ${ITEMS[tried].name}` : 'Combat'), statGrid(combat),
@@ -2005,7 +2062,7 @@ const SHEET_ROWS = [
 ];
 
 function renderSheet() {
-  const key = [stats.cls, stats.level, stats.xp, stats.sp, stats.hp, stats.mp, stats.gold, stats.weapon, JSON.stringify(stats.buffs), JSON.stringify(stats.eq)].join('|');
+  const key = [stats.cls, stats.level, stats.xp, stats.sp, stats.hp, stats.mp, stats.gold, stats.weapon, JSON.stringify(stats.buffs), JSON.stringify(stats.eq), stats.pvp, stats.pk, stats.karma, stats.st].join('|');
   if (key === sheetKey) return;
   sheetKey = key;
   const base = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, {}, stats.eq);   // without buffs, to highlight what they raise
@@ -2020,6 +2077,7 @@ function renderSheet() {
       cell('Experience', `${(stats.xp / need * 100).toFixed(2)}%`), cell('SP', stats.sp),
       cell('Gold', stats.gold), cell('Weapon upgrade', `Lv ${stats.weapon}`),   // the Blacksmith's work (B)
     ]),
+    ...section('PvP', [cell('PvP wins', stats.pvp), cell('PK', stats.pk), cell('Karma', stats.karma), cell('Standing', PVP_TITLES[stats.st])]),
     ...section('Attributes', ATTR_NAMES.map((n) => cell(n, sheet[n]))),
     ...section('Combat', SHEET_ROWS.flat().map((r) => (r ? cell(r[0], sheet[r[1]], sheet[r[1]] > base[r[1]], sheet[r[1]] - bare[r[1]]) : el('div')))),
   );
@@ -2028,6 +2086,7 @@ function renderSheet() {
 let xpSeen = null;   // the level and the experience the bar showed last, to tell when more has come in
 function updateHud() {
   $('who').textContent = `${names.get(myId) || 'Cat'} · ${CLASSES[stats.cls].name} ${stats.level}`;
+  $('who').style.color = stats.st ? PVP_COLORS[stats.st] : '';   // the colour the others see over this cat
   $('hpFill').style.width = `${stats.hp / stats.maxHp * 100}%`;
   $('hpText').textContent = `${stats.hp} / ${stats.maxHp}`;
   $('mpFill').style.width = `${stats.mp / stats.maxMp * 100}%`;
@@ -2047,7 +2106,9 @@ function updateHud() {
   $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
   $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
   if (helpOpen) $('online').textContent = `${online} ${online === 1 ? 'cat' : 'cats'} in the world right now`;
-  $('buffs').replaceChildren(...stats.buffs.map(([stat, left]) => el('span', '', `${BUFF_NAMES[stat] || stat} ${left}s`)));
+  $('buffs').replaceChildren(
+    ...['Stunned', 'Asleep', 'Slowed'].filter((_, i) => stats.cc & (1 << i)).map((text) => el('span', 'bad', text)),
+    ...stats.buffs.map(([stat, left]) => el('span', '', `${BUFF_NAMES[stat] || stat} ${left}s`)));
   if (sheetOpen) renderSheet();
 
   renderBar();
@@ -2085,10 +2146,17 @@ function updateHud() {
     skills.note = `${stats.sp} skill points: the Sage has ${n} ${n === 1 ? 'skill' : 'skills'} you can afford`;
   }
 
-  // target frame: name and level tinted by how dangerous the monster is for this player
-  const tv = mobViews.get(targetId);
+  // target frame: name and level tinted by how dangerous the monster is for this player; a cat's by how it stands
+  const tv = mobViews.get(targetId) || others.get(targetId);
   $('target').style.display = tv ? 'block' : 'none';
-  if (tv) {
+  $('tgAttack').style.display = tv?.cat && !attacking ? 'inline-block' : 'none';
+  if (tv?.cat) {
+    $('tgName').textContent = `${tv.name} · ${CLASSES[tv.cls].name} ${tv.level}`;
+    $('tgName').style.color = PVP_COLORS[tv.st];
+    $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
+    $('tgHp').textContent = `${Math.ceil(tv.hp)} / ${tv.maxHp}`;
+    $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : PVP_TITLES[tv.st];
+  } else if (tv) {
     const diff = tv.lvl - stats.level;
     $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
     $('tgName').style.color = diff >= 5 ? '#ff5a6a' : diff >= 3 ? '#ffa24d' : diff >= -2 ? '#fff3b0' : diff >= -5 ? '#8ee68e' : '#aab4b8';
@@ -2170,7 +2238,7 @@ function drawMinimap() {
   });
   for (const spawn of map.spawns) if (hasBoss(spawn)) dot(spawn.x, spawn.z, 8, '#ff2244', true);
   dot(map.start.x, map.start.z, 8, '#7fe8d6', true);          // town
-  for (const a of others.values()) dot(a.x, a.z, 6, '#ffffff');
+  for (const a of others.values()) dot(a.x, a.z, 6, a.st ? PVP_COLORS[a.st] : '#ffffff');
   g.fillStyle = '#ffffff';
   g.beginPath(); g.arc(C, C, 7, 0, 7); g.fill();
   g.fillStyle = '#35523f';

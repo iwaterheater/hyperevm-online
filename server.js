@@ -9,6 +9,7 @@ import {
   TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R,
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
+  PVP_FLAG, PVP_DAMAGE, KARMA_DEATH, CAT_R, karmaGain, karmaBurn, PVP_PEACE, PVP_FLAGGED, PVP_OUTLAW,
   ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, KNIGHT_SHIELD, stackMax, sellPrice, heldFamily, fightStyle, equipError, wearItem, roomFor, addItem, takeItem,
   cleanBag, cleanEquip, lookCode, rollLoot, chestLoot, cleanBar, defaultBar, barAdd,
 } from './src/shared.js';
@@ -510,7 +511,7 @@ function persist(p) {
   if (!p.persist) return;
   saved[p.token] = {
     name: p.name, cls: p.cls, level: p.level, xp: p.xp, sp: p.sp, skills: p.skills, gold: p.gold, weapon: p.weapon,
-    inv: p.inv, equip: p.equip, bar: p.bar,
+    inv: p.inv, equip: p.equip, bar: p.bar, pvp: p.pvp, pk: p.pk, karma: p.karma,
   };
   if (p.knightKit) saved[p.token].knightKit = 1;   // the Knight has had his shield (see grantShield)
 }
@@ -722,7 +723,7 @@ function giveItem(p, id, n, x, z) {
   if (got < n) refuse(p, `Your bag is full: ${ITEMS[id].name} was lost`);
 }
 
-// A physical attack on a monster: it can miss (Accuracy against Evasion) and can be a critical hit; P.Def reduces it.
+// A physical attack on a monster, or on the stats of a cat (defOf): it can miss (Accuracy against Evasion) and can be a critical hit; P.Def reduces it.
 // `power` is in the units of the skill table, where a plain weapon hit is 2.
 function physical(p, power, m) {
   if (Math.random() > hitChance(p.st.acc, m.eva)) return { dmg: 0, miss: true };
@@ -775,7 +776,9 @@ function damageMob(m, hit, dx, dz, knock, p) {
   }
   for (const id of m.dmgBy) {
     const q = players.get(id);
-    if (q && !q.dead) addXp(q, m.xp);
+    if (!q || q.dead) continue;
+    addXp(q, m.xp);
+    if (q.karma > 0) q.karma = Math.max(0, q.karma - karmaBurn(m.lvl));   // an outlaw works its karma off
   }
   // Loot is the killer's. The King is brought down together: everyone alive who wounded him gets a roll of their own.
   const looters = m.type === 'boss' ? [...m.dmgBy].map((id) => players.get(id)).filter((q) => q && !q.dead) : [p];
@@ -802,19 +805,83 @@ function hurtPlayer(p, m, magic) {
   p.hp -= mitigate(m.pAtk, magic ? p.st.mDef : p.st.pDef);
   p.hurtAt = now;
   p.sit = false;
+  p.sleepUntil = 0;   // any damage wakes a sleeping cat
   p.invulnUntil = now + 0.5;
   p.events.push({ k: 'hurt' });
-  if (p.hp <= 0) {
-    p.hp = 0;
-    p.dead = true;
-    p.deadUntil = now + 6;
-    const lost = Math.min(p.xp, Math.round(xpNext(p.level) * DEATH_XP_LOSS));   // death costs experience, never a level
-    p.xp -= lost;
-    p.buffs = {};
-    p.events.push({ k: 'died', xp: lost });
-    emit({ k: 'kill', id: 0, x: r2(p.x), z: r2(p.z), ti: -1 }, p.x, p.z);
-    broadcast({ t: 'c', sys: 1, m: `${p.name} was slain` });
-  }
+  if (p.hp <= 0) die(p);
+}
+
+// A cat falls: to a monster, or to the cat `by`, whose blow is `ev`. Death costs experience, never a level - but not
+// in a fight between cats, unless the one that fell is an outlaw. What the winner gets depends on how the loser stood:
+// see the rules in shared.js.
+function die(q, by = null, ev = {}) {
+  const state = pvpState(q);
+  q.hp = 0;
+  q.dead = true;
+  q.deadUntil = now + 6;
+  const lost = by && state !== PVP_OUTLAW ? 0 : Math.min(q.xp, Math.round(xpNext(q.level) * DEATH_XP_LOSS));
+  q.xp -= lost;
+  q.buffs = {};
+  Object.assign(q, { flagUntil: 0, stunUntil: 0, sleepUntil: 0, slowUntil: 0, dot: null });
+  if (state === PVP_OUTLAW) q.karma = Math.max(0, q.karma - KARMA_DEATH);
+  q.events.push(by ? { k: 'died', xp: lost, by: by.name } : { k: 'died', xp: lost });
+  emit({ k: 'kill', ...ev, id: 0, x: r2(q.x), z: r2(q.z), ti: -1 }, q.x, q.z);
+  if (!by) { broadcast({ t: 'c', sys: 1, m: `${q.name} was slain` }); return; }
+  const murder = state === PVP_PEACE;
+  if (murder) {
+    by.pk++;
+    by.karma += karmaGain(by.pk);
+    by.flagUntil = 0;   // an outlaw now: red, not purple
+  } else by.pvp++;
+  by.events.push({ k: 'pvp', n: q.name, pk: murder ? 1 : 0 });
+  broadcast({ t: 'c', sys: 1, m: `${q.name} was ${murder ? 'murdered' : 'defeated'} by ${by.name}` });
+}
+
+// ---------------------------------------------------------------- PvP (the rules are told in shared.js)
+
+const isCat = (o) => o.ws !== undefined;                      // a player, as opposed to a monster
+const foeOf = (id) => mobById.get(id) ?? players.get(id);     // ids come from one counter: an id names one or the other
+const bodyR = (o) => (isCat(o) ? CAT_R : o.r);
+const defOf = (o) => (isCat(o) ? o.st : o);                   // where its P.Def, M.Def and Evasion are
+const pvpState = (p) => (p.karma > 0 ? PVP_OUTLAW : now < p.flagUntil ? PVP_FLAGGED : PVP_PEACE);
+const held = (p) => now < p.stunUntil || now < p.sleepUntil;  // stunned or asleep: it can neither move nor act
+const ccFlags = (o) => (now < o.stunUntil ? 1 : 0) | (now < o.sleepUntil ? 2 : 0) | (now < o.slowUntil ? 4 : 0);
+
+// May p attack the cat q right now? A safe region shelters everyone in it but an outlaw, and nobody fights out of one -
+// except against an outlaw. (A play-test cat that cannot be hurt cannot be fought either.)
+function canFight(p, q) {
+  if (q === p || p.dead || q.dead || q.god) return false;
+  return q.karma > 0 || !(regions.isSafe(p.x, p.z) || regions.isSafe(q.x, q.z));
+}
+// whether the monster or cat p names is nothing it may strike
+const noFoe = (p, m) => !m || m.dead || (isCat(m) && !canFight(p, m));
+// p has turned on q: that flags p, unless q is an outlaw
+function engage(p, q) {
+  if (q.karma <= 0) p.flagUntil = now + PVP_FLAG;
+}
+
+// One cat's attack landing on another. -> whether it did damage: a miss, a dodge and a blow that may not be struck
+// (the target has reached a safe region since the arrow left) do none.
+function strikePlayer(q, hit, p) {
+  if (!canFight(p, q) || now < q.dashUntil || now < q.invulnUntil) return false;
+  engage(p, q);
+  if (hit.miss) { emit({ k: 'miss', id: q.id, o: p.id }, q.x, q.z); return false; }
+  const dmg = hit.dmg * PVP_DAMAGE;
+  q.hp -= dmg;
+  q.hurtAt = now;
+  q.sit = false;
+  q.sleepUntil = 0;
+  q.events.push({ k: 'hurt', o: p.id });
+  const ev = { x: r2(q.x), z: r2(q.z), o: p.id, d: r2(dmg), c: hit.crit ? 1 : 0 };
+  if (q.hp > 0) emit({ k: 'hit', id: q.id, ...ev }, q.x, q.z);
+  else die(q, p, ev);
+  return true;
+}
+// An attack of p landing on a monster or on a cat. -> whether it did damage.
+function strike(m, hit, dx, dz, knock, p) {
+  if (isCat(m)) return strikePlayer(m, hit, p);
+  damageMob(m, hit, dx, dz, knock, p);
+  return !hit.miss;
 }
 
 function respawnPlayer(p) {
@@ -823,6 +890,7 @@ function respawnPlayer(p) {
   p.hp = p.maxHp;
   p.mp = p.maxMp;
   p.dead = false;
+  p.invulnUntil = now + 3;   // nobody is struck down again the moment it stands up
   p.lastMoveAt = now;
   grace(p);
   p.events.push({ k: 'tp', x: r2(p.x), z: r2(p.z) });
@@ -978,20 +1046,27 @@ function tick() {
     else if (resting) p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.05 * dt);
     else if (now - p.hurtAt > 6) p.hp = Math.min(p.maxHp, p.hp + p.maxHp * 0.012 * dt);
     p.mp = Math.min(p.maxMp, p.mp + p.maxMp * (p.safe ? 0.08 : resting ? 0.06 : 0.015) * dt);
+    if (p.dot && now >= p.dot.next) {   // a cat bleeds as a monster does, once a second
+      const owner = players.get(p.dot.owner);
+      if (!owner || now > p.dot.until) p.dot = null;
+      else {
+        p.dot.next += 1;
+        strikePlayer(p, { dmg: p.dot.dps / PVP_DAMAGE, crit: false }, owner);   // the bleeding was worked out against this cat
+      }
+    }
   }
 
   for (const m of mobs) updateMob(m, dt);
   separateMobs();
 
-  // arrows and bolts home in on the monster they were loosed at
+  // arrows and bolts home in on the monster, or the cat, they were loosed at
   bullets = bullets.filter((b) => {
-    const m = mobById.get(b.target), p = players.get(b.owner);
+    const m = foeOf(b.target), p = players.get(b.owner);
     b.life -= dt;
     if (!m || m.dead || !p || b.life <= 0) return false;
     const dx = m.x - b.x, dz = m.z - b.z, d = Math.hypot(dx, dz) || 0.001, step = b.speed * dt;
-    if (d <= step + m.r) {
-      damageMob(m, b.hit, dx / d, dz / d, 4, p);
-      if (!b.hit.miss) applyEffects(m, b, p);
+    if (d <= step + bodyR(m)) {
+      if (strike(m, b.hit, dx / d, dz / d, 4, p)) applyEffects(m, b, p);
       return false;
     }
     b.x += dx / d * step; b.z += dz / d * step;
@@ -1008,6 +1083,11 @@ function tick() {
         if (m.dead) continue;
         const dx = m.x - b.x, dz = m.z - b.z, d = Math.hypot(dx, dz) || 1;
         if (d < b.radius + m.r) damageMob(m, (b.phys ? physical : magical)(p, b.power, m), dx / d, dz / d, 10, p);
+      }
+      // An area skill never starts a fight: among cats it reaches only those who are in one already, and outlaws.
+      for (const q of players.values()) {
+        if (q === p || q.dead || pvpState(q) === PVP_PEACE) continue;
+        if (Math.hypot(q.x - b.x, q.z - b.z) < b.radius + CAT_R) strikePlayer(q, (b.phys ? physical : magical)(p, b.power, q.st), p);
       }
     }
     return false;
@@ -1062,6 +1142,7 @@ function tick() {
       me: {
         hp: Math.ceil(p.hp), maxHp: p.maxHp, mp: Math.floor(p.mp), maxMp: p.maxMp, xp: p.xp, sp: p.sp, level: p.level, gold: p.gold,
         weapon: p.weapon, cls: p.cls, skills: p.skills, dead: p.dead ? 1 : 0,
+        pvp: p.pvp, pk: p.pk, karma: p.karma, st: pvpState(p), cc: ccFlags(p), slow: now < p.slowUntil ? p.slowMult : 1,
         buffs: Object.entries(p.buffs).filter(([, b]) => now < b.until).map(([stat, b]) => [stat, Math.ceil(b.until - now), b.mult]),
       },
       p: [], m: [], g: [],
@@ -1079,13 +1160,12 @@ function tick() {
     }
     for (const q of players.values()) {
       if (q !== p && near(q)) {
-        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls), lookCode(q.equip)]);
+        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls), lookCode(q.equip), pvpState(q), ccFlags(q)]);
       }
     }
     for (const m of mobs) {
       if (m.dead || !near(m)) continue;
-      const flags = (now < m.stunUntil ? 1 : 0) | (now < m.sleepUntil ? 2 : 0) | (now < m.slowUntil ? 4 : 0);
-      snap.m.push([m.id, m.ti, m.lvl, r2(m.x), r2(m.z), r2(Math.max(0, m.hp)), m.maxHp, flags]);
+      snap.m.push([m.id, m.ti, m.lvl, r2(m.x), r2(m.z), r2(Math.max(0, m.hp)), m.maxHp, ccFlags(m)]);
     }
     for (const g of gems) if (near(g)) snap.g.push([g.id, r2(g.x), r2(g.z)]);
     send(p.ws, snap);
@@ -1098,28 +1178,30 @@ function tick() {
 const wss = new WebSocketServer({ server, maxPayload: 2048 });   // a join that carries a 256-character editor token fits
 
 // What each kind of skill does once its cost and cooldown have been checked. Returns false to refuse the cast.
+// `m` is the monster or the cat the skill was aimed at.
 const SKILL_EFFECTS = {
   strike(p, s, R, m) {
-    if (!m || m.dead) return false;
-    const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
-    if (d > fightStyle(p.cls, heldFamily(p.cls, p.equip)).reach + m.r + 1.2) return false;
-    const hit = physical(p, s.power[R], m);
-    damageMob(m, hit, dx / d, dz / d, 7, p);
-    if (!hit.miss) applyEffects(m, { stun: s.stun?.[R], dot: s.dot && mitigate(s.dot[R] * p.st.pAtk / 2, m.pDef), dotDur: s.dotDur }, p);
+    if (noFoe(p, m)) return false;
+    const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001, foe = defOf(m);
+    if (d > fightStyle(p.cls, heldFamily(p.cls, p.equip)).reach + bodyR(m) + 1.2) return false;
+    if (!strike(m, physical(p, s.power[R], foe), dx / d, dz / d, 7, p)) return;
+    applyEffects(m, { stun: s.stun?.[R], dot: s.dot && mitigate(s.dot[R] * p.st.pAtk / 2, foe.pDef), dotDur: s.dotDur }, p);
   },
   shot(p, s, R, m) { return SKILL_EFFECTS.bolt(p, s, R, m); },
   bolt(p, s, R, m) {
-    if (!m || m.dead || Math.hypot(m.x - p.x, m.z - p.z) > s.range + 3) return false;   // a little slack for lag
+    if (noFoe(p, m) || Math.hypot(m.x - p.x, m.z - p.z) > s.range + 3) return false;   // a little slack for lag
+    if (isCat(m)) engage(p, m);   // loosing it is the attack, wherever it lands
     bullets.push({
       x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, speed: s.kind === 'shot' ? 42 : 34,
-      hit: (s.kind === 'shot' ? physical : magical)(p, s.power[R], m),
+      hit: (s.kind === 'shot' ? physical : magical)(p, s.power[R], defOf(m)),
       stun: s.stun?.[R], slow: s.slow?.[R], slowDur: s.slowDur,
     });
   },
   sleep(p, s, R, m) {
-    if (!m || m.dead || Math.hypot(m.x - p.x, m.z - p.z) > s.range + 3) return false;
+    if (noFoe(p, m) || Math.hypot(m.x - p.x, m.z - p.z) > s.range + 3) return false;
     applyEffects(m, { sleep: s.dur[R] }, p);
-    if (!m.target) m.target = p.id;
+    if (isCat(m)) engage(p, m);
+    else if (!m.target) m.target = p.id;
   },
   ground(p, s, R, m, msg) {
     let dx = num(msg.x) - p.x, dz = num(msg.z) - p.z;
@@ -1164,6 +1246,7 @@ const SKILL_EFFECTS = {
 };
 
 const DEAD = 'You cannot do that while dead';
+const OUTLAW = 'The Trader does not deal with outlaws';
 // The stack an item request means. It names the stack by its place in the bag AND by its item, so that a click which
 // crossed another change of the bag on the wire can never sell, drink or destroy a different item. A request for a
 // stack that is not there is dropped without an answer: the client's bag is simply a snapshot behind.
@@ -1175,6 +1258,7 @@ function stackOf(p, msg) {
 const handlers = {
   m(p, msg) {   // movement (client-side, sanity-checked here)
     if (p.dead) return;
+    if (held(p)) { p.speed = 0; p.lastMoveAt = now; return; }   // stunned or asleep: it stays where it is
     const x = num(msg.x), z = num(msg.z);
     const elapsed = Math.min(1, now - p.lastMoveAt);
     const over = Math.hypot(x - p.x, z - p.z) - 36 * elapsed;   // units beyond the speed limit; 3 are always fine
@@ -1195,32 +1279,33 @@ const handlers = {
     p.lastMoveAt = now;
     clampWorld(p, 1);
   },
-  a(p, msg) {   // auto-attack: one hit at the selected monster with whatever is in the paw
-    const m = mobById.get(msg.id), c = fightStyle(p.cls, heldFamily(p.cls, p.equip));
-    if (p.dead || now < p.swingAt || !m || m.dead) return;
+  a(p, msg) {   // auto-attack: one hit at the selected monster, or cat, with whatever is in the paw
+    const m = foeOf(msg.id), c = fightStyle(p.cls, heldFamily(p.cls, p.equip));
+    if (p.dead || held(p) || now < p.swingAt || noFoe(p, m)) return;
     const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
-    if (d > c.reach + m.r + 1.2) return;   // out of reach (with a little slack for lag)
+    if (d > c.reach + bodyR(m) + 1.2) return;   // out of reach (with a little slack for lag)
     p.swingAt = now + p.st.atkCd * 0.85;
     const kind = [0, 1, 2].includes(msg.c) ? msg.c : 2;   // which of the three swing animations to show
     emit({ k: 'swing', o: p.id, dx: r2(dx / d), dz: r2(dz / d), c: kind }, p.x, p.z);
     if (c.ranged) {
-      bullets.push({ x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, speed: 42, hit: physical(p, 2, m) });
+      if (isCat(m)) engage(p, m);
+      bullets.push({ x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, speed: 42, hit: physical(p, 2, defOf(m)) });
       emit({ k: 'shot', o: p.id, id: m.id, x: r2(p.x), z: r2(p.z), fx: 'arrow' }, p.x, p.z);
     } else {
-      damageMob(m, physical(p, 2, m), dx / d, dz / d, 5, p);
+      strike(m, physical(p, 2, defOf(m)), dx / d, dz / d, 5, p);
     }
   },
   k(p, msg) {   // started casting: only tells nearby players to play the animation
     const id = String(msg.s), s = own(SKILLS, id);
-    if (p.dead || now < p.castAt || !s || !p.skills[id]) return;
+    if (p.dead || held(p) || now < p.castAt || !s || !p.skills[id]) return;
     p.castAt = now + 0.3;
     emit({ k: 'cast', o: p.id, s: id, d: r2(castTime(s, p.st)) }, p.x, p.z);
   },
   sk(p, msg) {   // use a skill
     const id = String(msg.s), s = own(SKILLS, id), rank = own(p.skills, id) | 0;
-    if (p.dead || !s || !rank || s.kind === 'passive' || !classLine(p.cls).includes(s.cls)) return;
+    if (p.dead || held(p) || !s || !rank || s.kind === 'passive' || !classLine(p.cls).includes(s.cls)) return;
     if (now < (p.cds[id] || 0) || p.mp < s.mp) return;
-    const m = mobById.get(msg.tid);
+    const m = foeOf(msg.tid);
     if (SKILL_EFFECTS[s.kind](p, s, rank - 1, m, msg) === false) return;
     p.mp -= s.mp;
     p.sit = false;
@@ -1292,6 +1377,7 @@ const handlers = {
     if (!itemOf(id) || !SHOP.includes(id) || !Number.isInteger(n) || n < 1 || n > stackMax(id)) return;
     if (p.dead) { refuse(p, DEAD); return; }
     if (!nearNpc(map, p, 'trader', SHOP_RANGE)) { refuse(p, 'The Trader is too far away'); return; }
+    if (p.karma > 0) { refuse(p, OUTLAW); return; }
     const cost = ITEMS[id].price * n;
     if (p.gold < cost) { refuse(p, 'Not enough gold'); return; }
     if (roomFor(p.inv, id, n) < n) { refuse(p, 'Your bag is full'); return; }
@@ -1305,6 +1391,7 @@ const handlers = {
     if (!stack || !Number.isInteger(n) || n < 1 || n > stack[1]) return;
     if (p.dead) { refuse(p, DEAD); return; }
     if (!nearNpc(map, p, 'trader', SHOP_RANGE)) { refuse(p, 'The Trader is too far away'); return; }
+    if (p.karma > 0) { refuse(p, OUTLAW); return; }
     const id = stack[0], gold = sellPrice(id) * n;
     takeItem(p.inv, msg.i, n);
     p.gold += gold;
@@ -1417,6 +1504,9 @@ function join(ws, msg, conn) {
     bar: Array.isArray(data.bar) ? cleanBar(data.bar) : null, barDirty: true, knightKit: data.knightKit ? 1 : 0,
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
     castAt: 0, swingAt: 0, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
+    // PvP: fights won, murders, the karma they left - and, never saved, how long the cat stays flagged
+    pvp: data.pvp | 0, pk: data.pk | 0, karma: Math.max(0, data.karma | 0), flagUntil: 0,
+    stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null,   // what another cat's skills can do to it
     lastMoveAt: now, graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
   };
   grantFree(p);

@@ -36,7 +36,8 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `W` `A` `S` `D` / arrows | Move, relative to the camera; the cat turns to face where it walks |
 | Right mouse button (drag) | Turn the camera |
 | Mouse wheel | Zoom |
-| Left click on a monster | Select it as the target; a frame at the top shows its name, level and health |
+| Left click on a monster or a cat | Select it as the target; a frame at the top shows its name, level and health |
+| `Ctrl` + click on a cat | **Attack another player** - see [Fighting other cats](#fighting-other-cats). The Attack button under its name in the target frame does the same |
 | `Tab` | Select the next nearest monster |
 | `Esc` | Clear the target |
 | `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack) |
@@ -171,6 +172,25 @@ Stand next to the Trader in town and press `T`. He sells the four potions and al
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold and the better what else may lie in them. The King's hoard waits inside his fortress.
 - Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises P. Atk and M. Atk.
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
+
+### Fighting other cats
+
+Cats may fight each other anywhere outside the safe places, by the rules of Lineage II. Nobody attacks by accident: a
+peaceful cat is attacked with `Ctrl` + click, or with the Attack button of its target frame.
+
+- **Purple name - flagged.** Attacking another cat flags the attacker for 30 seconds after its last blow. Anyone may
+  fight a flagged cat; hitting back flags the defender too.
+- **PvP.** Bringing down a flagged cat, or an outlaw, is a fight won: PvP +1. The loser keeps its experience.
+- **PK.** Killing a cat that never fought back is murder: PK +1, and karma - 240 for the first one, 60 more for each
+  after it.
+- **Red name - outlaw.** A cat with karma may be attacked by anyone and anywhere, the town included, without that
+  flagging the attacker. It loses experience when another cat brings it down, and the Trader does not deal with it.
+- **Karma** is worked off by killing monsters (`8 + 2 × the monster's level` each), and 120 of it goes with every death.
+- Area skills never start a fight: among cats they reach only flagged ones and outlaws. Stuns, sleep, slows and
+  bleeding work on cats as they do on monsters; a cat's attack does three quarters of its damage to another cat.
+
+The counts are in the Character window (`C`) and under the name in the Inventory (`I`); the colour of a name is seen by
+everyone, on the cat, in its target frame and on the minimap.
 
 ## Map editor
 

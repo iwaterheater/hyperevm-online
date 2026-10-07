@@ -516,6 +516,26 @@ export const spFor = (xp) => Math.ceil(xp / 8);                  // skill points
 export const DEATH_XP_LOSS = 0.04;                               // share of the current level's experience lost on death
 export const upgradeCost = (weapon) => 40 * weapon;
 
+// ---------------------------------------------------------------- PvP
+
+// Cats may fight each other outside the safe regions, by the rules of Lineage II:
+//   - a cat that attacks another one is flagged for a while: its name turns purple, and anyone may fight it;
+//   - whoever kills a flagged cat, or an outlaw, has won a fight: PvP +1;
+//   - whoever kills a cat that never fought back has murdered it: PK +1, and karma. A cat with karma is an outlaw: its
+//     name is red, it may be attacked by anyone and anywhere - the town is no shelter - without that flagging the
+//     attacker, the Trader does not deal with it, and it loses experience when it falls to another cat;
+//   - karma is worked off by killing monsters, and a part of it goes with every death.
+export const PVP_FLAG = 30;         // seconds a cat stays flagged after its last attack on another cat
+export const PVP_DAMAGE = 0.75;     // what a cat's attack does to another cat, as a share of what it does to a monster
+export const KARMA_DEATH = 120;     // karma an outlaw is rid of by dying
+export const CAT_R = 0.5;           // the radius of a cat as a target
+export const karmaGain = (pk) => 240 + 60 * Math.min(Math.max(pk, 1) - 1, 16);   // for the murder that made the count `pk`
+export const karmaBurn = (mobLvl) => 8 + 2 * mobLvl;                             // worked off by killing a monster
+// How a cat stands with the others, as a number that travels with it: peaceful, flagged, outlaw.
+export const PVP_PEACE = 0, PVP_FLAGGED = 1, PVP_OUTLAW = 2;
+export const PVP_COLORS = ['#d5f5ee', '#c58bff', '#ff5a6a'];   // the colour of its name
+export const PVP_TITLES = ['Peaceful', 'Flagged', 'Outlaw'];
+
 // ---------------------------------------------------------------- world
 
 // The world itself - regions, monster camps, chests, townsfolk, the start point - is data: map/world.json, read through
