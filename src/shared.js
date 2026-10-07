@@ -37,13 +37,14 @@ export function mobStats(type, level) {
 // Two starting classes; at PROFESSION_LEVEL each branches into professions (`base` names the parent).
 // attr: the six base attributes - STR, DEX, CON, INT, WIT, MEN - from which every combat stat is derived (see statsOf).
 // armor: base physical defence of what the class wears. reach: auto-attack range.
+// weapon: the basic weapon the class fights with while its weapon slot is empty (a row of WEAPONS, a family of ARMS).
 export const CLASSES = {
   fighter: { name: 'Fighter', base: null, attr: [40, 30, 43, 21, 11, 25], armor: 40, reach: 2.4,
     weapon: 'sword', hoodie: 0x35523f, text: 'Fights up close with a sword. Tough and simple to play.' },
   mystic: { name: 'Mystic', base: null, attr: [22, 21, 27, 41, 20, 39], armor: 22, reach: 2.4,
     weapon: 'staff', hoodie: 0x3b4a8a, text: 'Casts spells from a distance. Fragile, lives on mana.' },
-  knight: { name: 'Knight', base: 'fighter', attr: [40, 28, 48, 21, 11, 27], armor: 62, reach: 2.4,
-    weapon: 'shield', hoodie: 0x5a6470, text: 'Tank: heavy defence, a shield, and skills that pull monsters onto himself.' },
+  knight: { name: 'Knight', base: 'fighter', attr: [40, 28, 48, 21, 11, 27], armor: 77, reach: 2.4,
+    weapon: 'sword', hoodie: 0x5a6470, text: 'Tank: heavy defence, a shield, and skills that pull monsters onto himself.' },
   rogue: { name: 'Rogue', base: 'fighter', attr: [41, 46, 36, 21, 12, 24], armor: 32, reach: 2.4,
     weapon: 'daggers', hoodie: 0x6a2a2a, text: 'Melee damage: fast twin daggers, frequent critical hits, a quick dash.' },
   archer: { name: 'Archer', base: 'fighter', attr: [39, 44, 34, 21, 13, 26], armor: 30, reach: 18, ranged: true,
@@ -54,13 +55,14 @@ export const CLASSES = {
     weapon: 'staff', hoodie: 0xcfc9ae, text: 'Support: heals and blesses everyone nearby, raises the fallen.' },
 };
 export const ATTR_NAMES = ['STR', 'DEX', 'CON', 'INT', 'WIT', 'MEN'];
-// What each kind of weapon contributes: attack values, base attack speed, critical rate (per 1000) and extra defence.
+// What the basic weapon of a class contributes: attack values, base attack speed and critical rate (per 1000).
+// A shield is an item of its own now (see SHIELDS): the 15 P.Def the Knight's built-in one used to add are part of
+// his armour, so a Knight is no weaker for it - with or without a shield on his paw.
 export const WEAPONS = {
-  sword:   { pAtk: 18, mAtk: 6,  spd: 300, crit: 20,  pDef: 0 },
-  shield:  { pAtk: 17, mAtk: 6,  spd: 290, crit: 20,  pDef: 15 },
-  daggers: { pAtk: 16, mAtk: 6,  spd: 400, crit: 120, pDef: 0 },
-  bow:     { pAtk: 26, mAtk: 6,  spd: 160, crit: 60,  pDef: 0 },
-  staff:   { pAtk: 9,  mAtk: 24, spd: 250, crit: 10,  pDef: 0 },
+  sword:   { pAtk: 18, mAtk: 6,  spd: 300, crit: 20 },
+  daggers: { pAtk: 16, mAtk: 6,  spd: 400, crit: 120 },
+  bow:     { pAtk: 26, mAtk: 6,  spd: 160, crit: 60 },
+  staff:   { pAtk: 9,  mAtk: 24, spd: 250, crit: 10 },
 };
 export const CLASS_KEYS = Object.keys(CLASSES);
 export const START_CLASSES = CLASS_KEYS.filter((k) => !CLASSES[k].base);
@@ -158,10 +160,11 @@ export const activeSkills = (cls, learned) => skillsFor(cls).filter((id) => SKIL
 
 // ---------------------------------------------------------------- items
 
-// What a cat can wear, and in what order the slots travel in a look code.
-export const EQUIP_SLOTS = ['weapon', 'head', 'body', 'hands', 'feet'];
-export const SLOT_NAMES = { weapon: 'Weapon', head: 'Head', body: 'Body', hands: 'Hands', feet: 'Feet' };
-// Gear comes in tiers. id / arms: the prefix of the item ids of armour / of weapons. lvl: the level needed to wear it.
+// What a cat can wear. The weapon slot is the main hand; the off hand carries a shield, and stays empty while the
+// main hand holds a weapon that takes both paws (see pushedOff).
+export const EQUIP_SLOTS = ['weapon', 'offhand', 'head', 'body', 'hands', 'feet'];
+export const SLOT_NAMES = { weapon: 'Weapon', offhand: 'Off hand', head: 'Head', body: 'Body', hands: 'Hands', feet: 'Feet' };
+// Gear comes in tiers. id / arms: the prefix of the item ids of armour and shields / of weapons. lvl: the level needed to wear it.
 // price: of a helmet; other pieces cost a multiple of it. color: the tint of the piece on the cat and of its icon.
 export const TIERS = [
   { id: 'leather', arms: 'bronze', name: 'Leather', lvl: 1,  price: 30,   color: 0xa9713c },
@@ -178,21 +181,26 @@ const ARMOR = {
   feet:  { cost: 0.9, names: ['Leather Boots', 'Iron Greaves', 'Steel Sabatons', 'Hypurr Striders'],  pDef: [2, 5, 8, 12],   speed: [2, 4, 6, 8] },
 };
 // Weapons by family. Any class may wield any of them; what is in the paw decides how the cat fights (see fightStyle).
+// hands: how many paws the weapon takes - a pair of daggers is one in each. New families go at the end: the place of
+// a family in this table travels in the look code.
 const ARMS = {
-  sword:   { names: ['Bronze Sword', 'Iron Sword', 'Steel Sword', 'Hypurr Blade'],        pAtk: [4, 8, 14, 20] },
-  daggers: { names: ['Bronze Daggers', 'Iron Daggers', 'Steel Daggers', 'Hypurr Fangs'],  pAtk: [3, 7, 12, 18], crit: [10, 20, 30, 40] },
-  bow:     { names: ['Short Bow', 'Hunting Bow', 'Composite Bow', 'Hypurr Longbow'],      pAtk: [5, 12, 20, 29] },
-  staff:   { names: ['Apprentice Staff', 'Adept Staff', 'Mage Staff', 'Hypurr Staff'],    mAtk: [5, 11, 18, 26], pAtk: [1, 3, 5, 7] },
+  sword:      { hands: 1, names: ['Bronze Sword', 'Iron Sword', 'Steel Sword', 'Hypurr Blade'],                    pAtk: [4, 8, 14, 20] },
+  daggers:    { hands: 2, names: ['Bronze Daggers', 'Iron Daggers', 'Steel Daggers', 'Hypurr Fangs'],              pAtk: [3, 7, 12, 18], crit: [10, 20, 30, 40] },
+  bow:        { hands: 2, names: ['Short Bow', 'Hunting Bow', 'Composite Bow', 'Hypurr Longbow'],                  pAtk: [5, 12, 20, 29] },
+  staff:      { hands: 2, names: ['Apprentice Staff', 'Adept Staff', 'Mage Staff', 'Hypurr Staff'],                mAtk: [5, 11, 18, 26], pAtk: [1, 3, 5, 7] },
+  greatsword: { hands: 2, names: ['Bronze Greatsword', 'Iron Greatsword', 'Steel Greatsword', 'Hypurr Claymore'],  pAtk: [6, 12, 21, 30] },
 };
 const WEAPON_COST = 2;
+// Shields, one per tier, for the off hand of any class.
+const SHIELDS = { cost: 1.2, names: ['Wooden Buckler', 'Iron Shield', 'Steel Shield', 'Hypurr Aegis'], pDef: [4, 8, 13, 19], mDef: [1, 2, 4, 6] };
 export const WEAPON_FAMILIES = Object.keys(ARMS);
 export const BONUS_KEYS = ['pAtk', 'mAtk', 'pDef', 'mDef', 'acc', 'crit', 'speed'];
 export const BONUS_NAMES = { pAtk: 'P. Atk', mAtk: 'M. Atk', pDef: 'P. Def', mDef: 'M. Def', acc: 'Accuracy', crit: 'Critical', speed: 'Speed' };
 
 // Every item of the game, by id.
-//   kind: weapon | armor | potion      slot: where it is worn (gear only)       family: the weapon family (weapons only)
-//   tier: index into TIERS (gear)      lvl: level needed to wear it             price: what the Trader asks for it
-//   bonus: what it adds while worn     hp / mp: what a potion restores
+//   kind: weapon | shield | armor | potion     slot: where it is worn (gear only)     family, hands: the weapon family and
+//   tier: index into TIERS (gear)              lvl: level needed to wear it           how many paws it takes (weapons only)
+//   bonus: what it adds while worn             hp / mp: what a potion restores        price: what the Trader asks for it
 export const ITEMS = {
   hp_small: { name: 'Lesser Health Potion', kind: 'potion', hp: 80,  price: 12 },
   hp_large: { name: 'Health Potion',        kind: 'potion', hp: 250, price: 40 },
@@ -204,8 +212,9 @@ TIERS.forEach((tier, t) => {
   for (const [slot, row] of Object.entries(ARMOR)) {
     ITEMS[`${tier.id}_${slot}`] = { name: row.names[t], kind: 'armor', slot, tier: t, lvl: tier.lvl, price: Math.round(tier.price * row.cost), bonus: bonusOf(row) };
   }
+  ITEMS[`${tier.id}_shield`] = { name: SHIELDS.names[t], kind: 'shield', slot: 'offhand', tier: t, lvl: tier.lvl, price: Math.round(tier.price * SHIELDS.cost), bonus: bonusOf(SHIELDS) };
   for (const [family, row] of Object.entries(ARMS)) {
-    ITEMS[`${tier.arms}_${family}`] = { name: row.names[t], kind: 'weapon', slot: 'weapon', family, tier: t, lvl: tier.lvl, price: tier.price * WEAPON_COST, bonus: bonusOf(row) };
+    ITEMS[`${tier.arms}_${family}`] = { name: row.names[t], kind: 'weapon', slot: 'weapon', family, hands: row.hands, tier: t, lvl: tier.lvl, price: tier.price * WEAPON_COST, bonus: bonusOf(row) };
   }
 });
 export const ITEM_KEYS = Object.keys(ITEMS);
@@ -218,16 +227,22 @@ export const POTION_CD = 6;       // seconds before the next potion of any kind
 export const SELL_RATE = 0.3;     // the share of its price the Trader pays for an item
 export const SHOP_TIER = 1;       // the best tier the Trader sells; better gear is only found
 export const STARTER_KIT = [['hp_small', 5]];   // what a new character has in its bag
+export const KNIGHT_SHIELD = `${TIERS[0].id}_shield`;   // what a Knight is handed with his profession, once
 export const stackMax = (id) => (ITEMS[id].kind === 'potion' ? STACK_MAX : 1);
 export const sellPrice = (id) => Math.max(1, Math.floor(ITEMS[id].price * SELL_RATE));
 // What the Trader sells, in the order of his list.
 export const SHOP = ITEM_KEYS.filter((id) => ITEMS[id].kind === 'potion' || ITEMS[id].tier <= SHOP_TIER);
 
-// The weapon a class starts with and holds while its weapon slot is empty. The knight fights with a sword too; his
-// shield is part of his look, not an item.
-export const weaponFamily = (cls) => (CLASSES[cls].weapon === 'shield' ? 'sword' : CLASSES[cls].weapon);
-// The kind of weapon in the paw: that of the equipped weapon, else the class's own.
-export const heldFamily = (cls, equip) => itemOf(equip?.weapon)?.family ?? weaponFamily(cls);
+// The weapon a class starts with and holds while its weapon slot is empty.
+export const weaponFamily = (cls) => CLASSES[cls].weapon;
+// How many paws a family of weapons takes.
+export const handsOf = (family) => ARMS[family].hands;
+// What a cat with an empty weapon slot fights with: the weapon of its class - unless that one takes both paws and the
+// off paw carries a shield (`shielded`). Then it is a plain sword: a shield never shares a paw with a bow, a staff
+// or a second dagger, for no class and in nobody's eyes.
+export const basicFamily = (cls, shielded = false) => (shielded && handsOf(weaponFamily(cls)) === 2 ? 'sword' : weaponFamily(cls));
+// The kind of weapon in the paw: that of the equipped weapon, else the basic one.
+export const heldFamily = (cls, equip) => itemOf(equip?.weapon)?.family ?? basicFamily(cls, !!worn(equip, 'offhand'));
 // How a cat fights follows what it holds, not its class: a bow shoots from afar, everything else strikes up close.
 export const MELEE_REACH = 2.4, BOW_REACH = 18;
 export function fightStyle(cls, family = weaponFamily(cls)) {
@@ -246,6 +261,46 @@ const worn = (equip, slot) => {
   const it = itemOf(equip?.[slot]);
   return it && it.slot === slot ? it : null;
 };
+// ---- two paws. A weapon is one-handed or two-handed (`hands`), and a two-handed one and anything in the off hand
+// exclude each other: putting one on takes the other off. These functions are the whole rule; the server acts on
+// them and the client shows what they will do.
+
+// The slots - beside the item's own - that have to be emptied before the item can be put on.
+export function pushedOff(equip, id) {
+  const it = itemOf(id);
+  if (it?.hands === 2 && worn(equip, 'offhand')) return ['offhand'];
+  if (it?.slot === 'offhand' && worn(equip, 'weapon')?.hands === 2) return ['weapon'];
+  return [];
+}
+// What goes back into the bag when the item is put on: what is in its slot first, then what it pushes off.
+export const comesOff = (equip, id) => [ITEMS[id].slot, ...pushedOff(equip, id)].map((slot) => equip[slot]).filter(Boolean);
+// The equipment as it would be with the item on: a copy, for comparing the numbers before and after.
+export function equipWith(equip, id) {
+  const next = { ...equip, [ITEMS[id].slot]: id };
+  for (const slot of pushedOff(equip, id)) next[slot] = null;
+  return next;
+}
+// Why a piece of gear from the bag cannot be put on for want of room, as a line for the player; '' when it can. The
+// piece leaves its place to what comes off; only when two things come off (a two-handed weapon instead of a sword
+// and a shield) does the second need a free place. Whether the character may wear the item at all is equipError's
+// question, not this one's.
+export function wearError(inv, equip, id) {
+  const back = comesOff(equip, id);
+  return inv.length - 1 + back.length > BAG_SIZE ? `Your bag is full: no room to take off ${ITEMS[back.at(-1)].name}` : '';
+}
+// Puts on the piece of gear that is the stack at index i of the bag: what was in its slot takes its place there, and
+// what it pushes off goes into the bag too. Nothing happens at all when that does not fit. -> '' when done, else
+// the reason.
+export function wearItem(inv, equip, i) {
+  const id = inv[i][0], back = comesOff(equip, id), err = wearError(inv, equip, id);
+  if (err) return err;
+  for (const slot of pushedOff(equip, id)) equip[slot] = null;
+  equip[ITEMS[id].slot] = id;
+  inv.splice(i, 1, ...back.slice(0, 1).map((item) => [item, 1]));
+  for (const item of back.slice(1)) inv.push([item, 1]);
+  return '';
+}
+
 // The sum of what the equipment adds, by bonus key. `equip` maps a slot to an item id (or null).
 export function equipBonus(equip, cls) {
   const sum = Object.fromEntries(BONUS_KEYS.map((k) => [k, 0]));
@@ -302,28 +357,35 @@ export function cleanBag(raw) {
 export function cleanEquip(raw) {
   const equip = {};
   for (const slot of EQUIP_SLOTS) equip[slot] = raw && typeof raw === 'object' && worn(raw, slot) ? raw[slot] : null;
+  if (ITEMS[equip.weapon]?.hands === 2) equip.offhand = null;   // no game puts a shield beside a two-handed weapon
   return equip;
 }
 
-// What other players need to DRAW a cat: per slot 0 (nothing) or the tier + 1, and after the slots the kind of weapon
-// in the paw (0 = none equipped, else the family's place in WEAPON_FAMILIES + 1), as the digits of one number.
-const LOOK_BASE = Math.max(TIERS.length, WEAPON_FAMILIES.length) + 1;
+// What other players need to DRAW a cat, as the digits of one number in base LOOK_BASE:
+//   digits 0 - 4: the tier + 1 of what is worn as weapon, head, body, hands, feet (0 = nothing);
+//   digit 5: the kind of weapon in the paw, its family's place in WEAPON_FAMILIES + 1 (0 = none equipped);
+//   digit 6: the tier + 1 of the shield in the off hand;
+//   digit 7: what of the family number does not fit into digit 5.
+// The first six digits are the whole code of the time before the off hand and the fifth family, so a number made
+// then still reads as it did - which is why the base is a fixed 5 and the two newer things stand above the rest.
+const LOOK_BASE = 5, LOOK_SLOTS = ['weapon', 'head', 'body', 'hands', 'feet'], LOOK_FAMILY = 5, LOOK_OFFHAND = 6, LOOK_FAMILY_HIGH = 7;
 export function lookCode(equip) {
   let code = 0;
-  EQUIP_SLOTS.forEach((slot, i) => {
-    const it = worn(equip, slot);
-    if (it) code += (it.tier + 1) * LOOK_BASE ** i;
-  });
-  const held = worn(equip, 'weapon');
-  if (held) code += (WEAPON_FAMILIES.indexOf(held.family) + 1) * LOOK_BASE ** EQUIP_SLOTS.length;
+  const put = (digit, value) => { code += value * LOOK_BASE ** digit; };
+  LOOK_SLOTS.forEach((slot, i) => put(i, (worn(equip, slot)?.tier ?? -1) + 1));
+  put(LOOK_OFFHAND, (worn(equip, 'offhand')?.tier ?? -1) + 1);
+  const family = WEAPON_FAMILIES.indexOf(worn(equip, 'weapon')?.family) + 1;
+  put(LOOK_FAMILY, family % LOOK_BASE);
+  put(LOOK_FAMILY_HIGH, Math.floor(family / LOOK_BASE));
   return code;
 }
-// -> { weapon, head, body, hands, feet, family }: the tier worn in each slot (-1 for nothing) and the family of the
-// equipped weapon (null when the slot is empty)
+// -> { weapon, offhand, head, body, hands, feet, family }: the tier worn in each slot (-1 for nothing) and the family
+// of the equipped weapon (null when the slot is empty)
 export function lookOf(code) {
   const n = Number.isInteger(code) && code > 0 ? code : 0, digit = (i) => Math.floor(n / LOOK_BASE ** i) % LOOK_BASE;
-  const look = Object.fromEntries(EQUIP_SLOTS.map((slot, i) => [slot, Math.min(TIERS.length, digit(i)) - 1]));
-  look.family = WEAPON_FAMILIES[digit(EQUIP_SLOTS.length) - 1] ?? null;
+  const tier = (i) => Math.min(TIERS.length, digit(i)) - 1;
+  const look = Object.fromEntries(EQUIP_SLOTS.map((slot) => [slot, tier(slot === 'offhand' ? LOOK_OFFHAND : LOOK_SLOTS.indexOf(slot))]));
+  look.family = WEAPON_FAMILIES[digit(LOOK_FAMILY) + LOOK_BASE * digit(LOOK_FAMILY_HIGH) - 1] ?? null;
   return look;
 }
 
@@ -367,10 +429,11 @@ export const POTION_CHANCE = 0.12;
 export const gearChance = (type, lvl) => Math.min(1, GEAR_CHANCE[type] * (1 + 0.04 * (lvl - 1)));
 // The best tier a character - or the loot of a monster - of this level can be.
 export const tierForLevel = (lvl) => TIERS.reduce((best, tier, t) => (lvl >= tier.lvl ? t : best), 0);
-// One piece of gear of a tier: armour twice as often as a weapon, every family and slot alike.
+// One piece of gear of a tier: armour - a shield is one of its pieces here - twice as often as a weapon, every family
+// and slot alike.
 function pickGear(t, r) {
   const pool = [];
-  for (const slot of Object.keys(ARMOR)) pool.push(`${TIERS[t].id}_${slot}`, `${TIERS[t].id}_${slot}`);
+  for (const piece of [...Object.keys(ARMOR), 'shield']) pool.push(`${TIERS[t].id}_${piece}`, `${TIERS[t].id}_${piece}`);
   for (const family of WEAPON_FAMILIES) pool.push(`${TIERS[t].arms}_${family}`);
   return pool[Math.min(pool.length - 1, Math.floor(r * pool.length))];
 }
@@ -425,7 +488,7 @@ export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}, equip 
     maxMp: Math.round((40 + 9 * (level - 1)) * (1 + (MEN - 20) * 0.05) * (1 + passive('mp'))),
     pAtk: Math.round((w.pAtk + gear.pAtk) * grade * atkLevel * (1 + (STR - 40) * 0.025) * (1 + passive('patk')) * buff('patk') * buff('atk')),
     mAtk: Math.round((w.mAtk + gear.mAtk) * grade * atkLevel * (1 + (INT - 41) * 0.03) * (1 + passive('matk')) * buff('atk')),
-    pDef: Math.round((c.armor + w.pDef + gear.pDef) * defLevel * (1 + passive('pdef')) * buff('pdef')),
+    pDef: Math.round((c.armor + gear.pDef) * defLevel * (1 + passive('pdef')) * buff('pdef')),
     mDef: Math.round((20 + gear.mDef) * defLevel * (1 + (MEN - 20) * 0.04)),
     acc: Math.round(level + DEX * 0.3 + 5) + gear.acc,
     eva: Math.round(level + DEX * 0.3),

@@ -5,7 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // The model is made of rigid parts hung on pivots - head, body, two arms, two legs, tail - and it is animated here,
 // in code, by turning those pivots: running, jumping, three sword swings, casting, shooting, sitting, blinking.
 // Weapons are separate objects with their origin at the grip, so any of them can be put into a paw; each piece of
-// armour is a separate object too, shown or hidden on its own.
+// armour is a separate object too, shown or hidden on its own. The shield is the one piece built here, in code.
 
 const MODEL_URL = './assets/cat/hypercat.glb';
 const SCALE = 1.45;                 // model units -> game units: the cat stands about 2.5 units tall
@@ -24,6 +24,10 @@ const BOW_ARM = new THREE.Vector3(-Math.cos(0.12), Math.sin(0.12), 0);
 const GRIP = new THREE.Vector3(-0.255, 0.72, 0).addScaledVector(BOW_ARM, PAW);
 const SHOULDER = new THREE.Vector3(0.255, 0.72, 0), HANG = new THREE.Vector3(0.36, 0.38, 0), QUIVER = new THREE.Vector3(0.32, 1.04, -0.24);
 const V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), Q1 = new THREE.Quaternion();
+// The shield on the off paw, in the frame of the body: where its middle is from the paw (out to the side, up, in
+// front) and how it faces - forward, turned a little outwards and leaning back; and how far that paw is held up for it.
+const SHIELD_AT = new THREE.Vector3(-0.05, 0.03, 0.085), SHIELD_FACING = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.14, -0.3, 0, 'YXZ'));
+const SHIELD_ARM = -0.7;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // what leaves the shoulder: the direction the arm was modelled in (x is mirrored for the left arm)
 const ARM_DIR = new THREE.Vector3(0.52, -0.85, 0.06).normalize();
@@ -40,8 +44,31 @@ function makeGradientMap() {
   return tex;
 }
 
+// A heater shield, facing +Z with its middle at the origin: a dark rim, a domed face that takes the colour of the
+// tier, and a boss. Three small geometries, built once and shared by every cat that carries one.
+function makeShieldParts() {
+  const outline = (k) => {
+    const w = 0.215 * k, top = 0.225 * k, tip = -0.31 * k, s = new THREE.Shape();
+    s.moveTo(-w, top);
+    s.quadraticCurveTo(0, top + 0.045 * k, w, top);                    // the upper edge, arched a little
+    s.lineTo(w, 0.02 * k);
+    s.bezierCurveTo(w, -0.15 * k, 0.11 * k, -0.25 * k, 0, tip);        // the sides run down and in to the point
+    s.bezierCurveTo(-0.11 * k, -0.25 * k, -w, -0.15 * k, -w, 0.02 * k);
+    s.closePath();
+    return s;
+  };
+  const plate = (k, depth, bevel) => new THREE.ExtrudeGeometry(outline(k), { depth, curveSegments: 6, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2 });
+  const face = plate(0.8, 0.012, 0.022);
+  face.translate(0, 0, 0.022);
+  const boss = new THREE.SphereGeometry(0.058, 12, 8);
+  boss.scale(1, 1, 0.6);
+  boss.translate(0, 0.01, 0.062);
+  return { rim: plate(1, 0.024, 0.008), face, boss };
+}
+
 // The file is loaded once; every cat is a clone of it that shares its geometry and all materials but those it colours
-// for itself: its hoodie, the plates of its armour, and the blade and the glow of a weapon better than the basic one.
+// for itself: its hoodie, the plates of its armour, its shield, and the blade and the glow of a weapon better than
+// the basic one.
 let shared = null;
 function getShared() {
   if (shared) return shared;
@@ -63,7 +90,7 @@ function getShared() {
     cat_head: () => toon(0xffffff, { map: m.map }),
   }[m.name]?.() ?? toon(m.color.getHex()));
   shared = {
-    toon, outline, mats: new Map(),
+    toon, outline, mats: new Map(), shieldParts: null,
     ready: new GLTFLoader().loadAsync(MODEL_URL).then((gltf) => {
       gltf.scene.traverse((o) => {
         if (!o.isMesh) return;
@@ -76,16 +103,16 @@ function getShared() {
   return shared;
 }
 
-// -> { group, update(dt, state), setLook({ hoodie, weapon, armor, weaponTint }) }. The group is there at once, standing
-// on its origin and facing +Z; the model appears in it when the file has arrived.
-export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, weaponTint = null } = {}) {
+// -> { group, update(dt, state), setLook({ hoodie, weapon, armor, weaponTint, shield }) }. The group is there at once,
+// standing on its origin and facing +Z; the model appears in it when the file has arrived.
+export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, weaponTint = null, shield = null } = {}) {
   const S = getShared();
   const group = new THREE.Group();   // origin at the feet, facing +Z
   const inner = new THREE.Group();   // bob / lean
   group.add(inner);
   // Materials of this cat alone. Those of the armour and the weapon are made when first needed: most cats wear nothing.
-  const own = { hoodie: S.toon(hoodie), trim: S.toon(new THREE.Color(hoodie).multiplyScalar(0.62)), plates: {}, blade: null, glow: null };
-  let look = { hoodie, weapon, armor, weaponTint };
+  const own = { hoodie: S.toon(hoodie), trim: S.toon(new THREE.Color(hoodie).multiplyScalar(0.62)), plates: {}, blade: null, glow: null, shield: null, shieldRim: null };
+  let look = { hoodie, weapon, armor, weaponTint, shield };
   let rig = null;                    // the pivots, once the model is in
 
   S.ready.then((scene) => {
@@ -133,17 +160,11 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     setLook(look);
   }, () => {});
 
-  // ---- what the cat holds depends on its class. Everything points forward along the paw's +Z.
+  // ---- what the cat holds: the weapon in paw 1 (the bow and the second dagger in paw 0), a shield on paw 0.
+  // Everything points forward along the paw's +Z.
   const GEAR = {
     sword() { blade(1, 1); },
-    shield() {
-      blade(1, 1);
-      const g = hold(0), disc = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.04, 18), S.mats.get('a_steel') ?? S.toon(0x8e9bb0));
-      disc.rotation.x = Math.PI / 2; disc.position.set(0, 0.08, 0.11);
-      const boss = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), S.mats.get('w_gold') ?? S.toon(0xf2c14e));
-      boss.position.set(0, 0.08, 0.14);
-      g.add(disc, boss);
-    },
+    greatsword() { blade(1, 1.3, 1.5, 0.8); },   // the same sword, half as long again and broader, carried point up
     daggers() { blade(1, 0.55); blade(0, 0.55); },
     bow() {
       const g = hold(0), bow = rig.weapons.Bow.clone(true);
@@ -191,27 +212,46 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     },
   };
   function hold(i) { const g = new THREE.Group(); rig.arms[i].hand.add(g); rig.gear.push(g); return g; }
-  function blade(i, size) {
+  // lift: how far the point is raised from straight ahead - a blade as long as the cat, held level, reads as a lance
+  function blade(i, size, length = size, lift = 0) {
     const sword = rig.weapons.Sword.clone(true);
-    sword.rotation.x = Math.PI / 2;      // modelled point up: turned to point forward out of the paw
-    sword.scale.setScalar(size);
+    sword.rotation.x = Math.PI / 2 - lift;   // modelled point up: turned to point forward out of the paw
+    sword.scale.set(size, length, size);
     hold(i).add(sword);
+  }
+  // The shield on the off paw, its face in `tint`. It is kept upright by update(), whatever the paw does.
+  function carryShield(tint) {
+    const parts = (S.shieldParts ??= makeShieldParts()), g = hold(0);
+    own.shield ??= S.toon(tint);
+    own.shieldRim ??= S.toon(tint);
+    own.shield.color.set(tint);
+    own.shieldRim.color.set(tint).multiplyScalar(0.42);
+    for (const [geo, mat] of [[parts.rim, own.shieldRim], [parts.face, own.shield], [parts.boss, S.mats.get('w_gold') ?? S.toon(0xf2c14e)]]) {
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true;
+      g.add(mesh);
+    }
+    g.name = 'Shield';
+    rig.shield = g;
   }
 
   // Recolours the hoodie and swaps what is held and worn, e.g. when the character changes class or its equipment.
   //   armor: { helmet, chest, gloves, boots } - for each piece the colour of its plates (a number), or nothing to hide it;
   //          `true` shows the piece in the steel it was modelled in
   //   weaponTint: the colour of the blade and of the glow of what is held; nothing leaves the weapon as modelled
-  function setLook({ hoodie: color = HOODIE, weapon: held = 'sword', armor: worn = null, weaponTint: tint = null } = {}) {
-    look = { hoodie: color, weapon: held, armor: worn, weaponTint: tint };
+  //   shield: the colour of the shield on the off paw (a number); nothing for no shield. The caller sees to it that a
+  //          shield never comes with a weapon that needs that paw
+  function setLook({ hoodie: color = HOODIE, weapon: held = 'sword', armor: worn = null, weaponTint: tint = null, shield: guard = null } = {}) {
+    look = { hoodie: color, weapon: held, armor: worn, weaponTint: tint, shield: guard };
     own.hoodie.color.set(color);
     own.trim.color.set(color).multiplyScalar(0.62);
     if (!rig) return;
     for (const g of rig.gear) g.removeFromParent();
     rig.gear.length = 0;
     rig.bow?.string.geometry.dispose();
-    rig.bow = null;
+    rig.bow = rig.shield = null;
     (GEAR[held] || GEAR.sword)();
+    if (typeof guard === 'number') carryShield(guard);
     if (typeof tint === 'number') {
       // this cat's own blade and glow: a shared material tinted here would recolour the weapon of every cat
       own.blade ??= S.toon(tint);
@@ -256,6 +296,11 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     // right arm points forward while firing
     arms[1].rotation.x = swing * 0.8 * (1 - shoot) - 1.5 * shoot;
     arms[1].rotation.z = (0.35 + air * 0.9) * (1 - shoot);
+    // a shield is carried, not swung: the off paw holds it up in front and only rocks a little on the run
+    if (rig.shield) {
+      arms[0].rotation.x = SHIELD_ARM - swing * 0.2;
+      arms[0].rotation.z = -0.22 - air * 0.5;
+    }
     // casting: both paws held out in front, cupping the charging bolt
     if (cast > 0.01) {
       const tremble = Math.sin(t * 40) * 0.04 * cast;
@@ -348,6 +393,13 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       arms[0].rotation.z -= 0.75 * jolt;
       arms[1].rotation.z += 0.75 * jolt;
       if (h > 0.3) eyes[0].scale.y = eyes[1].scale.y = 0.14;
+    }
+
+    // the shield stays upright and faces ahead whatever its paw has just been told to do
+    if (rig.shield) {
+      Q1.copy(arms[0].quaternion).invert();
+      rig.shield.quaternion.copy(Q1).multiply(SHIELD_FACING);
+      rig.shield.position.copy(SHIELD_AT).applyQuaternion(Q1);
     }
   }
 

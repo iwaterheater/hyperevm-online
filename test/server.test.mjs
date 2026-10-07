@@ -814,7 +814,7 @@ check('start-up removes a temp file that a cut-short save left behind, and nothi
 const TRADER = FILE.npcs.find((n) => n.kind === 'trader');
 const AT_TRADER = [TRADER.x + 1.5, TRADER.z + 1.5];
 const KING = FILE.spawns.find((spawn) => spawn.types.boss);
-const NAKED = { weapon: null, head: null, body: null, hands: null, feet: null };
+const NAKED = { weapon: null, offhand: null, head: null, body: null, hands: null, feet: null };
 // Characters as players.json holds them. OLD is one from before the game had items: no bag, no equipment.
 const OLD = { name: 'Old', cls: 'fighter', level: 6, xp: 394, sp: 0, skills: {}, gold: 2000, weapon: 2 };
 const seed = (characters) => (s) => {
@@ -955,7 +955,7 @@ check('items: wearing and taking off - class and level rules, the swap, the stat
   await f.until('the helmet on', () => f.eq.head === 'iron_head');
   assert.deepEqual(f.inv.map((stack) => stack[0]), ['leather_head', 'iron_staff', 'steel_body', 'iron_sword', 'hp_small', 'iron_feet']);
   await w.until('the watcher sees the helmet', () => lookOf(seen()[12]).head === 1);
-  assert.deepEqual(lookOf(seen()[12]), { weapon: -1, head: 1, body: -1, hands: -1, feet: -1, family: null });
+  assert.deepEqual(lookOf(seen()[12]), { weapon: -1, offhand: -1, head: 1, body: -1, hands: -1, feet: -1, family: null });
   // another helmet swaps with it, in place
   await f.send({ t: 'eq', i: 0, id: 'leather_head' });
   await f.until('the cap on', () => f.eq.head === 'leather_head');
@@ -967,7 +967,7 @@ check('items: wearing and taking off - class and level rules, the swap, the stat
   await f.until('sword, helmet and boots on', () => f.eq.weapon === 'iron_sword' && f.eq.feet === 'iron_feet' && f.eq.head === 'iron_head');
   assert.deepEqual(f.inv.map((stack) => stack[0]), ['leather_head', 'iron_staff', 'steel_body', 'hp_small']);
   await w.until('the watcher sees all three', () => lookOf(seen()[12]).weapon === 1);
-  assert.deepEqual(lookOf(seen()[12]), { weapon: 1, head: 1, body: -1, hands: -1, feet: 1, family: 'sword' });
+  assert.deepEqual(lookOf(seen()[12]), { weapon: 1, offhand: -1, head: 1, body: -1, hands: -1, feet: 1, family: 'sword' });
   // what the watcher gets is the look and nothing more: no bag, no item ids
   assert.equal(seen().length, 13);
   assert.ok(seen().every((v) => typeof v === 'number'));
@@ -1184,6 +1184,179 @@ check('items: any class wields any weapon - it stays through a change of profess
     await f.until('the bow', () => f.eq.weapon === 'iron_bow');
     const row = await archer.until('the fighter with a bow in view', () => archer.others.find((r) => r[0] === f.w.id && lookOf(r[12]).family === 'bow'));
     assert.equal(lookOf(row[12]).weapon, 1, 'an iron one');
+  });
+});
+
+// ---------------------------------------------------------------- two paws: the off hand, two-handed weapons, shields
+
+check('two paws: a sword and a shield go together; a two-handed weapon and a shield push each other into the bag', () => withServer({
+  setup: seed({
+    duel: { ...OLD, inv: [['iron_sword', 1], ['iron_shield', 1], ['iron_greatsword', 1], ['iron_bow', 1], ['leather_shield', 1], ['iron_head', 1]] },
+    watcher: { ...OLD, name: 'Watcher', cls: 'mystic' },
+  }),
+}, async (s) => {
+  const { lookOf } = await import('../src/shared.js');
+  const f = await enter(s, { token: 'duel', at: [100, 100] }), w = await enter(s, { token: 'watcher', at: [102, 100] });
+  const seen = () => lookOf(w.others.find((row) => row[0] === f.w.id)?.[12]);
+  const hands = () => [f.eq.weapon, f.eq.offhand], bag = () => f.inv.map((stack) => stack[0]);
+  const wear = async (id) => {
+    const before = JSON.stringify([f.eq, f.inv]);
+    await f.send({ t: 'eq', i: bag().indexOf(id), id });
+    await f.until(`${id} on`, () => JSON.stringify([f.eq, f.inv]) !== before);
+  };
+  // one-handed and a shield
+  await wear('iron_sword');
+  await wear('iron_shield');
+  assert.deepEqual(hands(), ['iron_sword', 'iron_shield']);
+  assert.deepEqual(bag(), ['iron_greatsword', 'iron_bow', 'leather_shield', 'iron_head']);
+  await w.until('the watcher sees sword and shield', () => seen().offhand === 1 && seen().family === 'sword');
+  // another shield swaps in place; the off hand takes nothing else
+  await wear('leather_shield');
+  assert.deepEqual([hands(), bag()], [['iron_sword', 'leather_shield'], ['iron_greatsword', 'iron_bow', 'iron_shield', 'iron_head']]);
+  await w.until('the watcher sees the buckler', () => seen().offhand === 0);
+  // the greatsword takes both paws: the sword goes where it lay, the shield to the end of the bag
+  await wear('iron_greatsword');
+  assert.deepEqual([hands(), bag()], [['iron_greatsword', null], ['iron_sword', 'iron_bow', 'iron_shield', 'iron_head', 'leather_shield']]);
+  await w.until('the watcher sees the greatsword and no shield', () => seen().family === 'greatsword' && seen().offhand === -1);
+  assert.equal(seen().weapon, 1);
+  // a shield pushes it off again, and a bow the shield
+  await wear('iron_shield');
+  assert.deepEqual([hands(), bag()], [[null, 'iron_shield'], ['iron_sword', 'iron_bow', 'iron_greatsword', 'iron_head', 'leather_shield']]);
+  await w.until('the watcher sees a shield alone', () => seen().family === null && seen().offhand === 1);
+  await wear('iron_bow');
+  assert.deepEqual([hands(), bag()], [['iron_bow', null], ['iron_sword', 'iron_shield', 'iron_greatsword', 'iron_head', 'leather_shield']]);
+  // armour has nothing to do with the paws
+  await wear('iron_head');
+  assert.deepEqual([hands(), f.eq.head], [['iron_bow', null], 'iron_head']);
+  // off like anything else
+  await wear('iron_shield');
+  await f.send({ t: 'uneq', slot: 'offhand' });
+  await f.until('the shield off', () => f.eq.offhand === null);
+  assert.deepEqual([hands(), bag()], [[null, null], ['iron_sword', 'iron_bow', 'iron_greatsword', 'leather_shield', 'iron_shield']]);
+  await f.send({ t: 'uneq', slot: 'offhand' });   // nothing there: ignored
+  await f.settled();
+  assert.deepEqual(f.events.filter((ev) => ev.k === 'err'), []);
+  assert.equal(f.inv.length + Object.values(f.eq).filter(Boolean).length, 6, 'nothing was lost and nothing doubled');
+}));
+
+check('two paws: a full bag refuses what would take two things off, and nothing changes', async () => {
+  const heads = Array.from({ length: 29 }, () => ['leather_head', 1]);
+  const run = await withServer({
+    setup: seed({
+      full: { ...OLD, inv: [...heads, ['iron_greatsword', 1]], equip: { weapon: 'iron_sword', offhand: 'iron_shield' } },
+      light: { ...OLD, inv: [...heads, ['iron_bow', 1]], equip: { offhand: 'iron_shield' } },
+      broken: { ...OLD, inv: [], equip: { weapon: 'iron_greatsword', offhand: 'iron_shield', head: 'iron_head' } },
+    }),
+  }, async (s) => {
+    const f = await enter(s, { token: 'full' });
+    assert.deepEqual([f.eq.weapon, f.eq.offhand, f.inv.length], ['iron_sword', 'iron_shield', 30]);
+    await f.send({ t: 'eq', i: 29, id: 'iron_greatsword' });
+    assert.match((await f.event('err')).m, /^Your bag is full: no room to take off Iron Shield$/);
+    await f.settled();
+    assert.deepEqual([f.eq.weapon, f.eq.offhand, f.inv.length, f.inv[29][0]], ['iron_sword', 'iron_shield', 30, 'iron_greatsword']);
+    // one free place is all it takes
+    await f.send({ t: 'drop', i: 0, id: 'leather_head' });
+    await f.until('a place free', () => f.inv.length === 29);
+    await f.send({ t: 'eq', i: 28, id: 'iron_greatsword' });
+    await f.until('the greatsword on', () => f.eq.weapon === 'iron_greatsword');
+    assert.deepEqual([f.eq.offhand, f.inv.length, f.inv[28][0], f.inv[29][0]], [null, 30, 'iron_sword', 'iron_shield']);
+    // and back: one thing on for one thing off fits into a full bag
+    await f.send({ t: 'eq', i: 29, id: 'iron_shield' });
+    await f.until('the shield on', () => f.eq.offhand === 'iron_shield');
+    assert.deepEqual([f.eq.weapon, f.inv.length, f.inv[29][0]], [null, 30, 'iron_greatsword']);
+    await f.settled();
+    assert.deepEqual(f.events.filter((ev) => ev.k === 'err'), []);
+    // a shield alone gives way to a bow in a full bag too
+    const l = await enter(s, { token: 'light' });
+    await l.send({ t: 'eq', i: 29, id: 'iron_bow' });
+    await l.until('the bow on', () => l.eq.weapon === 'iron_bow');
+    assert.deepEqual([l.eq.offhand, l.inv.length, l.inv[29][0]], [null, 30, 'iron_shield']);
+    await l.settled();
+    // a save that holds what no game allows - a shield beside a weapon for both paws - loads with the weapon
+    const b = await enter(s, { token: 'broken' });
+    assert.deepEqual(b.eq, { ...NAKED, weapon: 'iron_greatsword', head: 'iron_head' });
+    await b.settled();
+  });
+  const file = savedPlayers(run);
+  assert.deepEqual(file.full.equip, { ...NAKED, offhand: 'iron_shield' });
+  assert.deepEqual(file.light.equip, { ...NAKED, weapon: 'iron_bow' });
+  assert.equal(file.full.knightKit, undefined, 'only a Knight carries the mark of his shield');
+});
+
+check('two paws: a Knight is handed a shield - with the profession, or the first time an old Knight comes back - once', async () => {
+  const sage = FILE.npcs.find((n) => n.kind === 'sage');
+  const at = [sage.x + 1, sage.z + 1];
+  const ready = { ...OLD, level: 20, xp: 0 }, knight = { ...ready, cls: 'knight', skills: { provoke: 1 } };
+  const stuffed = Array.from({ length: 30 }, () => ['leather_head', 1]);
+  const { statsOf } = await import('../src/shared.js');
+  const first = await withServer({
+    setup: seed({
+      squire: { ...ready, inv: [['hp_small', 2]], equip: { weapon: 'iron_sword' } },
+      bowman: { ...ready, inv: [], equip: { weapon: 'iron_bow' } },
+      owner: { ...ready, inv: [['iron_shield', 1]], equip: {} },
+      packed: { ...ready, inv: stuffed, equip: { weapon: 'iron_bow' } },
+      veteran: { ...knight, inv: [['hp_small', 3]], equip: { weapon: 'iron_sword', head: 'iron_head' } },   // a save from before shields were items
+      archer: { ...ready, cls: 'archer', inv: [], equip: {} },
+    }),
+  }, async (s) => {
+    const become = async (token) => {
+      const p = await enter(s, { token, at });
+      await p.send({ t: 'prof', cls: 'knight' });
+      await p.until('the knight', () => p.me.cls === 'knight');
+      await p.settled();
+      return p;
+    };
+    // onto the free paw, beside the sword
+    const squire = await become('squire');
+    assert.deepEqual(squire.events.filter((ev) => ev.k === 'gift'), [{ k: 'gift', id: 'leather_shield' }]);
+    assert.deepEqual([squire.eq.weapon, squire.eq.offhand, squire.inv], ['iron_sword', 'leather_shield', [['hp_small', 2]]]);
+    // into the bag when the paws are busy with a bow
+    const bowman = await become('bowman');
+    assert.deepEqual([bowman.eq.weapon, bowman.eq.offhand, bowman.inv], ['iron_bow', null, [['leather_shield', 1]]]);
+    // none for one who has a shield already - and none later either
+    const owner = await become('owner');
+    assert.deepEqual([owner.eq.offhand, owner.inv, owner.events.filter((ev) => ev.k === 'gift')], [null, [['iron_shield', 1]], []]);
+    // no paw and no room: said so, and tried again the next time
+    const packed = await become('packed');
+    assert.match(packed.events.find((ev) => ev.k === 'err').m, /bag is full: your Wooden Buckler waits/);
+    assert.deepEqual([packed.eq.offhand, packed.inv.length], [null, 30]);
+    // an old Knight gets his on coming back, and is as strong as he was without it
+    const veteran = await enter(s, { token: 'veteran', at });
+    assert.deepEqual(veteran.events.filter((ev) => ev.k === 'gift'), [{ k: 'gift', id: 'leather_shield' }]);
+    assert.deepEqual(veteran.eq, { ...NAKED, weapon: 'iron_sword', offhand: 'leather_shield', head: 'iron_head' });
+    assert.deepEqual(veteran.inv, [['hp_small', 3]]);
+    assert.equal(statsOf('knight', 20, {}, 2, {}, { ...veteran.eq, offhand: null }).pDef, Math.round((62 + 15 + 5) * 1.95), 'what he had before, without the shield');
+    // he throws it away: that was his one
+    await veteran.send({ t: 'uneq', slot: 'offhand' });
+    await veteran.until('the shield in the bag', () => veteran.inv.length === 2);
+    await veteran.send({ t: 'drop', i: 1, id: 'leather_shield' });
+    await veteran.until('the shield gone', () => veteran.inv.length === 1);
+    // no other class is handed anything
+    const archer = await enter(s, { token: 'archer', at });
+    assert.deepEqual([archer.eq, archer.inv, archer.events.filter((ev) => ev.k === 'gift')], [NAKED, [], []]);
+    // a play-test Knight looks the part too
+    const test = await enter(s, { test: { lvl: 25, cls: 'knight' } });
+    assert.equal(test.eq.offhand, 'leather_shield');
+    for (const p of [squire, bowman, owner, packed, veteran, archer]) await p.settled();
+  });
+  const file = savedPlayers(first);
+  assert.deepEqual(file.squire.equip, { ...NAKED, weapon: 'iron_sword', offhand: 'leather_shield' });
+  assert.deepEqual([file.squire.knightKit, file.bowman.knightKit, file.owner.knightKit, file.veteran.knightKit], [1, 1, 1, 1]);
+  assert.equal(file.packed.knightKit, undefined);
+  assert.equal(file.archer.knightKit, undefined);
+  assert.deepEqual(file.veteran.inv, [['hp_small', 3]]);
+
+  // the next run reads what this one wrote: nobody is handed a second shield, and the one who had no room gets his now
+  file.packed.inv = [['hp_small', 1]];
+  await withServer({ setup: seed(file) }, async (s) => {
+    const squire = await enter(s, { token: 'squire' });
+    assert.deepEqual([squire.eq.weapon, squire.eq.offhand, squire.inv, squire.events.filter((ev) => ev.k === 'gift')], ['iron_sword', 'leather_shield', [['hp_small', 2]], []]);
+    const veteran = await enter(s, { token: 'veteran' });
+    assert.deepEqual([veteran.eq.offhand, veteran.inv, veteran.events.filter((ev) => ev.k === 'gift')], [null, [['hp_small', 3]], []]);
+    const owner = await enter(s, { token: 'owner' });
+    assert.deepEqual([owner.eq.offhand, owner.inv], [null, [['iron_shield', 1]]]);
+    const packed = await enter(s, { token: 'packed' });
+    assert.deepEqual([packed.eq.weapon, packed.inv, packed.events.filter((ev) => ev.k === 'gift').length], ['iron_bow', [['hp_small', 1], ['leather_shield', 1]], 1]);
   });
 });
 

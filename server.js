@@ -9,7 +9,7 @@ import {
   TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R,
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
-  ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, stackMax, sellPrice, heldFamily, fightStyle, equipError, roomFor, addItem, takeItem,
+  ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, KNIGHT_SHIELD, stackMax, sellPrice, heldFamily, fightStyle, equipError, wearItem, roomFor, addItem, takeItem,
   cleanBag, cleanEquip, lookCode, rollLoot, chestLoot, cleanBar, defaultBar, barAdd,
 } from './src/shared.js';
 import {
@@ -416,6 +416,7 @@ function persist(p) {
     name: p.name, cls: p.cls, level: p.level, xp: p.xp, sp: p.sp, skills: p.skills, gold: p.gold, weapon: p.weapon,
     inv: p.inv, equip: p.equip, bar: p.bar,
   };
+  if (p.knightKit) saved[p.token].knightKit = 1;   // the Knight has had his shield (see grantShield)
 }
 function flush() {
   for (const p of players.values()) persist(p);
@@ -599,6 +600,21 @@ function bagChanged(p) {
 // An item request that cannot be done is answered with a line the client shows; nothing else happens.
 function refuse(p, text) {
   p.events.push({ k: 'err', m: text });
+}
+// A Knight carries a shield: he is handed one with the profession, onto his off paw when that is free, else into the
+// bag. Once per character (`knightKit` is saved with it), and a Knight from before shields were items - whose shield
+// was part of his look - gets his the first time he comes back. One who owns a shield already needs none. With no
+// free paw and a full bag the shield waits: the next time he enters the world it is tried again.
+function grantShield(p) {
+  if (p.cls !== 'knight' || p.knightKit) return;
+  const has = (id) => ITEMS[id]?.kind === 'shield';
+  if (!has(p.equip.offhand) && !p.inv.some((stack) => has(stack[0]))) {
+    if (!p.equip.offhand && ITEMS[p.equip.weapon]?.hands !== 2) p.equip.offhand = KNIGHT_SHIELD;
+    else if (!addItem(p.inv, KNIGHT_SHIELD, 1)) { refuse(p, `Your bag is full: your ${ITEMS[KNIGHT_SHIELD].name} waits until you come back with room for it`); return; }
+    p.events.push({ k: 'gift', id: KNIGHT_SHIELD });
+  }
+  p.knightKit = 1;
+  bagChanged(p);
 }
 // Loot goes straight into the bag; (x, z) is where the client floats its name up. What does not fit is lost, and said so.
 function giveItem(p, id, n, x, z) {
@@ -1130,6 +1146,7 @@ const handlers = {
     if (p.dead || !c || c.base !== p.cls || p.level < PROFESSION_LEVEL || !nearNpc(map, p, 'sage', SHOP_RANGE)) return;
     p.cls = target;
     grantFree(p);
+    grantShield(p);
     bagChanged(p);   // the look and the stats follow the new profession
     p.hp = p.maxHp;
     p.mp = p.maxMp;
@@ -1145,15 +1162,11 @@ const handlers = {
     refresh(p);
     p.events.push({ k: 'up', weapon: p.weapon });
   },
-  eq(p, msg) {   // wear an item from the bag; what was in its slot takes its place in the bag
+  eq(p, msg) {   // wear an item from the bag; what was in its slot, and what it pushes off the other paw, goes into the bag
     const stack = stackOf(p, msg);
     if (!stack) return;
-    const err = p.dead ? DEAD : equipError(p.cls, p.level, stack[0]);
+    const err = (p.dead ? DEAD : equipError(p.cls, p.level, stack[0])) || wearItem(p.inv, p.equip, msg.i);
     if (err) { refuse(p, err); return; }
-    const slot = ITEMS[stack[0]].slot, old = p.equip[slot];
-    p.equip[slot] = stack[0];
-    if (old) p.inv[msg.i] = [old, 1];
-    else p.inv.splice(msg.i, 1);
     bagChanged(p);
   },
   uneq(p, msg) {   // take a worn item off, into the bag
@@ -1305,7 +1318,7 @@ function join(ws, msg, conn) {
     level, xp: Math.min(data.xp || 0, xpNext(level) - 1), sp: data.sp || 0, skills: { ...(data.skills || {}) },
     gold: data.gold || 0, weapon: data.weapon || 1,
     inv: cleanBag(fresh ? STARTER_KIT : data.inv), equip: cleanEquip(data.equip), bagDirty: true, potionAt: 0,
-    bar: Array.isArray(data.bar) ? cleanBar(data.bar) : null, barDirty: true,
+    bar: Array.isArray(data.bar) ? cleanBar(data.bar) : null, barDirty: true, knightKit: data.knightKit ? 1 : 0,
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
     castAt: 0, swingAt: 0, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
     lastMoveAt: now, graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
@@ -1314,6 +1327,7 @@ function join(ws, msg, conn) {
   // A character without a saved bar - a new one, or one from before the game had the bar - gets its skills and potions
   // laid out as the keys 1 - 8 and Q / E used to have them.
   if (!p.bar) p.bar = defaultBar(p.cls, p.skills, p.inv);
+  grantShield(p);
   refresh(p);   // also brings health and mana down to their maximum
   players.set(p.id, p);
   const hello = { t: 'w', id: p.id, x: r2(p.x), z: r2(p.z), rev };

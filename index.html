@@ -11,18 +11,20 @@
     font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif; user-select: none; }
   canvas#view { display: block; cursor: crosshair; }
 
-  /* --win-top / --win-h keep the windows clear of the target frame above them and of the action bar below.
+  /* --win-top / --win-h keep the windows clear of the target frame above them and of the action bar below (a window
+     reaches from 110px under the upper edge to 104px above the lower one).
      Hidden for good while it is off: its bar and its buttons take clicks. */
   #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .3s;
-    --win-top: calc(50% + 8px); --win-h: calc(100vh - 204px); }
+    --win-top: calc(50% + 3px); --win-h: calc(100vh - 214px); }
   #hud.on { opacity: 1; visibility: visible; }
   .panel { position: absolute; padding: 10px 14px; background: rgba(6, 24, 21, .6);
     border: 1px solid rgba(127, 232, 214, .25); border-radius: 12px; backdrop-filter: blur(6px); }
   #stats { top: 16px; left: 16px; width: 250px; }
-  /* the right edge: the info panel with the radar, and under it the strip of window buttons */
+  /* the right edge: the minimap - nothing but the map, in a thin ring - and under it the strip of window buttons */
   #right { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
   #right .panel { position: relative; }
-  #side { width: 172px; text-align: right; }
+  #minimap { display: block; width: 176px; height: 176px; border-radius: 50%; border: 1px solid rgba(127, 232, 214, .4);
+    box-shadow: 0 0 0 3px rgba(6, 24, 21, .45), 0 3px 12px rgba(0, 0, 0, .45); }
   #menubar { display: flex; flex-direction: column; gap: 6px; padding: 6px; pointer-events: auto; }
   .mbtn { position: relative; width: 40px; height: 40px; cursor: pointer; color: var(--teal); background: rgba(6, 24, 21, .7);
     border: 2px solid rgba(127, 232, 214, .3); border-radius: 10px; }
@@ -31,6 +33,10 @@
   .mbtn svg { position: absolute; inset: 5px; width: 26px; height: 26px; fill: currentColor; }
   .mbtn kbd { position: absolute; right: 2px; bottom: 1px; margin: 0; padding: 0; font-size: 9px; line-height: 1; border: 0; background: none;
     color: #e8fffa; opacity: .75; }
+  /* on the Skills button: how many skills the unspent points would buy now */
+  .mbtn .badge { position: absolute; top: -6px; left: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 800;
+    line-height: 17px; text-align: center; color: #04211c; background: var(--gold); box-shadow: 0 0 8px rgba(255, 215, 106, .8); }
+  .mbtn .badge:empty { display: none; }
   .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85;
     display: flex; justify-content: space-between; }
   .title { font-size: 17px; font-weight: 800; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -39,12 +45,7 @@
   .bar > i { display: block; height: 100%; width: 0; border-radius: 6px; transition: width .12s; }
   #hpFill, #tgFill { background: linear-gradient(90deg, #ff6b8e, #ffb3c4); }
   #mpFill { background: linear-gradient(90deg, #4f8dff, #a9c8ff); }
-  #xpFill { background: linear-gradient(90deg, #b58cff, #e0ccff); }
   @keyframes pulse { to { filter: brightness(1.6); } }
-  .row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
-  .row b { font-size: 15px; }
-  #gold { color: var(--gold); }
-  #minimap { display: block; width: 144px; height: 144px; margin-top: 8px; border-radius: 50%; }
 
   #target { top: 16px; left: 50%; transform: translateX(-50%); width: 260px; display: none; text-align: center; }
   #target .title { margin-bottom: 4px; }
@@ -55,7 +56,7 @@
     letter-spacing: .04em; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .8), 0 0 24px rgba(127, 232, 214, .9); opacity: 0;
     transition: opacity .4s; }
   #banner.on { opacity: 1; }
-  #shop { position: absolute; bottom: 92px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
+  #shop { position: absolute; bottom: 94px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
     border-radius: 999px; background: rgba(6, 24, 21, .75); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold);
     display: none; }
   #cast { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); width: 150px; height: 10px; display: none;
@@ -68,9 +69,23 @@
   #drawFill::after { content: ''; position: absolute; right: -7px; top: 50%; transform: translateY(-50%);
     border-left: 9px solid #fff6d0; border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
   #draw::before { content: ''; position: absolute; left: -5px; top: -4px; bottom: -4px; width: 3px; border-radius: 2px; background: var(--gold); }
-  /* the action bar: ten slots in the middle of the lower edge, the Attack button to the left of them */
-  #actionbar { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
+  /* the action bar: ten slots in the middle of the lower edge, the Attack button to the left of them, and the
+     experience bar under them. Only the slots take room in it, so the bar itself is exactly as wide as their row. */
+  #actionbar { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
   #attackBtn { position: absolute; right: calc(100% + 12px); top: 0; }
+  /* experience: a thin line from the left edge of slot 1 to the right edge of slot 0, with a mark at every tenth.
+     #xpbar is what the cursor finds (the line alone would be hard to hit); .track is what is seen. */
+  #xpbar { position: absolute; left: 0; right: 0; top: 100%; padding: 5px 0 4px; }
+  #xpbar .track { position: relative; height: 7px; overflow: hidden; border-radius: 4px; background: rgba(2, 10, 9, .6);
+    border: 1px solid rgba(127, 232, 214, .3); }
+  #xpbar .track::after { content: ''; position: absolute; top: 0; bottom: 0; left: 10%; right: 0;
+    background: linear-gradient(90deg, rgba(255, 255, 255, .3) 1px, transparent 0) 0 0 / calc(100% / 9) 100%; }
+  #xpFill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #b58cff, #e0ccff); transition: width .25s; }
+  /* experience came in: the line lights up for a moment */
+  #xpbar.gain .track { animation: xpGlow .8s ease-out; }
+  #xpbar.gain #xpFill { animation: xpGain .8s ease-out; }
+  @keyframes xpGlow { from { border-color: #e0ccff; box-shadow: 0 0 12px 2px rgba(181, 140, 255, .9); } }
+  @keyframes xpGain { from { filter: brightness(1.8); } }
   .act { position: relative; flex: none; width: 64px; height: 64px; padding: 16px 1px 0; line-height: 1.08; text-align: center; font-size: 9.5px;
     letter-spacing: -.1px; overflow: hidden; cursor: pointer; background: rgba(6, 24, 21, .7); border: 2px solid rgba(127, 232, 214, .3); border-radius: 12px; }
   .act:hover { filter: brightness(1.25); }
@@ -91,7 +106,7 @@
   /* what is being dragged onto the bar follows the cursor */
   #ghost { position: fixed; z-index: 6; margin: -32px 0 0 -32px; pointer-events: none; opacity: .9; transform: scale(.85);
     box-shadow: 0 6px 18px rgba(0, 0, 0, .6); }
-  #buffs { position: absolute; top: 188px; left: 16px; display: flex; gap: 6px; font-size: 12px; }
+  #buffs { position: absolute; top: 131px; left: 16px; display: flex; gap: 6px; font-size: 12px; }
   #buffs span { padding: 3px 8px; border-radius: 999px; background: rgba(6, 24, 21, .7); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold); }
 
   /* skills window */
@@ -100,6 +115,7 @@
   #book.on, #help.on { display: flex; }
   #book h2, #help h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
   #book .sub, #help .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
+  #help #online { margin: 10px 0 0; font-size: 12px; opacity: .55; }   /* a quiet last line: how many cats are in the world */
   #bookList, #helpList { overflow-y: auto; padding-right: 6px; }
   .sk .icon { width: 22px; height: 22px; margin: 0; }
   .sk .grab { cursor: grab; }   /* a learned skill can be dragged onto the action bar */
@@ -136,6 +152,10 @@
   .slot.bad { border-style: dashed; opacity: .6; }   /* this character cannot wear it */
   .slot svg { position: absolute; inset: 6px; width: 26px; height: 26px; fill: currentColor; }
   .slot.hollow svg { color: var(--teal); opacity: .2; }   /* an empty equipment slot: the outline of what belongs there */
+  /* the off hand while the weapon takes both paws: that weapon again, dimmed, and marked as two-handed */
+  .slot.taken { border-style: dashed; border-color: var(--tint); cursor: not-allowed; }
+  .slot.hollow.taken svg { color: var(--tint); opacity: .38; }
+  .slot.taken::after { content: '2H'; position: absolute; right: 3px; bottom: 0; font-size: 10px; font-weight: 800; color: #fff; opacity: .75; text-shadow: 0 1px 2px #000; }
   .slot .n { position: absolute; right: 3px; bottom: 0; font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
   .slot .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
 
@@ -163,7 +183,7 @@
   #bagStats .cell b.bad, #bagStats .cell b.bad small { color: #ff8095; }
   #bagStats .cell small { margin-right: 5px; font-weight: 400; }
   #bagStats .cell small.eq { color: #8ee68e; }
-  /* the paper doll: the cat itself between its equipment slots - armour down the left, the weapon by its paw */
+  /* the paper doll: the cat itself between its equipment slots - armour down the left, the weapon and the off hand on the right */
   #doll { display: flex; gap: 6px; align-items: center; }
   #doll .col { display: flex; flex-direction: column; gap: 8px; }
   #dollStage { position: relative; align-self: stretch; width: 132px; min-height: 200px; overflow: hidden; border-radius: 6px;
@@ -230,14 +250,14 @@
     background: radial-gradient(transparent 40%, rgba(255, 60, 110, .55)); transition: opacity .25s; }
 
   /* dev bar: only for whoever may edit the map. It sits above the band of the action bar */
-  #devbar { right: 16px; bottom: 92px; display: none; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; font-size: 13px;
+  #devbar { right: 16px; bottom: 102px; display: none; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; font-size: 13px;
     white-space: nowrap; }
   #devbar.on { display: flex; }
   /* a region name may be 48 characters long: it is cut where the bar would reach under a window in the middle */
   #devPos { max-width: min(320px, 14vw); overflow: hidden; text-overflow: ellipsis; }
   #devbar button { padding: 6px 14px; font-size: 13px; box-shadow: none; }
 
-  #chat { position: absolute; left: 16px; bottom: 92px; width: min(380px, 20vw); font-size: 13px; }
+  #chat { position: absolute; left: 16px; bottom: 102px; width: min(380px, 20vw); font-size: 13px; }
   #chatLog div { padding: 1px 0; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
   #chatLog .sys { color: var(--teal); opacity: .8; }
   #chatLog b { color: var(--gold); }
@@ -280,17 +300,9 @@
     <div class="bar"><i id="hpFill"></i></div>
     <div class="label"><span>Mana</span><span id="mpText"></span></div>
     <div class="bar"><i id="mpFill"></i></div>
-    <div class="label"><span>Experience</span><span id="xpText"></span></div>
-    <div class="bar"><i id="xpFill"></i></div>
   </div>
   <div id="right">
-    <div class="panel" id="side">
-      <div class="row"><span>Gold</span><b id="gold">0</b></div>
-      <div class="row"><span>Skill points</span><b id="sp">0</b></div>
-      <div class="row"><span>Weapon</span><b id="weapon">Lv 1</b></div>
-      <div class="row"><span>Online</span><b id="online">1</b></div>
-      <canvas id="minimap" width="288" height="288"></canvas>
-    </div>
+    <canvas id="minimap" width="288" height="288"></canvas>
     <div class="panel" id="menubar"></div>
   </div>
   <div class="panel" id="target">
@@ -366,6 +378,7 @@
       <div><kbd>Enter</kbd></div><span>Open the chat, send the message</span>
       <div><kbd>M</kbd></div><span>Sound on and off</span>
     </div>
+    <div class="sub" id="online"></div>
   </div>
   <div class="panel" id="tip"></div>
   <div id="shop"></div>

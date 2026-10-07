@@ -11,7 +11,7 @@ import {
   MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
-  weaponFamily, heldFamily, fightStyle, equipError, lookCode, lookOf, BAR_SIZE,
+  basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
@@ -338,18 +338,18 @@ function setLabel(a, text, color) {
 }
 
 // What a cat wears and holds: its class gives the hoodie, the look code of its equipment (lookCode in shared.js) the
-// armour pieces, their tiers and the kind of weapon in its paw - any class may hold any weapon; with nothing equipped
-// it holds the one its class starts with. A piece and a weapon are tinted by their tier.
+// armour pieces, their tiers, the shield on its off paw and the kind of weapon in the other - any class may hold any
+// weapon; with nothing equipped it holds the one its class starts with (basicFamily). A piece, a shield and a weapon
+// are tinted by their tier.
 function setLook(a, cls, code = a.look) {
   if (!CLASSES[cls] || (a.cls === cls && a.look === code)) return;
   a.cls = cls;
   a.look = code;
   const worn = lookOf(code), tint = (tier) => (tier < 0 ? null : TIERS[tier].color);
-  a.family = worn.family ?? weaponFamily(cls);
-  // the knight keeps his shield as long as the other paw holds a sword
-  const held = !worn.family ? CLASSES[cls].weapon : worn.family === 'sword' && CLASSES[cls].weapon === 'shield' ? 'shield' : worn.family;
+  a.family = worn.family ?? basicFamily(cls, worn.offhand >= 0);
   a.cat.setLook({
-    ...CLASSES[cls], weapon: held, weaponTint: tint(worn.weapon),
+    // the server never sends a shield beside a weapon that takes both paws; a code that says so anyway shows the weapon
+    ...CLASSES[cls], weapon: a.family, weaponTint: tint(worn.weapon), shield: handsOf(a.family) === 2 ? null : tint(worn.offhand),
     armor: { helmet: tint(worn.head), chest: tint(worn.body), gloves: tint(worn.hands), boots: tint(worn.feet) },
   });
 }
@@ -761,6 +761,10 @@ function onEvent(ev) {
       sfx(880, 0.18, 'triangle', 0.06, 440);
       break;
     }
+    case 'gift':   // handed over by the game itself: the Knight's shield
+      notice(`You received ${ITEMS[ev.id].name}`);
+      chatLine('', `You received ${ITEMS[ev.id].name}`, true);
+      break;
     case 'err':   // the server refused an item request, or the bag was too full for loot
       notice(ev.m);
       chatLine('', ev.m, true);
@@ -1331,6 +1335,17 @@ attackSlot.classList.remove('empty');
 attackSlot.append(el('kbd', '', 'F'), el('i', 'icon'), 'Attack');
 attackSlot.querySelector('.icon').style.setProperty('--tint', '#cfd8e0');
 attackSlot.addEventListener('click', attackKey);
+// The experience bar lies under the ten slots. It is a child of the action bar, which is as wide as the row of its
+// slots and nothing else, so the bar follows that width whatever the layout does. No text on it: hovering tells.
+const xpBar = el('div'), xpFill = el('i');
+xpBar.id = 'xpbar';
+xpFill.id = 'xpFill';
+xpBar.append(el('div', 'track'));
+xpBar.firstChild.append(xpFill);
+const xpShare = () => stats.xp / xpNext(stats.level) * 100;
+const xpLine = () => `Level ${stats.level} · ${stats.xp.toLocaleString('en-US')} / ${xpNext(stats.level).toLocaleString('en-US')} XP (${xpShare().toFixed(1)} %)`;
+tipOn(xpBar, () => [el('b', 'name', 'Experience'), el('div', '', xpLine())]);
+$('actionbar').append(xpBar);
 function renderBar() {
   const key = JSON.stringify(stats.bar);
   if (key === barKey) return;
@@ -1348,7 +1363,7 @@ function renderBar() {
     tipOn(node, () => slotTip(i));
     return { id, k, it, node, note, cd, left };
   });
-  $('actionbar').replaceChildren(attackSlot, ...barSlots.map((slot) => slot.node));
+  $('actionbar').replaceChildren(attackSlot, ...barSlots.map((slot) => slot.node), xpBar);
 }
 tipOn(attackSlot, () => [el('b', 'name', 'Attack'), el('div', '', 'Runs up to the target and keeps hitting it with the weapon.'), el('div', 'hint', 'Key F or click')]);
 
@@ -1531,6 +1546,8 @@ const ICONS = {
   daggers: '<path d="M3 3l8 4.5-3.5 3.500zM10 10l1.8 1.8-1.3 1.3-1.8-1.800zM21 3l-8 4.5 3.5 3.500zM14 10l-1.8 1.8 1.3 1.3 1.8-1.800zM9 14.500l1.5 1.5-4.5 4.5-1.5-1.500zM15 14.500l-1.5 1.5 4.5 4.5 1.5-1.500z"/>',
   bow: '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M7 3c11 3 11 15 0 18M7 3v18"/><path d="M2 11h13v-2.500l5 3.5-5 3.500v-2.500h-13z"/>',
   staff: '<path d="M6 21.500l-1.5-1.5 9-9 1.5 1.500z"/><circle cx="17" cy="7" r="4"/><circle cx="17" cy="7" r="1.6" fill="#fff"/>',
+  greatsword: '<path d="M21.6 1.4l1 1-.8 5.400-9.300 9.300-3.600-3.600 9.300-9.300zM5.800 9.200l9 9-1.700 1.700-9-9zM7.300 15.200l1.500 1.500-3.300 3.300-1.500-1.500z"/><circle cx="3.700" cy="20.300" r="1.700"/>',
+  offhand: '<path fill-rule="evenodd" d="M12 1.800l8.700 2.900v6.300c0 5.300-3.600 9.200-8.700 11.200-5.100-2-8.700-5.900-8.700-11.200v-6.300zM12 4.500l-6.200 2.100v4.400c0 3.900 2.500 6.800 6.200 8.400 3.700-1.600 6.200-4.500 6.200-8.400v-4.400z"/><circle cx="12" cy="11" r="2.500"/>',
   head: '<path d="M4 14a8 8 0 0116 0v5h-5v-5h-2v5h-2v-5h-2v5h-5z"/><path d="M11 3h2v4h-2z"/>',
   body: '<path d="M8 3l4 2 4-2 5 4-3 3.5-1-1v11.500h-10v-11.500l-1 1-3-3.500z"/>',
   hands: '<path d="M7 21v-5l-3.5-4.5 1.8-1.5 2.7 2.500v-8a1.5 1.5 0 013 0v4.500h1v-6a1.5 1.5 0 013 0v6h1v-4.500a1.5 1.5 0 013 0v10.500l-1.5 6z"/>',
@@ -1538,7 +1555,11 @@ const ICONS = {
   potion: '<path d="M9 2h6v2h-1v4.500l4.5 7.500a3.5 3.5 0 01-3 5.500h-7a3.5 3.5 0 01-3-5.500l4.5-7.500v-4.500h-1z"/>',
 };
 const POTION_TINT = { hp: '#ff6b8e', mp: '#6fa4ff' };
-const FAMILY_NAMES = { sword: 'Sword', daggers: 'Daggers', bow: 'Bow', staff: 'Staff' };
+const FAMILY_NAMES = { sword: 'Sword', daggers: 'Daggers', bow: 'Bow', staff: 'Staff', greatsword: 'Greatsword' };
+// what kind of thing a piece of gear is, in a few words: a weapon says how many paws it takes
+const gearKind = (it) => (it.kind === 'weapon' ? `${FAMILY_NAMES[it.family]} · ${it.hands === 2 ? 'Two-handed' : 'One-handed'}`
+  : it.kind === 'shield' ? `Shield · ${SLOT_NAMES[it.slot]}` : `Armour · ${SLOT_NAMES[it.slot]}`);
+const listOf = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]);
 const itemTint = (id) => { const it = ITEMS[id]; return it.kind === 'potion' ? POTION_TINT[it.hp ? 'hp' : 'mp'] : css(TIERS[it.tier].color); };
 const stackText = (id, n) => (n > 1 ? `${ITEMS[id].name} ×${n}` : ITEMS[id].name);
 
@@ -1606,14 +1627,15 @@ function itemTip(id, hint, worn = false) {
     line(`Restores ${it.hp || it.mp} ${it.hp ? 'health' : 'mana'}`);
     line(`${POTION_CD} s before the next potion`, 'dim');
   } else {
-    line(`${it.kind === 'weapon' ? `Weapon · ${FAMILY_NAMES[it.family]}` : `Armour · ${SLOT_NAMES[it.slot]}`} · ${TIERS[it.tier].name} tier`, 'kind');
+    line(`${gearKind(it)} · ${TIERS[it.tier].name} tier`, 'kind');
     for (const [k, v] of Object.entries(it.bonus)) line(`+${v} ${BONUS_NAMES[k]}`);
     line(`Requires level ${it.lvl}`, stats.level < it.lvl ? 'bad' : 'dim');
-    // what wearing it would change, in the numbers of the status window
+    // What wearing it would change, in the numbers of the status window - with all that comes off for it: a weapon
+    // for both paws takes the shield off too, and a shield such a weapon.
     if (!worn && !equipError(stats.cls, stats.level, id)) {
-      const old = stats.eq[it.slot], after = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), { ...stats.eq, [it.slot]: id });
+      const old = stats.eq[it.slot], off = comesOff(stats.eq, id), after = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), equipWith(stats.eq, id));
       const changes = SHEET_ROWS.flat().filter((r) => r && after[r[1]] !== sheet[r[1]]);
-      if (changes.length || old) line(old === id ? 'The same as what you wear' : old ? `Instead of ${ITEMS[old].name}:` : 'If you wear it:', 'kind');
+      if (changes.length || off.length) line(old === id ? 'The same as what you wear' : off.length ? `Instead of ${listOf(off.map((item) => ITEMS[item].name))}:` : 'If you wear it:', 'kind');
       for (const [label, k] of changes) line(`${label} ${sheet[k]} → ${after[k]} (${after[k] > sheet[k] ? '+' : ''}${after[k] - sheet[k]})`, after[k] > sheet[k] ? 'good' : 'bad');
     }
   }
@@ -1644,7 +1666,7 @@ function useStack(i) {
   const [id] = stats.inv[i] || [], it = ITEMS[id];
   if (!it || stats.dead) return;
   if (it.kind === 'potion') { drink(i); return; }
-  const err = equipError(stats.cls, stats.level, id);
+  const err = equipError(stats.cls, stats.level, id) || wearError(stats.inv, stats.eq, id);
   if (err) { notice(err); return; }
   send({ t: 'eq', i, id });
   sfx(330, 0.12, 'triangle', 0.06, 200);
@@ -1679,6 +1701,7 @@ function destroyStack(i) {
   }
 }
 
+const HANDS = ['weapon', 'offhand'];   // the two slots beside the paws of the paper doll
 function renderBag() {
   const key = [bagTab, stats.cls, stats.level, stats.gold, JSON.stringify(stats.inv), JSON.stringify(stats.eq)].join('|');
   if (key === bagKey) return;
@@ -1687,13 +1710,24 @@ function renderBag() {
   for (const b of $('bagTabs').children) b.classList.toggle('on', b.dataset.tab === bagTab);
   $('bagCount').textContent = `${stats.inv.length} / ${BAG_SIZE}`;
   $('bagGold').textContent = stats.gold;
-  // The equipment slots stand around the cat: armour down its left, the weapon by its paw. An empty one shows the
-  // outline of what belongs in it - for the weapon, the kind the class fights with.
+  // The equipment slots stand around the cat: armour down its left, the weapon and the off hand by its paws. An empty
+  // one shows the outline of what belongs in it - for the weapon, the kind the cat fights with meanwhile. While the
+  // weapon takes both paws the off hand is not empty but taken: it shows that weapon, dimmed.
+  const both = ITEMS[stats.eq.weapon]?.hands === 2 ? stats.eq.weapon : null;
   const worn = (slot) => {
-    const id = ITEMS[stats.eq[slot]] ? stats.eq[slot] : null, t = tile(id, 1, slot === 'weapon' ? weaponFamily(stats.cls) : slot);
+    const id = ITEMS[stats.eq[slot]] ? stats.eq[slot] : null, taken = slot === 'offhand' && !id && both;
+    const t = tile(id, 1, taken ? ITEMS[both].family : slot === 'weapon' ? basicFamily(stats.cls, !!stats.eq.offhand) : slot);
     t.dataset.slot = slot;
+    if (taken) {
+      t.classList.add('taken');
+      t.style.setProperty('--tint', itemTint(both));
+      tipOn(t, () => [el('b', 'name', SLOT_NAMES[slot]), el('div', 'kind bad', `Taken by ${ITEMS[both].name}`),
+        el('div', 'dim', 'A two-handed weapon needs both paws. Wearing a shield puts it back into the bag')]);
+      return t;
+    }
     if (!id) {
-      tipOn(t, () => [el('b', 'name', SLOT_NAMES[slot]), el('div', 'kind', 'Empty slot'), el('div', 'dim', 'Click a piece in the bag to wear it')]);
+      tipOn(t, () => [el('b', 'name', SLOT_NAMES[slot]), el('div', 'kind', 'Empty slot'),
+        el('div', 'dim', slot === 'offhand' ? 'A shield goes here, beside a one-handed weapon' : 'Click a piece in the bag to wear it')]);
       return t;
     }
     t.addEventListener('click', () => takeOff(slot));
@@ -1701,8 +1735,8 @@ function renderBag() {
     tipOn(t, () => itemTip(id, 'Click to take it off · drag onto the action bar', true));
     return t;
   };
-  $('dollLeft').replaceChildren(...EQUIP_SLOTS.filter((slot) => slot !== 'weapon').map(worn));
-  $('dollRight').replaceChildren(worn('weapon'));
+  $('dollLeft').replaceChildren(...EQUIP_SLOTS.filter((slot) => !HANDS.includes(slot)).map(worn));
+  $('dollRight').replaceChildren(...HANDS.map(worn));
   // The grid shows the stacks the tab lets through, then empty cells; a stack keeps its place in the bag (i), which
   // is what the server is told.
   const shown = stats.inv.map(([id, n], i) => ({ id, n, i }))
@@ -1750,7 +1784,7 @@ function renderBagStats() {
   if (key === statsKey) return;
   statsKey = key;
   const base = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, {}, stats.eq), bare = bareSheet();
-  const after = tried ? statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), { ...stats.eq, [ITEMS[tried].slot]: tried }) : sheet;
+  const after = tried ? statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), equipWith(stats.eq, tried)) : sheet;   // with what it pushes off
   const combat = SHEET_ROWS.flat().filter(Boolean).map(([label, k]) => {
     if (after[k] === sheet[k]) return statCell(label, sheet[k], sheet[k] > base[k], sheet[k] - bare[k]);
     const c = statCell(label, after[k]), b = c.lastChild;   // "83 → 95", green for more and red for less
@@ -1867,7 +1901,7 @@ function renderStore() {
     return r;
   };
   const facts = (it) => (it.kind === 'potion' ? `Restores ${it.hp || it.mp} ${it.hp ? 'health' : 'mana'}`
-    : `${Object.entries(it.bonus).map(([k, v]) => `+${v} ${BONUS_NAMES[k]}`).join(' · ')} · level ${it.lvl}`);
+    : `${Object.entries(it.bonus).map(([k, v]) => `+${v} ${BONUS_NAMES[k]}`).join(' · ')} · ${it.hands === 2 ? 'two-handed · ' : ''}level ${it.lvl}`);
   const list = $('storeList');
   if (storeTab === 'buy') {
     // what the character cannot wear comes last, dimmed, with the reason
@@ -1915,13 +1949,21 @@ const MENU = [
   { name: 'Help', key: 'H', toggle: () => toggleHelp(), isOpen: () => helpOpen,
     icon: '<path d="M12 2.500a9.500 9.500 0 100 19 9.500 9.500 0 000-19zM12 6c2.300 0 4 1.500 4 3.500 0 1.500-.800 2.300-1.900 3-.900.600-1.100.900-1.100 1.800h-2.200c0-1.700.500-2.500 1.700-3.300.900-.600 1.200-.900 1.200-1.500 0-.800-.700-1.400-1.700-1.400s-1.700.600-1.800 1.600h-2.200c.100-2.200 1.700-3.700 4-3.700zM10.700 15.500h2.600v2.500h-2.600z" fill-rule="evenodd"/>' },
 ];
+// How many skills the character could buy the next rank of right now, were it standing before the Sage: the Skills
+// button wears that number, since the skill points themselves are shown only in the skill book.
+const affordable = () => skillsFor(stats.cls).filter((id) => {
+  const k = SKILLS[id], rank = stats.skills[id] | 0;
+  return stats.level >= k.lvl && rank < k.sp.length && stats.sp >= k.sp[rank];
+}).length;
 for (const m of MENU) {
   m.node = el('div', 'mbtn');
-  m.node.append(glyph(m.icon), el('kbd', '', m.key));
+  m.badge = el('span', 'badge');
+  m.node.append(glyph(m.icon), el('kbd', '', m.key), m.badge);
   m.node.addEventListener('click', () => { if (state === 'playing') m.toggle(); });
-  tipOn(m.node, () => [el('b', 'name', m.name), el('div', 'hint', m.key === 'H' ? 'Key H or F1' : `Key ${m.key}`)]);
+  tipOn(m.node, () => [el('b', 'name', m.name), ...(m.badge.textContent ? [el('div', '', m.note)] : []), el('div', 'hint', m.key === 'H' ? 'Key H or F1' : `Key ${m.key}`)]);
   $('menubar').append(m.node);
 }
+let badgeKey = null;
 
 const BUFF_NAMES = { patk: 'Attack up', pdef: 'Defence up', atk: 'Might' };
 const SHEET_ROWS = [
@@ -1934,7 +1976,7 @@ const SHEET_ROWS = [
 ];
 
 function renderSheet() {
-  const key = [stats.cls, stats.level, stats.xp, stats.sp, stats.hp, stats.mp, stats.weapon, JSON.stringify(stats.buffs), JSON.stringify(stats.eq)].join('|');
+  const key = [stats.cls, stats.level, stats.xp, stats.sp, stats.hp, stats.mp, stats.gold, stats.weapon, JSON.stringify(stats.buffs), JSON.stringify(stats.eq)].join('|');
   if (key === sheetKey) return;
   sheetKey = key;
   const base = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, {}, stats.eq);   // without buffs, to highlight what they raise
@@ -1947,29 +1989,35 @@ function renderSheet() {
     ...section('Status', [
       cell('HP', `${stats.hp} / ${stats.maxHp}`), cell('MP', `${stats.mp} / ${stats.maxMp}`),
       cell('Experience', `${(stats.xp / need * 100).toFixed(2)}%`), cell('SP', stats.sp),
+      cell('Gold', stats.gold), cell('Weapon upgrade', `Lv ${stats.weapon}`),   // the Blacksmith's work (B)
     ]),
     ...section('Attributes', ATTR_NAMES.map((n) => cell(n, sheet[n]))),
     ...section('Combat', SHEET_ROWS.flat().map((r) => (r ? cell(r[0], sheet[r[1]], sheet[r[1]] > base[r[1]], sheet[r[1]] - bare[r[1]]) : el('div')))),
   );
 }
 
+let xpSeen = null;   // the level and the experience the bar showed last, to tell when more has come in
 function updateHud() {
-  const need = xpNext(stats.level);
   $('who').textContent = `${names.get(myId) || 'Cat'} · ${CLASSES[stats.cls].name} ${stats.level}`;
   $('hpFill').style.width = `${stats.hp / stats.maxHp * 100}%`;
   $('hpText').textContent = `${stats.hp} / ${stats.maxHp}`;
   $('mpFill').style.width = `${stats.mp / stats.maxMp * 100}%`;
   $('mpText').textContent = `${stats.mp} / ${stats.maxMp}`;
-  $('xpFill').style.width = `${stats.xp / need * 100}%`;
-  $('xpText').textContent = `${(stats.xp / need * 100).toFixed(1)}%`;
+  if (!xpSeen || xpSeen.level !== stats.level || xpSeen.xp !== stats.xp) {
+    xpFill.style.width = `${xpShare()}%`;
+    if (xpSeen && (stats.level > xpSeen.level || (stats.level === xpSeen.level && stats.xp > xpSeen.xp))) {
+      xpBar.classList.remove('gain');
+      void xpBar.offsetWidth;   // lets the animation start over when the next kill follows at once
+      xpBar.classList.add('gain');
+    }
+    xpSeen = { level: stats.level, xp: stats.xp };
+    if (tipAnchor === xpBar) $('tip').lastChild.textContent = xpLine();   // the tooltip is open: it counts along
+  }
   $('draw').style.display = me.drawT >= 0 ? 'block' : 'none';
   $('drawFill').style.width = `${Math.max(0, me.drawT) / me.drawDur * 100}%`;
   $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
   $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
-  $('gold').textContent = stats.gold;
-  $('sp').textContent = stats.sp;
-  $('weapon').textContent = `Lv ${stats.weapon}`;
-  $('online').textContent = online;
+  if (helpOpen) $('online').textContent = `${online} ${online === 1 ? 'cat' : 'cats'} in the world right now`;
   $('buffs').replaceChildren(...stats.buffs.map(([stat, left]) => el('span', '', `${BUFF_NAMES[stat] || stat} ${left}s`)));
   if (sheetOpen) renderSheet();
 
@@ -2000,6 +2048,13 @@ function updateHud() {
     m.node.classList.toggle('on', m.isOpen());
     if (m.near) m.node.style.display = m.isOpen() || nearNpc(map, me, m.near) ? '' : 'none';
   }
+  const spent = [stats.cls, stats.level, stats.sp, JSON.stringify(stats.skills)].join('|');
+  if (spent !== badgeKey) {
+    badgeKey = spent;
+    const skills = MENU.find((m) => m.key === 'K'), n = affordable();
+    skills.badge.textContent = n ? String(n) : '';
+    skills.note = `${stats.sp} skill points: the Sage has ${n} ${n === 1 ? 'skill' : 'skills'} you can afford`;
+  }
 
   // target frame: name and level tinted by how dangerous the monster is for this player
   const tv = mobViews.get(targetId);
@@ -2022,7 +2077,9 @@ function updateHud() {
   // the Blacksmith and the Trader may stand close enough together for both to be in reach
   const tips = [];
   if (atSage) tips.push('K — learn skills from the Sage');
-  else if (nearNpc(map, me, 'blacksmith')) tips.push(stats.gold >= cost ? `B — upgrade weapon for ${cost} gold` : `Weapon upgrade: ${cost} gold (you have ${stats.gold})`);
+  else if (nearNpc(map, me, 'blacksmith')) {   // the Blacksmith has no window: his line says all there is to his trade
+    tips.push(`${stats.gold >= cost ? 'B — upgrade weapon' : 'Weapon upgrade'} Lv ${stats.weapon} → ${stats.weapon + 1}: ${cost} gold (you have ${stats.gold})`);
+  }
   if (atTrader && !storeOpen) tips.push('T — trade with the Trader');
   const tip = bookOpen || helpOpen || storeOpen ? '' : tips.join(' · ');   // those three reach down to where the line stands
   $('shop').style.display = tip ? 'block' : 'none';
@@ -2039,7 +2096,7 @@ function drawMinimap() {
   const g = mapCtx, C = 144, RIM = 136, S = RIM / RADAR_R;
   g.clearRect(0, 0, 288, 288);
   g.save();
-  g.beginPath(); g.arc(C, C, 140, 0, 7); g.clip();
+  g.beginPath(); g.arc(C, C, C, 0, 7); g.clip();   // to the very edge: the ring around it is the canvas's border
   g.fillStyle = 'rgba(4, 20, 17, .85)';
   g.fillRect(0, 0, 288, 288);
 
