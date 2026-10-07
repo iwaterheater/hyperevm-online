@@ -9,7 +9,7 @@ import {
   TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R,
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
-  ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, stackMax, sellPrice, weaponFamily, equipError, roomFor, addItem, takeItem,
+  ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, stackMax, sellPrice, heldFamily, fightStyle, equipError, roomFor, addItem, takeItem,
   cleanBag, cleanEquip, lookCode, rollLoot, chestLoot,
 } from './src/shared.js';
 import {
@@ -604,13 +604,6 @@ function giveItem(p, id, n, x, z) {
   }
   if (got < n) refuse(p, `Your bag is full: ${ITEMS[id].name} was lost`);
 }
-// A weapon the class can no longer fight with goes back into the bag - if the bag has room. Otherwise it stays in the
-// paw and counts for nothing (see equipBonus) until its owner makes room and takes it off.
-function shedWeapon(p) {
-  const it = itemOf(p.equip.weapon);
-  if (it && it.family !== weaponFamily(p.cls) && addItem(p.inv, p.equip.weapon, 1)) p.equip.weapon = null;
-  bagChanged(p);
-}
 
 // A physical attack on a monster: it can miss (Accuracy against Evasion) and can be a critical hit; P.Def reduces it.
 // `power` is in the units of the skill table, where a plain weapon hit is 2.
@@ -965,7 +958,7 @@ function tick() {
     }
     for (const q of players.values()) {
       if (q !== p && near(q)) {
-        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls), lookCode(q.equip, q.cls)]);
+        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls), lookCode(q.equip)]);
       }
     }
     for (const m of mobs) {
@@ -988,7 +981,7 @@ const SKILL_EFFECTS = {
   strike(p, s, R, m) {
     if (!m || m.dead) return false;
     const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
-    if (d > CLASSES[p.cls].reach + m.r + 1.2) return false;
+    if (d > fightStyle(p.cls, heldFamily(p.cls, p.equip)).reach + m.r + 1.2) return false;
     const hit = physical(p, s.power[R], m);
     damageMob(m, hit, dx / d, dz / d, 7, p);
     if (!hit.miss) applyEffects(m, { stun: s.stun?.[R], dot: s.dot && mitigate(s.dot[R] * p.st.pAtk / 2, m.pDef), dotDur: s.dotDur }, p);
@@ -1081,8 +1074,8 @@ const handlers = {
     p.lastMoveAt = now;
     clampWorld(p, 1);
   },
-  a(p, msg) {   // auto-attack: one hit at the selected monster with whatever the class wields
-    const m = mobById.get(msg.id), c = CLASSES[p.cls];
+  a(p, msg) {   // auto-attack: one hit at the selected monster with whatever is in the paw
+    const m = mobById.get(msg.id), c = fightStyle(p.cls, heldFamily(p.cls, p.equip));
     if (p.dead || now < p.swingAt || !m || m.dead) return;
     const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
     if (d > c.reach + m.r + 1.2) return;   // out of reach (with a little slack for lag)
@@ -1127,7 +1120,7 @@ const handlers = {
     if (p.dead || !c || c.base !== p.cls || p.level < PROFESSION_LEVEL || !nearNpc(map, p, 'sage', SHOP_RANGE)) return;
     p.cls = target;
     grantFree(p);
-    shedWeapon(p);   // a rogue has no use for the fighter's sword; this also recomputes the stats
+    bagChanged(p);   // the look and the stats follow the new profession
     p.hp = p.maxHp;
     p.mp = p.maxMp;
     p.events.push({ k: 'prof', cls: target });

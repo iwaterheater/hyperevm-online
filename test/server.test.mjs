@@ -932,9 +932,7 @@ check('items: wearing and taking off - class and level rules, the swap, the stat
   assert.equal(seen()[12], 0, 'a cat that wears nothing has the look code 0');
   const { lookOf } = await import('../src/shared.js');
 
-  // refused, each with a line for the player: the wrong class, a level too low, a potion
-  await f.send({ t: 'eq', i: 2, id: 'iron_staff' });
-  assert.match((await f.event('err')).m, /Fighter cannot use that weapon/);
+  // refused, each with a line for the player: a level too low, a potion (a weapon of another class is fine: see below)
   await f.send({ t: 'eq', i: 3, id: 'steel_body' });
   assert.match((await f.event('err')).m, /Steel Cuirass requires level 10/);
   await f.send({ t: 'eq', i: 5, id: 'hp_small' });
@@ -956,7 +954,7 @@ check('items: wearing and taking off - class and level rules, the swap, the stat
   await f.until('the helmet on', () => f.eq.head === 'iron_head');
   assert.deepEqual(f.inv.map((stack) => stack[0]), ['leather_head', 'iron_staff', 'steel_body', 'iron_sword', 'hp_small', 'iron_feet']);
   await w.until('the watcher sees the helmet', () => lookOf(seen()[12]).head === 1);
-  assert.deepEqual(lookOf(seen()[12]), { weapon: -1, head: 1, body: -1, hands: -1, feet: -1 });
+  assert.deepEqual(lookOf(seen()[12]), { weapon: -1, head: 1, body: -1, hands: -1, feet: -1, family: null });
   // another helmet swaps with it, in place
   await f.send({ t: 'eq', i: 0, id: 'leather_head' });
   await f.until('the cap on', () => f.eq.head === 'leather_head');
@@ -968,7 +966,7 @@ check('items: wearing and taking off - class and level rules, the swap, the stat
   await f.until('sword, helmet and boots on', () => f.eq.weapon === 'iron_sword' && f.eq.feet === 'iron_feet' && f.eq.head === 'iron_head');
   assert.deepEqual(f.inv.map((stack) => stack[0]), ['leather_head', 'iron_staff', 'steel_body', 'hp_small']);
   await w.until('the watcher sees all three', () => lookOf(seen()[12]).weapon === 1);
-  assert.deepEqual(lookOf(seen()[12]), { weapon: 1, head: 1, body: -1, hands: -1, feet: 1 });
+  assert.deepEqual(lookOf(seen()[12]), { weapon: 1, head: 1, body: -1, hands: -1, feet: 1, family: 'sword' });
   // what the watcher gets is the look and nothing more: no bag, no item ids
   assert.equal(seen().length, 13);
   assert.ok(seen().every((v) => typeof v === 'number'));
@@ -1163,33 +1161,27 @@ check('items: the King leaves a piece of the top tier in the bag of who brought 
   assert.ok(p.inv.some((stack) => stack[0] === potions.id && stack[1] >= 3));
 }));
 
-check('items: a change of profession puts a weapon of the wrong kind back into the bag', async () => {
+check('items: any class wields any weapon - it stays through a change of profession, and others see what it holds', async () => {
   const sage = FILE.npcs.find((n) => n.kind === 'sage');
   const at = [sage.x + 1, sage.z + 1];
   const veteran = { ...OLD, level: 20, xp: 0, equip: { weapon: 'iron_sword', head: 'iron_head' } };
-  await withServer({ setup: seed({ a: { ...veteran, inv: [] }, k: { ...veteran, inv: [] }, full: { ...veteran, inv: Array.from({ length: 30 }, () => ['leather_head', 1]) } }) }, async (s) => {
-    const { statsOf } = await import('../src/shared.js');
+  await withServer({ setup: seed({ a: { ...veteran, inv: [] }, f: { ...veteran, cls: 'fighter', inv: [['iron_bow', 1], ['iron_staff', 1]] } }) }, async (s) => {
+    const { statsOf, lookOf } = await import('../src/shared.js');
+    // an archer keeps the fighter's sword in its paw, and it still counts
     const archer = await enter(s, { token: 'a', at });
     await archer.send({ t: 'prof', cls: 'archer' });
-    await archer.until('the archer', () => archer.me.cls === 'archer' && archer.eq.weapon === null);
-    assert.deepEqual(archer.inv, [['iron_sword', 1]]);
-    assert.equal(archer.eq.head, 'iron_head');
-    // a knight still fights with a sword
-    const knight = await enter(s, { token: 'k', at });
-    await knight.send({ t: 'prof', cls: 'knight' });
-    await knight.until('the knight', () => knight.me.cls === 'knight');
-    await knight.settled();
-    assert.equal(knight.eq.weapon, 'iron_sword');
-    assert.deepEqual(knight.inv, []);
-    // no room: the sword stays where it is, counts for nothing, and is not shown to others
-    const full = await enter(s, { token: 'full', at });
-    await full.send({ t: 'prof', cls: 'rogue' });
-    await full.until('the rogue', () => full.me.cls === 'rogue');
-    await full.settled();
-    assert.equal(full.eq.weapon, 'iron_sword');
-    assert.equal(full.inv.length, 30);
-    assert.deepEqual(statsOf('rogue', 20, full.me.skills, 2, {}, full.eq).pAtk, statsOf('rogue', 20, full.me.skills, 2).pAtk);
-    const row = await knight.until('the rogue in view', () => knight.others.find((r) => r[0] === full.w.id));
-    assert.equal(row[12] % 5, 0, 'the weapon digit of the look code');
+    await archer.until('the archer', () => archer.me.cls === 'archer');
+    await archer.settled();
+    assert.equal(archer.eq.weapon, 'iron_sword');
+    assert.deepEqual(archer.inv, []);
+    assert.ok(statsOf('archer', 20, archer.me.skills, 2, {}, archer.eq).pAtk > statsOf('archer', 20, archer.me.skills, 2).pAtk);
+    // a fighter takes a staff, then a bow: no refusal, and the others are told what it holds
+    const f = await enter(s, { token: 'f', at });
+    await f.send({ t: 'eq', i: 1, id: 'iron_staff' });
+    await f.until('the staff', () => f.eq.weapon === 'iron_staff');
+    await f.send({ t: 'eq', i: f.inv.findIndex(([id]) => id === 'iron_bow'), id: 'iron_bow' });
+    await f.until('the bow', () => f.eq.weapon === 'iron_bow');
+    const row = await archer.until('the fighter with a bow in view', () => archer.others.find((r) => r[0] === f.w.id && lookOf(r[12]).family === 'bow'));
+    assert.equal(lookOf(row[12]).weapon, 1, 'an iron one');
   });
 });

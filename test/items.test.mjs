@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CLASSES, CLASS_KEYS, WEAPONS, MOB_KEYS, statsOf,
-  ITEMS, ITEM_KEYS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_KEYS, BONUS_NAMES, WEAPON_FAMILIES, BAG_SIZE, STACK_MAX, SELL_RATE, SHOP, SHOP_TIER,
+  ITEMS, ITEM_KEYS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_KEYS, BONUS_NAMES, WEAPON_FAMILIES, heldFamily, fightStyle, MELEE_REACH, BOW_REACH, BAG_SIZE, STACK_MAX, SELL_RATE, SHOP, SHOP_TIER,
   STARTER_KIT, itemOf, stackMax, sellPrice, weaponFamily, equipError, equipBonus, roomFor, addItem, takeItem, cleanBag, cleanEquip,
   lookCode, lookOf, gearChance, tierForLevel, rollLoot, chestLoot, POTION_CHANCE,
 } from '../src/shared.js';
@@ -96,29 +96,29 @@ test('statsOf: the Blacksmith\'s upgrade, passive skills and buffs multiply the 
   assert.equal(statsOf('fighter', 10, {}, 1, { pdef: 2 }, IRON).pDef, Math.round((40 + 25) * 1.45 * 2));
 });
 
-test('equipBonus: only an item that belongs in its slot counts, and a weapon only for a class that fights with it', () => {
+test('equipBonus: only an item that belongs in its slot counts; a weapon counts for whoever holds it', () => {
   const zero = Object.fromEntries(BONUS_KEYS.map((k) => [k, 0]));
   assert.deepEqual(equipBonus(null, 'fighter'), zero);
   assert.deepEqual(equipBonus({ head: 'iron_body', body: 'iron_sword', weapon: 'iron_head', feet: 'hp_small', hands: 'constructor' }, 'fighter'), zero);
-  assert.deepEqual(equipBonus({ weapon: 'iron_staff' }, 'fighter'), zero);
+  assert.equal(equipBonus({ weapon: 'iron_staff' }, 'fighter').mAtk, 11);                             // any class, any weapon
   assert.equal(equipBonus({ weapon: 'iron_staff' }, 'cleric').mAtk, 11);
   assert.equal(equipBonus({ weapon: 'iron_sword' }, 'knight').pAtk, 8);
-  assert.deepEqual(statsOf('archer', 20, {}, 1, {}, { weapon: 'hypurr_sword' }), statsOf('archer', 20));   // left over from the fighter
+  assert.ok(statsOf('archer', 20, {}, 1, {}, { weapon: 'hypurr_sword' }).pAtk > statsOf('archer', 20).pAtk);   // an archer may hold a sword
   assert.deepEqual(equipBonus(IRON, 'fighter'), { ...zero, pAtk: 8, pDef: 25, mDef: 6, acc: 2, speed: 4 });
 });
 
-test('equipError: the class decides the weapon, the level decides the tier, any class wears any armour', () => {
+test('equipError: the level decides the tier; any class wields any weapon and wears any armour', () => {
   assert.equal(equipError('fighter', 5, 'iron_sword'), '');
   assert.equal(equipError('knight', 5, 'iron_sword'), '');
-  assert.match(equipError('fighter', 5, 'iron_staff'), /Fighter cannot use/);
-  assert.match(equipError('rogue', 20, 'iron_sword'), /Rogue cannot use/);
+  assert.equal(equipError('fighter', 5, 'iron_staff'), '');
+  assert.equal(equipError('rogue', 20, 'iron_sword'), '');
   assert.equal(equipError('rogue', 20, 'iron_daggers'), '');
   assert.equal(equipError('archer', 20, 'steel_bow'), '');
   assert.match(equipError('fighter', 4, 'iron_head'), /requires level 5/);
   assert.match(equipError('fighter', 14, 'hypurr_sword'), /requires level 15/);
   for (const cls of CLASS_KEYS) {
     for (const slot of EQUIP_SLOTS.slice(1)) assert.equal(equipError(cls, 15, `hypurr_${slot}`), '', `${cls} wears ${slot}`);
-    assert.equal(ITEM_KEYS.filter((id) => ITEMS[id].kind === 'weapon' && !equipError(cls, 99, id)).length, TIERS.length, `${cls} has one weapon per tier`);
+    assert.equal(ITEM_KEYS.filter((id) => ITEMS[id].kind === 'weapon' && !equipError(cls, 99, id)).length, TIERS.length * WEAPON_FAMILIES.length, `${cls} can hold every weapon`);
   }
   for (const id of ['hp_small', 'nothing', 'constructor', undefined, 5]) assert.match(equipError('fighter', 99, id), /cannot be equipped/);
   assert.ok(CLASSES.knight.weapon === 'shield');   // the reason weaponFamily exists
@@ -181,29 +181,31 @@ test('a save file: an old one without items, a broken one and one with unknown i
 
 // ---------------------------------------------------------------- the look
 
-test('the look code: which pieces and which tiers, and nothing else; a weapon the class cannot use is not drawn', () => {
+test('the look code: which pieces, which tiers and the kind of weapon in the paw, and nothing else', () => {
   assert.equal(lookCode(null, 'fighter'), 0);
   assert.equal(lookCode({}, 'fighter'), 0);
-  const none = { weapon: -1, head: -1, body: -1, hands: -1, feet: -1 };
+  const none = { weapon: -1, head: -1, body: -1, hands: -1, feet: -1, family: null };
   assert.deepEqual(lookOf(0), none);
   for (const junk of [undefined, null, -5, 1.5, NaN, 'x', {}]) assert.deepEqual(lookOf(junk), none);
-  assert.deepEqual(lookOf(lookCode(IRON, 'fighter')), { weapon: 1, head: 1, body: 1, hands: 1, feet: 1 });
+  assert.deepEqual(lookOf(lookCode(IRON)), { weapon: 1, head: 1, body: 1, hands: 1, feet: 1, family: 'sword' });
   const mixed = { weapon: 'hypurr_bow', head: 'leather_head', body: null, hands: 'steel_hands', feet: 'hypurr_feet' };
-  assert.deepEqual(lookOf(lookCode(mixed, 'archer')), { weapon: 3, head: 0, body: -1, hands: 2, feet: 3 });
-  assert.deepEqual(lookOf(lookCode(mixed, 'fighter')), { weapon: -1, head: 0, body: -1, hands: 2, feet: 3 });
+  assert.deepEqual(lookOf(lookCode(mixed)), { weapon: 3, head: 0, body: -1, hands: 2, feet: 3, family: 'bow' });
+  for (const family of WEAPON_FAMILIES) assert.equal(lookOf(lookCode({ weapon: `iron_${family}` })).family, family);
   // every combination comes back as it went in
   const seen = new Set();
   for (let head = -1; head < 4; head++) {
     for (let feet = -1; feet < 4; feet++) {
       const eq = { head: head < 0 ? null : `${TIERS[head].id}_head`, feet: feet < 0 ? null : `${TIERS[feet].id}_feet` };
       const code = lookCode(eq, 'mystic');
-      assert.ok(Number.isInteger(code) && code >= 0 && code < 5 ** 5);
+      assert.ok(Number.isInteger(code) && code >= 0 && code < 5 ** 6);
       assert.deepEqual(lookOf(code), { ...none, head, feet });
       seen.add(code);
     }
   }
   assert.equal(seen.size, 25);
-  assert.ok(Object.values(lookOf(5 ** 5 * 3 + 4)).every((t) => t >= -1 && t < TIERS.length), 'a code too large still names real tiers');
+  const big = lookOf(5 ** 6 * 3 + 5 ** 5 * 3 + 4);
+  assert.ok(EQUIP_SLOTS.every((slot) => big[slot] >= -1 && big[slot] < TIERS.length), 'a code too large still names real tiers');
+  assert.equal(big.family, WEAPON_FAMILIES[2]);
 });
 
 // ---------------------------------------------------------------- loot
@@ -261,4 +263,15 @@ test('chests: sometimes a potion, seldom gear, and the richer the chest the bett
   assert.deepEqual(chestLoot(400, true, dice([0.9, 0.49, 0])), [['hypurr_head', 1]]);
   assert.deepEqual(chestLoot(400, true, dice([0.9, 0.5, 0])), []);
   for (let i = 0; i < 500; i++) for (const [id, n] of chestLoot(90, false)) assert.ok(itemOf(id) && n >= 1 && n <= 2);
+});
+
+test('how a cat fights follows what it holds, not its class', () => {
+  assert.equal(heldFamily('fighter', null), 'sword');
+  assert.equal(heldFamily('knight', {}), 'sword');
+  assert.equal(heldFamily('wizard', { weapon: 'iron_bow' }), 'bow');
+  assert.deepEqual(fightStyle('archer'), { ranged: true, reach: BOW_REACH });
+  assert.deepEqual(fightStyle('fighter'), { ranged: false, reach: MELEE_REACH });
+  assert.deepEqual(fightStyle('fighter', 'bow'), { ranged: true, reach: BOW_REACH });      // a fighter with a bow shoots
+  assert.deepEqual(fightStyle('archer', 'sword'), { ranged: false, reach: MELEE_REACH });  // an archer with a sword strikes
+  for (const cls of CLASS_KEYS) assert.equal(fightStyle(cls).reach, CLASSES[cls].reach, `${cls} fights as before with its own weapon`);
 });

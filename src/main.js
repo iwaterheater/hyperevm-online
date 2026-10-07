@@ -10,7 +10,7 @@ import {
   MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, hotbar, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
-  weaponFamily, equipError, lookCode, lookOf,
+  weaponFamily, heldFamily, fightStyle, equipError, lookCode, lookOf,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
@@ -346,15 +346,19 @@ function setLabel(a, text, color) {
   a.root.add(a.label);
 }
 
-// What a cat wears and holds: its class gives the hoodie and the kind of weapon, the look code of its equipment
-// (lookCode in shared.js) the armour pieces and their tiers. A piece and a weapon are tinted by their tier.
+// What a cat wears and holds: its class gives the hoodie, the look code of its equipment (lookCode in shared.js) the
+// armour pieces, their tiers and the kind of weapon in its paw - any class may hold any weapon; with nothing equipped
+// it holds the one its class starts with. A piece and a weapon are tinted by their tier.
 function setLook(a, cls, code = a.look) {
   if (!CLASSES[cls] || (a.cls === cls && a.look === code)) return;
   a.cls = cls;
   a.look = code;
   const worn = lookOf(code), tint = (tier) => (tier < 0 ? null : TIERS[tier].color);
+  a.family = worn.family ?? weaponFamily(cls);
+  // the knight keeps his shield as long as the other paw holds a sword
+  const held = !worn.family ? CLASSES[cls].weapon : worn.family === 'sword' && CLASSES[cls].weapon === 'shield' ? 'shield' : worn.family;
   a.cat.setLook({
-    ...CLASSES[cls], weaponTint: tint(worn.weapon),
+    ...CLASSES[cls], weapon: held, weaponTint: tint(worn.weapon),
     armor: { helmet: tint(worn.head), chest: tint(worn.body), gloves: tint(worn.hands), boots: tint(worn.feet) },
   });
 }
@@ -616,7 +620,7 @@ function onSnapshot(s) {
   online = s.n;
   const wasDead = stats.dead;
   Object.assign(stats, s.me, { dead: !!s.me.dead });
-  setLook(me, stats.cls, lookCode(stats.eq, stats.cls));
+  setLook(me, stats.cls, lookCode(stats.eq));
   sheet = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, Object.fromEntries(stats.buffs.map(([stat, , mult]) => [stat, mult])), stats.eq);
   if (stats.dead !== wasDead) $('dead').classList.toggle('hidden', !stats.dead);
 
@@ -685,7 +689,7 @@ function onEvent(ev) {
     case 'swing':
       if (ev.o === myId || !others.has(ev.o)) break;
       Object.assign(others.get(ev.o), { swingT: 0, swingKind: ev.c });
-      if (!CLASSES[others.get(ev.o).cls].ranged) spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
+      if (!fightStyle(others.get(ev.o).cls, others.get(ev.o).family).ranged) spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
       break;
     case 'skill': {   // the server accepted a skill: show what it does
       const k = SKILLS[ev.s], a = ev.o === myId ? me : others.get(ev.o), tv = mobViews.get(ev.tid);
@@ -1061,7 +1065,7 @@ function updateLocal(dt) {
   let tv = mobViews.get(targetId);
   if (targetId && (!tv || tv.killed)) { setTarget(0, false); tv = null; }   // the target died or walked out of view
   if (stats.dead) { me.speed = 0; me.castT = -1; me.sitting = false; attacking = false; fresh.clear(); return; }
-  const cls = CLASSES[stats.cls];
+  const cls = CLASSES[stats.cls], style = fightStyle(stats.cls, heldFamily(stats.cls, stats.eq));   // a bow shoots, whoever holds it
 
   // where area skills will land: the terrain under the cursor (the last such point while the cursor is on the sky)
   raycaster.setFromCamera(mouse, camera);
@@ -1082,7 +1086,7 @@ function updateLocal(dt) {
     tdx = tv.x - me.x; tdz = tv.z - me.z;
     tDist = Math.hypot(tdx, tdz) || 0.001;
     tdx /= tDist; tdz /= tDist;
-    inReach = tDist < cls.reach + tv.def.r;
+    inReach = tDist < style.reach + tv.def.r;
   }
   if (tDist > 50 && tv) { setTarget(0, false); tv = null; }   // too far away to stay locked on
   // auto-attack: with no keys held the cat runs up to its target by itself
@@ -1118,7 +1122,7 @@ function updateLocal(dt) {
   // ... and hits whenever its weapon is ready and the target is within reach
   if (attacking && tv && inReach && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
     local.swordCd = sheet.atkCd;   // Atk.Spd
-    if (cls.ranged) {
+    if (style.ranged) {
       me.shootPose = 0.3;   // the arrow itself appears when the server confirms the shot
     } else {
       me.swingT = 0;
@@ -1127,7 +1131,7 @@ function updateLocal(dt) {
       spawnSlash(me.x, me.z, tdx, tdz, me.swingKind);
     }
     send({ t: 'a', id: targetId, c: me.swingKind });
-    sfx(cls.ranged ? 500 : 300, 0.12, 'sawtooth', 0.04, 500);
+    sfx(style.ranged ? 500 : 300, 0.12, 'sawtooth', 0.04, 500);
   }
 
   // skills on keys 1-8; Shift is a shortcut for a dash skill
@@ -1493,10 +1497,6 @@ function itemTip(id, hint, worn = false) {
     line(`${it.kind === 'weapon' ? `Weapon · ${FAMILY_NAMES[it.family]}` : `Armour · ${SLOT_NAMES[it.slot]}`} · ${TIERS[it.tier].name} tier`, 'kind');
     for (const [k, v] of Object.entries(it.bonus)) line(`+${v} ${BONUS_NAMES[k]}`);
     line(`Requires level ${it.lvl}`, stats.level < it.lvl ? 'bad' : 'dim');
-    if (it.family) {
-      const users = CLASS_KEYS.filter((c) => weaponFamily(c) === it.family).map((c) => CLASSES[c].name).join(', ');
-      line(`For: ${users}`, it.family === weaponFamily(stats.cls) ? 'dim' : 'bad');
-    }
     // what wearing it would change, in the numbers of the status window
     if (!worn && !equipError(stats.cls, stats.level, id)) {
       const old = stats.eq[it.slot], after = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), { ...stats.eq, [it.slot]: id });
@@ -1587,11 +1587,8 @@ function renderBag() {
     t.style.gridArea = slot;
     t.dataset.slot = slot;
     if (!id) return t;
-    // a weapon left over from before a change of profession gives nothing: say so
-    const useless = !!equipError(stats.cls, 99, id);
-    t.classList.toggle('bad', useless);
     t.addEventListener('click', () => takeOff(slot));
-    tipOn(t, () => itemTip(id, useless ? 'Your class cannot use it · click to take it off' : 'Click to take it off', true));
+    tipOn(t, () => itemTip(id, 'Click to take it off', true));
     return t;
   }));
   bagCds = [];

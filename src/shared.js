@@ -178,7 +178,7 @@ const ARMOR = {
   hands: { cost: 0.8, names: ['Leather Gloves', 'Iron Gauntlets', 'Steel Gauntlets', 'Hypurr Claws'], pDef: [2, 4, 7, 10],   acc: [1, 2, 3, 4] },
   feet:  { cost: 0.9, names: ['Leather Boots', 'Iron Greaves', 'Steel Sabatons', 'Hypurr Striders'],  pDef: [2, 5, 8, 12],   speed: [2, 4, 6, 8] },
 };
-// Weapons by family - the kind of weapon a class fights with (see weaponFamily). A class can only equip its own family.
+// Weapons by family. Any class may wield any of them; what is in the paw decides how the cat fights (see fightStyle).
 const ARMS = {
   sword:   { names: ['Bronze Sword', 'Iron Sword', 'Steel Sword', 'Hypurr Blade'],        pAtk: [4, 8, 14, 20] },
   daggers: { names: ['Bronze Daggers', 'Iron Daggers', 'Steel Daggers', 'Hypurr Fangs'],  pAtk: [3, 7, 12, 18], crit: [10, 20, 30, 40] },
@@ -224,27 +224,34 @@ export const sellPrice = (id) => Math.max(1, Math.floor(ITEMS[id].price * SELL_R
 // What the Trader sells, in the order of his list.
 export const SHOP = ITEM_KEYS.filter((id) => ITEMS[id].kind === 'potion' || ITEMS[id].tier <= SHOP_TIER);
 
-// The knight fights with a sword too; his shield is part of his look, not an item.
+// The weapon a class starts with and holds while its weapon slot is empty. The knight fights with a sword too; his
+// shield is part of his look, not an item.
 export const weaponFamily = (cls) => (CLASSES[cls].weapon === 'shield' ? 'sword' : CLASSES[cls].weapon);
+// The kind of weapon in the paw: that of the equipped weapon, else the class's own.
+export const heldFamily = (cls, equip) => itemOf(equip?.weapon)?.family ?? weaponFamily(cls);
+// How a cat fights follows what it holds, not its class: a bow shoots from afar, everything else strikes up close.
+export const MELEE_REACH = 2.4, BOW_REACH = 18;
+export function fightStyle(cls, family = weaponFamily(cls)) {
+  const ranged = family === 'bow';
+  return { ranged, reach: ranged ? BOW_REACH : MELEE_REACH };
+}
 // Why this character cannot wear an item, as a line for the player; '' when it can.
 export function equipError(cls, level, id) {
   const it = itemOf(id);
   if (!it || !it.slot) return 'That cannot be equipped';
-  if (it.family && it.family !== weaponFamily(cls)) return `A ${CLASSES[cls].name} cannot use that weapon`;
   if (level < it.lvl) return `${it.name} requires level ${it.lvl}`;
   return '';
 }
-// An item in a slot counts when it belongs there - and, for a weapon, when the class can still fight with it: after a
-// change of profession the old sword may sit in the paw of an archer whose bag was too full to take it.
-const worn = (equip, slot, cls) => {
+// An item in a slot counts when it belongs there.
+const worn = (equip, slot) => {
   const it = itemOf(equip?.[slot]);
-  return it && it.slot === slot && (!it.family || !cls || it.family === weaponFamily(cls)) ? it : null;
+  return it && it.slot === slot ? it : null;
 };
 // The sum of what the equipment adds, by bonus key. `equip` maps a slot to an item id (or null).
 export function equipBonus(equip, cls) {
   const sum = Object.fromEntries(BONUS_KEYS.map((k) => [k, 0]));
   for (const slot of EQUIP_SLOTS) {
-    const it = worn(equip, slot, cls);
+    const it = worn(equip, slot);
     if (it) for (const [k, v] of Object.entries(it.bonus)) sum[k] += v;
   }
   return sum;
@@ -299,20 +306,26 @@ export function cleanEquip(raw) {
   return equip;
 }
 
-// What other players need to DRAW a cat: per slot 0 (nothing) or the tier + 1, as the digits of one number.
-const LOOK_BASE = TIERS.length + 1;
-export function lookCode(equip, cls) {
+// What other players need to DRAW a cat: per slot 0 (nothing) or the tier + 1, and after the slots the kind of weapon
+// in the paw (0 = none equipped, else the family's place in WEAPON_FAMILIES + 1), as the digits of one number.
+const LOOK_BASE = Math.max(TIERS.length, WEAPON_FAMILIES.length) + 1;
+export function lookCode(equip) {
   let code = 0;
   EQUIP_SLOTS.forEach((slot, i) => {
-    const it = worn(equip, slot, cls);
+    const it = worn(equip, slot);
     if (it) code += (it.tier + 1) * LOOK_BASE ** i;
   });
+  const held = worn(equip, 'weapon');
+  if (held) code += (WEAPON_FAMILIES.indexOf(held.family) + 1) * LOOK_BASE ** EQUIP_SLOTS.length;
   return code;
 }
-// -> { weapon, head, body, hands, feet }: the tier worn in each slot, -1 for nothing
+// -> { weapon, head, body, hands, feet, family }: the tier worn in each slot (-1 for nothing) and the family of the
+// equipped weapon (null when the slot is empty)
 export function lookOf(code) {
-  const n = Number.isInteger(code) && code > 0 ? code : 0;
-  return Object.fromEntries(EQUIP_SLOTS.map((slot, i) => [slot, Math.min(TIERS.length, Math.floor(n / LOOK_BASE ** i) % LOOK_BASE) - 1]));
+  const n = Number.isInteger(code) && code > 0 ? code : 0, digit = (i) => Math.floor(n / LOOK_BASE ** i) % LOOK_BASE;
+  const look = Object.fromEntries(EQUIP_SLOTS.map((slot, i) => [slot, Math.min(TIERS.length, digit(i)) - 1]));
+  look.family = WEAPON_FAMILIES[digit(EQUIP_SLOTS.length) - 1] ?? null;
+  return look;
 }
 
 // ---- loot. `rnd` is Math.random or a test's stand-in; every function draws from it in a fixed order.
