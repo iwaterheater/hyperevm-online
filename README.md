@@ -256,7 +256,8 @@ map/world.json    The world: terrain, scenery, regions, monster camps, chests, t
 map/backups/      The map before each save (created by the server, git-ignored)
 src/main.js       Client: rendering, input, networking, HUD
 src/cat.js        The cat: a Blender model of rigid parts (assets/cat/hypercat.glb), animated in code; weapons and armour, tinted by tier
-art/              The Blender source of the cat, its weapons and its armour (hypercat.blend)
+art/              The Blender sources: the cat, its weapons and its armour (hypercat.blend), the skill effects (fx.blend)
+src/fx.js         What skills look like: Blender-made shapes (assets/fx/fx.glb) - bolts, ground circles, glyphs, flames, light - animated in code
 src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations
 assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
 assets/medieval/  KayKit buildings, walls, trees, rocks and props, with their CC0 license
@@ -276,6 +277,7 @@ src/geo.js        Helpers for building vertex-coloured low-poly geometry
 src/shared.js     Constants, tables (monsters, classes, skills, items) and formulas used by both client and server
 tools/bake-map.mjs      Wrote the first map/world.json from the old world generator; refuses to overwrite an edited map without --force
 tools/check-imports.mjs Checks every import and page reference of this bundler-less project (npm run check)
+tools/build-fx.py       Builds the skill-effect shapes in art/fx.blend and exports assets/fx/fx.glb; run inside Blender
 test/             Tests of the map format, the items, the server and the editor's logic (npm test)
 data/             Saved player progress (created at runtime, git-ignored)
 ```

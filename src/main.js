@@ -5,6 +5,7 @@ import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton
 import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
 import { createComposer } from './postfx.js';
+import { createFx } from './fx.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
@@ -15,7 +16,6 @@ import {
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
-const REACH = 2.4;    // melee reach, for the size of the slash effect
 const glow = (hex, k = 2.5) => new THREE.Color(hex).multiplyScalar(k);
 const css = (hex) => `#${hex.toString(16).padStart(6, '0')}`;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -227,7 +227,6 @@ const orbMat = (id) => {
   const k = SKILLS[id];
   return !k ? bulletMat : k.kind === 'heal' ? healMat : k.kind === 'ground' ? fireMat : FX[k.fx] || bulletMat;
 };
-const bulletPool = meshPool(sphereGeo, bulletMat, 0.32);
 const orbPool = meshPool(sphereGeo, new THREE.MeshBasicMaterial({ color: glow(0xff3b6b, 3) }), 0.32);
 // dropped gold: a glowing placeholder until the coin model has loaded, then a spinning coin
 let gemLook = { geo: new THREE.OctahedronGeometry(0.28), mat: new THREE.MeshBasicMaterial({ color: glow(0xffd76a, 1.8) }) };
@@ -307,16 +306,8 @@ function updateParticles(dt) {
   pMesh.instanceMatrix.needsUpdate = true;
 }
 
-const rings = [];
-const ringGeo = new THREE.RingGeometry(0.9, 1, 64);
-function spawnRing(x, z, maxR, hex) {
-  const mesh = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
-    color: glow(hex, 1.8), transparent: true, side: THREE.DoubleSide, depthWrite: false,
-  }));
-  layOnGround(mesh, x, z, maxR / 2, 0.1);
-  scene.add(mesh);
-  rings.push({ mesh, t: 0, maxR });
-}
+// what skills look like: the Blender-made shapes and their animation
+const fx = createFx(scene, { groundY, layOnGround, burst });
 
 // ---------------------------------------------------------------- avatars (cats)
 
@@ -379,7 +370,7 @@ const lvlLabels = new Map();
 
 const corpses = [];
 function removeMobView(v) {
-  scene.remove(v.root);
+  scene.remove(v.root);   // the status marks go with it; their materials are shared
   v.skeleton.dispose();
 }
 
@@ -413,7 +404,7 @@ let ws = null, myId = 0, time = 0, shake = 0, online = 1;
 let joinName = '', testSpeed = 1;   // testSpeed: a play-test may run at double speed
 const names = new Map();
 const others = new Map(), mobViews = new Map(), gemViews = new Map();
-let bullets = [], orbs = [], meteors = [];
+let bullets = [], orbs = [];
 
 const me = makeAvatar();
 // Until the server places it the cat waits where it will appear: on the start point - the menu pose - or, when the page
@@ -439,19 +430,6 @@ const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 40), new THREE
 targetRing.visible = false;
 scene.add(targetRing);
 
-// the arc a sword swing leaves in the air
-const slashes = [];
-const slashGeo = new THREE.RingGeometry(1.2, REACH + 0.3, 24, 1, -1.1, 2.2);
-const chopGeo = new THREE.PlaneGeometry(REACH, 0.4).translate(REACH / 2 + 0.6, 0, 0);
-// kind 0 / 1: horizontal arc revealed in the direction of the sweep; kind 2: a straight streak ahead
-function spawnSlash(x, z, dx, dz, kind) {
-  const mesh = new THREE.Mesh(kind === 2 ? chopGeo : slashGeo, new THREE.MeshBasicMaterial({ color: glow(0xffffff, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
-  mesh.rotation.set(-Math.PI / 2, 0, Math.atan2(-dz, dx));
-  mesh.position.set(x, groundY(x, z) + 1.0, z);
-  scene.add(mesh);
-  slashes.push({ mesh, t: 0, kind, yaw: mesh.rotation.z });
-}
-
 // numbers that float up over a monster when this player damages it, or over the cat when it is healed;
 // `y` is the height above the ground at x, z
 const floaters = [];
@@ -463,11 +441,6 @@ function floatText(x, y, z, text, color, big) {
   scene.add(sprite);
   floaters.push({ sprite, t: 0 });
 }
-
-// preview of where an area skill will land while it is being cast
-const aoeMarker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
-aoeMarker.visible = false;
-scene.add(aoeMarker);
 
 let bannerTimer = 0;
 function banner(text) {
@@ -658,15 +631,14 @@ function onSnapshot(s) {
   for (const ev of s.e) onEvent(ev);
 }
 
-// a bolt that homes in on a monster; purely visual, the server decides the damage
-function spawnBolt(x, z, id, fx) {
-  const b = bulletPool.get();
+// A bolt that homes in on a monster; purely visual, the server decides the damage. A skill's bolt is larger than that
+// of a plain attack and may carry the skill's colour.
+const BOLT_LOOK = { power_shot: [1.7, 0xffd76a], pinning_shot: [1.4, 0xa9d8ff], fireball: [1.25] };
+function spawnBolt(x, z, id, kind, skill) {
+  const b = { mesh: fx.bolt(kind, ...(BOLT_LOOK[skill] || [])), kind, id };
   b.h = 1.1;   // its height above the ground it flies over
   b.mesh.position.set(x, groundY(x, z) + b.h, z);
-  b.mesh.material = FX[fx] || bulletMat;
-  b.mesh.scale.setScalar(fx === 'arrow' ? 0.16 : 0.32);
-  b.id = id;
-  b.speed = fx === 'arrow' ? 42 : 34;
+  b.speed = kind === 'arrow' ? 42 : 34;
   bullets.push(b);
 }
 
@@ -689,42 +661,30 @@ function onEvent(ev) {
     case 'swing':
       if (ev.o === myId || !others.has(ev.o)) break;
       Object.assign(others.get(ev.o), { swingT: 0, swingKind: ev.c });
-      if (!fightStyle(others.get(ev.o).cls, others.get(ev.o).family).ranged) spawnSlash(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
+      if (!fightStyle(others.get(ev.o).cls, others.get(ev.o).family).ranged) fx.swing(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
       break;
     case 'skill': {   // the server accepted a skill: show what it does
       const k = SKILLS[ev.s], a = ev.o === myId ? me : others.get(ev.o), tv = mobViews.get(ev.tid);
       if (!k || !a) break;
       if (k.kind === 'strike') {
         if (ev.o !== myId) Object.assign(a, { swingT: 0, swingKind: 2 });
-        if (tv) burst(tv.x, tv.top * 0.6, tv.z, 0xffffff, 10, 7);
         sfx(240, 0.14, 'sawtooth', 0.05, 300);
       } else if (k.kind === 'shot' || k.kind === 'bolt') {
-        spawnBolt(a.x, a.z, ev.tid, k.fx);
+        spawnBolt(a.x, a.z, ev.tid, k.fx, ev.s);
         a.shootPose = 0.25;
         sfx(660, 0.12, 'square', 0.04, -400);
-      } else if (k.kind === 'sleep') {
-        if (tv) burst(tv.x, tv.top, tv.z, 0xc9a6ff, 22, 4);
       } else if (k.kind === 'ground') {
-        const marker = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: glow(FIRE, 1.6), transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
-        layOnGround(marker, ev.x, ev.z, k.radius / 2, 0.08);
-        marker.scale.setScalar(k.radius);
-        const star = new THREE.Mesh(sphereGeo, k.phys ? arrowMat : fireMat);
-        star.scale.setScalar(k.phys ? 0.4 : 0.7);
-        scene.add(marker, star);
-        meteors.push({ marker, star, t: 0, d: k.delay, x: ev.x, y: groundY(ev.x, ev.z), z: ev.z });
         sfx(900, k.delay, 'sawtooth', 0.04, -700);
       } else if (k.kind === 'heal' || k.kind === 'buff' || k.kind === 'taunt' || k.kind === 'revive') {
-        const color = { heal: 0x8ee68e, buff: 0xffd76a, taunt: 0xff5a5a, revive: 0xffffff }[k.kind];
-        spawnRing(a.x, a.z, k.radius || 2.5, color);
-        burst(a.x, 1.3, a.z, color, 26, 6);
         sfx(k.kind === 'taunt' ? 150 : 520, 0.35, 'triangle', 0.07, 300);
       } else if (k.kind === 'dash' && ev.o !== myId) {
         burst(a.x, 1, a.z, TEAL, 14, 6);
       }
+      fx.cast(ev.s, k, a, tv, ev);
       break;
     }
     case 'boom':
-      spawnRing(ev.x, ev.z, ev.r, FIRE);
+      fx.boom(ev.x, ev.z, ev.r);
       burst(ev.x, 0.5, ev.z, FIRE, 45, 12);
       if (Math.hypot(ev.x - me.x, ev.z - me.z) < 25) shake = Math.max(shake, 0.5);
       sfx(70, 0.5, 'sawtooth', 0.12, -40);
@@ -758,7 +718,7 @@ function onEvent(ev) {
       break;
     }
     case 'lvlfx':
-      spawnRing(ev.x, ev.z, 4, 0xffd76a);
+      fx.levelUp(ev);
       burst(ev.x, 1.5, ev.z, 0xffd76a, 30, 9);
       break;
     case 'lvl':
@@ -1045,10 +1005,7 @@ function useSkill(id, tdx, tdz) {
   local.cds[id] = time + Math.max(k.cd, 0.3);
   const msg = { t: 'sk', s: id, tid: targetId };
   if (k.kind === 'ground') [msg.x, msg.z] = groundPoint(k.range);
-  if (k.kind === 'strike') {
-    Object.assign(me, { swingT: 0, swingKind: 2 });
-    spawnSlash(me.x, me.z, tdx, tdz, 2);
-  }
+  if (k.kind === 'strike') Object.assign(me, { swingT: 0, swingKind: 2 });   // the blow itself is drawn when the server confirms it
   if (k.kind === 'dash') startDash();
   if (k.kind === 'strike' || k.kind === 'shot' || k.kind === 'bolt') attacking = true;   // an attack skill also starts the auto-attack
   me.sitting = false;
@@ -1059,7 +1016,7 @@ function updateLocal(dt) {
   local.swordCd -= dt;
   local.fireCd -= dt;
   local.invuln -= dt;
-  aoeMarker.visible = false;
+  fx.hideAim();
   me.shootPose -= dt;
 
   let tv = mobViews.get(targetId);
@@ -1128,7 +1085,7 @@ function updateLocal(dt) {
       me.swingT = 0;
       me.swingKind = local.combo;          // combo: left-to-right, right-to-left, overhead chop
       local.combo = (local.combo + 1) % 3;
-      spawnSlash(me.x, me.z, tdx, tdz, me.swingKind);
+      fx.swing(me.x, me.z, tdx, tdz, me.swingKind);
     }
     send({ t: 'a', id: targetId, c: me.swingKind });
     sfx(style.ranged ? 500 : 300, 0.12, 'sawtooth', 0.04, 500);
@@ -1165,9 +1122,7 @@ function updateLocal(dt) {
     me.castT += dt;
     if (s.kind === 'ground') {
       const [gx, gz] = groundPoint(s.range);
-      aoeMarker.visible = true;
-      layOnGround(aoeMarker, gx, gz, s.radius / 2, 0.08);
-      aoeMarker.scale.setScalar(s.radius);
+      fx.aim(me.castSkill, gx, gz, s.radius);
     } else if (NEEDS_TARGET.includes(s.kind) && !tv) {
       me.castT = -1;   // the target is gone: the spell fizzles
     }
@@ -1243,6 +1198,9 @@ function updateViews(dt) {
     v.flash = Math.max(0, v.flash - dt * 6);
     v.skeleton.flash(v.flash);
     v.bar.set(v.hp / v.maxHp, v.hp < v.maxHp);
+    // stunned, asleep or slowed: the marks are made the first time a monster needs them
+    if (v.flags && !v.status) v.status = fx.status(v.root, v.top, v.def.r);
+    v.status?.update(v.flags, time);
   }
 
   // corpses play the death animation, then sink into the ground
@@ -1273,11 +1231,12 @@ function updateViews(dt) {
       const dx = v.x - m.x, dz = v.z - m.z, d = Math.hypot(dx, dz) || 0.001, step = b.speed * dt;
       // it follows the lie of the land, so a rise between the two is flown over, not through
       b.h += (v.top * 0.5 - b.h) * Math.min(1, dt * 8);
-      if (d <= step + v.def.r * 0.6) { done = true; burst(v.x, v.top * 0.5, v.z, b.mesh.material.color.getHex(), 6, 5); }
+      if (d <= step + v.def.r * 0.6) { done = true; fx.hit(b.kind, v.x, v.top * 0.5, v.z, v.def.r); }
       else { m.x += dx / d * step; m.z += dz / d * step; }
       m.y = groundY(m.x, m.z) + b.h;
+      fx.point(b.mesh, v.x, groundY(v.x, v.z) + v.top * 0.5, v.z, dt);
     }
-    if (done) bulletPool.release(b);
+    if (done) fx.drop(b.mesh);
     return !done;
   });
 
@@ -1304,35 +1263,6 @@ function updateViews(dt) {
     f.sprite.position.y += dt * 1.7;
     f.sprite.material.opacity = Math.min(1, (1 - f.t) * 2.5);
     if (f.t >= 1) { disposeSprite(f.sprite); floaters.splice(j, 1); }
-  }
-
-  for (let j = slashes.length - 1; j >= 0; j--) {
-    const s = slashes[j];
-    s.t += dt / 0.2;
-    s.mesh.scale.setScalar(0.85 + s.t * 0.25);
-    // horizontal arcs travel across the front in the direction of the sweep
-    if (s.kind !== 2) s.mesh.rotation.z = s.yaw + (s.kind === 1 ? -1 : 1) * (s.t - 0.5) * 0.9;
-    s.mesh.material.opacity = 0.8 * (1 - s.t);
-    if (s.t >= 1) { scene.remove(s.mesh); s.mesh.material.dispose(); slashes.splice(j, 1); }
-  }
-
-  meteors = meteors.filter((m) => {
-    m.t += dt;
-    const k = Math.min(1, m.t / m.d);
-    m.star.position.set(m.x + (1 - k) * 7, m.y + (1 - k) * 22 + 0.5, m.z - (1 - k) * 4);
-    m.marker.material.opacity = 0.4 + 0.5 * Math.abs(Math.sin(m.t * 25));
-    if (k < 1) return true;
-    scene.remove(m.marker, m.star);
-    m.marker.material.dispose();
-    return false;
-  });
-
-  for (let j = rings.length - 1; j >= 0; j--) {
-    const r = rings[j];
-    r.t += dt / 0.45;
-    r.mesh.scale.setScalar(Math.max(0.01, r.t * r.maxR));
-    r.mesh.material.opacity = 1 - r.t;
-    if (r.t >= 1) { scene.remove(r.mesh); r.mesh.material.dispose(); rings.splice(j, 1); }
   }
 }
 
@@ -1893,6 +1823,7 @@ function tick(dt) {
     me.yaw = Math.sin(time * 0.6) * 0.7;
   }
   updateParticles(dt);
+  fx.update(dt);
   updateAvatar(me, dt, true);
   me.bar.set(0, false);
   me.root.visible = !stats.dead;   // a hit shows as a flinch of the cat (cat.js), not as blinking in and out
@@ -1907,7 +1838,7 @@ function frame() {
 frame();
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, toggleBag, toggleStore, quaff, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, quaff, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
 
 // A play-test, and a page that has reloaded itself for a saved map, go straight in.
 if (autoJoin) {
