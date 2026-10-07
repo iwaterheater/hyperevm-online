@@ -11,12 +11,26 @@
     font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif; user-select: none; }
   canvas#view { display: block; cursor: crosshair; }
 
-  #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s; }
-  #hud.on { opacity: 1; }
+  /* --win-top / --win-h keep the windows clear of the target frame above them and of the action bar below.
+     Hidden for good while it is off: its bar and its buttons take clicks. */
+  #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .3s;
+    --win-top: calc(50% + 8px); --win-h: calc(100vh - 204px); }
+  #hud.on { opacity: 1; visibility: visible; }
   .panel { position: absolute; padding: 10px 14px; background: rgba(6, 24, 21, .6);
     border: 1px solid rgba(127, 232, 214, .25); border-radius: 12px; backdrop-filter: blur(6px); }
   #stats { top: 16px; left: 16px; width: 250px; }
-  #side { top: 16px; right: 16px; width: 172px; text-align: right; }
+  /* the right edge: the info panel with the radar, and under it the strip of window buttons */
+  #right { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  #right .panel { position: relative; }
+  #side { width: 172px; text-align: right; }
+  #menubar { display: flex; flex-direction: column; gap: 6px; padding: 6px; pointer-events: auto; }
+  .mbtn { position: relative; width: 40px; height: 40px; cursor: pointer; color: var(--teal); background: rgba(6, 24, 21, .7);
+    border: 2px solid rgba(127, 232, 214, .3); border-radius: 10px; }
+  .mbtn:hover { filter: brightness(1.3); }
+  .mbtn.on { color: #fff; border-color: #fff; box-shadow: 0 0 14px rgba(127, 232, 214, .8); }   /* its window is open */
+  .mbtn svg { position: absolute; inset: 5px; width: 26px; height: 26px; fill: currentColor; }
+  .mbtn kbd { position: absolute; right: 2px; bottom: 1px; margin: 0; padding: 0; font-size: 9px; line-height: 1; border: 0; background: none;
+    color: #e8fffa; opacity: .75; }
   .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85;
     display: flex; justify-content: space-between; }
   .title { font-size: 17px; font-weight: 800; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -41,7 +55,7 @@
     letter-spacing: .04em; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .8), 0 0 24px rgba(127, 232, 214, .9); opacity: 0;
     transition: opacity .4s; }
   #banner.on { opacity: 1; }
-  #shop { position: absolute; bottom: 150px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
+  #shop { position: absolute; bottom: 92px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
     border-radius: 999px; background: rgba(6, 24, 21, .75); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold);
     display: none; }
   #cast { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); width: 150px; height: 10px; display: none;
@@ -54,27 +68,41 @@
   #drawFill::after { content: ''; position: absolute; right: -7px; top: 50%; transform: translateY(-50%);
     border-left: 9px solid #fff6d0; border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
   #draw::before { content: ''; position: absolute; left: -5px; top: -4px; bottom: -4px; width: 3px; border-radius: 2px; background: var(--gold); }
-  #skills { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
-  .skill { position: relative; width: 78px; height: 78px; padding: 9px 2px 0; line-height: 1.1; text-align: center; font-size: 12px; overflow: hidden;
-    background: rgba(6, 24, 21, .7); border: 2px solid rgba(127, 232, 214, .3); border-radius: 12px; }
-  .skill.active { border-color: #fff; box-shadow: 0 0 16px rgba(127, 232, 214, .8); }
-  .skill .icon { display: block; width: 22px; height: 22px; margin: 5px auto 4px; border-radius: 50%; }
-  .skill .icon { background: radial-gradient(#fff, var(--tint, var(--teal))); box-shadow: 0 0 10px var(--tint, var(--teal)); }
-  .skill .mp { position: absolute; top: 3px; right: 5px; font-size: 10px; color: #a9c8ff; }
-  .skill.dim { opacity: .5; }
-  .skill kbd { position: absolute; top: 3px; left: 4px; margin: 0; padding: 0 5px; font-size: 11px; }
-  .skill .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
-  .skill .time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; }
+  /* the action bar: ten slots in the middle of the lower edge, the Attack button to the left of them */
+  #actionbar { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
+  #attackBtn { position: absolute; right: calc(100% + 12px); top: 0; }
+  .act { position: relative; flex: none; width: 64px; height: 64px; padding: 16px 1px 0; line-height: 1.08; text-align: center; font-size: 9.5px;
+    letter-spacing: -.1px; overflow: hidden; cursor: pointer; background: rgba(6, 24, 21, .7); border: 2px solid rgba(127, 232, 214, .3); border-radius: 12px; }
+  .act:hover { filter: brightness(1.25); }
+  .act.empty { cursor: default; background: rgba(6, 24, 21, .45); border-color: rgba(127, 232, 214, .16); }
+  .act.item { color: var(--tint); border-color: var(--tint); box-shadow: inset 0 0 16px -5px var(--tint); }
+  .act.active { border-color: #fff; box-shadow: 0 0 16px rgba(127, 232, 214, .8); }
+  .act.drop { border-color: var(--gold); box-shadow: 0 0 14px rgba(255, 215, 106, .8); }   /* what is dragged would land here */
+  .act.dim { opacity: .5; }                          /* not enough mana, or none of the item left */
+  .act.off { opacity: .4; border-style: dashed; }    /* a skill this character has not learned */
+  .act .icon, .sk .icon { display: block; width: 20px; height: 20px; margin: 0 auto 2px; border-radius: 50%; flex: none;
+    background: radial-gradient(#fff, var(--tint, var(--teal))); box-shadow: 0 0 10px var(--tint, var(--teal)); }
+  .act svg { position: absolute; left: 15px; top: 17px; width: 30px; height: 30px; fill: currentColor; }
+  .act .mp { position: absolute; top: 3px; right: 5px; font-size: 10px; color: #a9c8ff; }
+  .act .n { position: absolute; right: 5px; bottom: 2px; font-size: 12px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
+  .act kbd { position: absolute; top: 3px; left: 4px; margin: 0; padding: 0 5px; font-size: 11px; line-height: 1.2; }
+  .act .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
+  .act .time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800; color: #fff; }
+  /* what is being dragged onto the bar follows the cursor */
+  #ghost { position: fixed; z-index: 6; margin: -32px 0 0 -32px; pointer-events: none; opacity: .9; transform: scale(.85);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .6); }
   #buffs { position: absolute; top: 188px; left: 16px; display: flex; gap: 6px; font-size: 12px; }
   #buffs span { padding: 3px 8px; border-radius: 999px; background: rgba(6, 24, 21, .7); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold); }
 
   /* skills window */
-  #book { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, 94vw); max-height: 78vh; display: none;
-    flex-direction: column; padding: 16px 18px; pointer-events: auto; overflow: hidden; }
-  #book.on { display: flex; }
-  #book h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
-  #book .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
-  #bookList { overflow-y: auto; padding-right: 6px; }
+  #book, #help { position: absolute; top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(560px, 94vw); max-height: var(--win-h);
+    display: none; flex-direction: column; padding: 16px 18px; pointer-events: auto; overflow: hidden; }
+  #book.on, #help.on { display: flex; }
+  #book h2, #help h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
+  #book .sub, #help .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
+  #bookList, #helpList { overflow-y: auto; padding-right: 6px; }
+  .sk .icon { width: 22px; height: 22px; margin: 0; }
+  .sk .grab { cursor: grab; }   /* a learned skill can be dragged onto the action bar */
   .sk { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(127, 232, 214, .15); }
   .sk .info { flex: 1; min-width: 0; }
   .sk .name { font-weight: 800; }
@@ -88,9 +116,8 @@
   .prof div span { flex: 1; opacity: .85; }
 
   /* character status window */
-  #sheet { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(400px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
+  #sheet { position: absolute; top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(400px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
   #sheet.on { display: block; }
-  #hud.bagOpen #sheet { transform: translate(calc(-100% - 8px), -50%); }   /* beside the inventory, which opens to the right of the middle */
   #sheet h2 { margin: 0; font-size: 20px; color: var(--teal); }
   #sheet .sub { font-size: 13px; opacity: .8; }
   #sheet h3 { margin: 12px 0 4px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85; }
@@ -100,30 +127,64 @@
   #sheet .cell b.up { color: var(--gold); }
   #sheet .cell small.eq { margin-right: 6px; font-weight: 400; color: #8ee68e; }   /* what the equipment adds to the value */
 
-  /* item tiles: the bag, the paper doll, the Trader's list */
-  .slot { position: relative; flex: none; width: 52px; height: 52px; overflow: hidden; border-radius: 10px; background: rgba(255, 255, 255, .05);
-    border: 2px solid rgba(127, 232, 214, .16); }
-  .slot.full { cursor: pointer; color: var(--tint); border-color: var(--tint); background: rgba(6, 24, 21, .8); box-shadow: inset 0 0 16px -5px var(--tint); }
+  /* item tiles: the bag, the paper doll, the Trader's list. Small square cells with a thin bevelled edge. */
+  .slot { position: relative; flex: none; width: 40px; height: 40px; overflow: hidden; border-radius: 5px; background: rgba(2, 10, 9, .55);
+    border: 1px solid rgba(127, 232, 214, .2); box-shadow: inset 1px 1px 0 rgba(255, 255, 255, .07), inset -1px -1px 0 rgba(0, 0, 0, .55); }
+  .slot.full { cursor: pointer; color: var(--tint); border-color: var(--tint); background: rgba(6, 24, 21, .85);
+    box-shadow: inset 0 0 12px -4px var(--tint), inset 1px 1px 0 rgba(255, 255, 255, .1), inset -1px -1px 0 rgba(0, 0, 0, .55); }
   .slot.full:hover { filter: brightness(1.3); }
   .slot.bad { border-style: dashed; opacity: .6; }   /* this character cannot wear it */
-  .slot svg { position: absolute; inset: 8px; width: 32px; height: 32px; fill: currentColor; }
-  .slot .n { position: absolute; right: 4px; bottom: 1px; font-size: 12px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
-  .slot .tag { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; letter-spacing: .06em;
-    text-transform: uppercase; opacity: .45; }
+  .slot svg { position: absolute; inset: 6px; width: 26px; height: 26px; fill: currentColor; }
+  .slot.hollow svg { color: var(--teal); opacity: .2; }   /* an empty equipment slot: the outline of what belongs there */
+  .slot .n { position: absolute; right: 3px; bottom: 0; font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
   .slot .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
 
-  /* inventory: to the right of the middle, so that the Trader's window fits beside it */
-  #bag { top: 50%; left: 50%; transform: translate(8px, -50%); display: none; padding: 16px 18px; pointer-events: auto; }
+  /* inventory: three parts side by side - the character's numbers, the paper doll, the bag */
+  #bag { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); display: none; padding: 12px; pointer-events: auto; }
   #bag.on { display: block; }
   #bag h2, #store h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
-  #bag .sub, #store .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
-  #bag .foot { max-width: 530px; margin: 10px 0 0; font-size: 12px; }
-  #bagBody { display: flex; gap: 18px; align-items: center; }
-  #doll { display: grid; gap: 6px; grid-template-areas: ". head ." "weapon body hands" ". feet ."; }
-  #bagGrid { display: grid; gap: 6px; grid-template-columns: repeat(6, 52px); }
+  #bag h2 { margin-bottom: 8px; font-size: 17px; }
+  #store .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
+  #bagBody { display: flex; gap: 8px; align-items: stretch; }
+  #bagBody > div { padding: 6px; border-radius: 8px; background: rgba(2, 10, 9, .4); border: 1px solid rgba(127, 232, 214, .12); }
+  /* the numbers of the status window, one value a row */
+  #bagStats { width: 160px; font-size: 12px; }
+  #bagStats .who { font-size: 14px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bagStats .sub { margin-bottom: 4px; font-size: 11px; opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bagStats h3 { margin: 6px 0 1px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bagStats h3.try { color: var(--gold); opacity: 1; }   /* the numbers below are what the item under the cursor would make them */
+  #bagStats .grid { display: grid; grid-template-columns: 1fr; }
+  #bagStats .grid.two { grid-template-columns: 1fr 1fr; column-gap: 12px; }
+  #bagStats .cell { display: flex; justify-content: space-between; line-height: 16px; border-bottom: 1px solid rgba(127, 232, 214, .1); white-space: nowrap; }
+  #bagStats .cell span { opacity: .8; }
+  #bagStats .cell b.up { color: var(--gold); }
+  #bagStats .cell b.good, #bagStats .cell b.good small { color: #8ee68e; }
+  #bagStats .cell b.bad, #bagStats .cell b.bad small { color: #ff8095; }
+  #bagStats .cell small { margin-right: 5px; font-weight: 400; }
+  #bagStats .cell small.eq { color: #8ee68e; }
+  /* the paper doll: the cat itself between its equipment slots - armour down the left, the weapon by its paw */
+  #doll { display: flex; gap: 6px; align-items: center; }
+  #doll .col { display: flex; flex-direction: column; gap: 8px; }
+  #dollStage { position: relative; align-self: stretch; width: 132px; min-height: 200px; overflow: hidden; border-radius: 6px;
+    background: radial-gradient(ellipse at 50% 62%, rgba(127, 232, 214, .2), rgba(2, 10, 9, .75) 72%); }
+  #dollView { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }   /* drag to turn the cat */
+  /* the bag: filter tabs and the count above the grid, the gold below it */
+  #bagSide { display: flex; flex-direction: column; }
+  #bagTop { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
+  #bagTabs { display: flex; gap: 3px; }
+  #bagTabs button { padding: 3px 9px; font-size: 11px; font-weight: 700; color: #e8fffa; background: rgba(255, 255, 255, .1); border-radius: 5px;
+    box-shadow: none; }
+  #bagTabs button:hover { transform: none; filter: brightness(1.3); }
+  #bagTabs button.on { color: #04211c; background: var(--teal); }
+  #bagCount { opacity: .85; }
+  #bagGrid { display: grid; gap: 3px; grid-template-columns: repeat(6, 40px); }
+  #bagFoot { display: flex; justify-content: space-between; align-items: baseline; margin-top: 7px; font-size: 12px; }
+  #bagFoot b { color: var(--gold); }
+  #bagHint { width: 252px; margin-top: auto; padding-top: 6px; font-size: 11px; line-height: 1.3; opacity: .7; }
 
-  /* the Trader's shop: to the left of the middle */
-  #store { top: 50%; left: 50%; transform: translate(calc(-100% - 8px), -50%); width: min(440px, 46vw); max-height: 78vh; display: none;
+  /* the Trader's shop */
+  #store { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(440px, 46vw); max-height: var(--win-h); display: none;
     flex-direction: column; padding: 16px 18px; pointer-events: auto; overflow: hidden; }
   #store.on { display: flex; }
   #storeTabs { display: flex; gap: 8px; margin-bottom: 6px; }
@@ -132,11 +193,20 @@
   #storeList { overflow-y: auto; padding-right: 6px; }
   #storeList button:disabled { background: rgba(255, 255, 255, .15); color: rgba(255, 255, 255, .5); cursor: default; transform: none; }
 
-  /* a window too narrow for two panels around its middle: they keep to its edges instead */
-  @media (max-width: 1250px) {
-    #bag { left: auto; right: 8px; transform: translateY(-50%); }
-    #store, #hud.bagOpen #sheet { left: 8px; transform: translateY(-50%); }
+  /* A window in the middle fits between the chat and the radar. Two side by side - the inventory to the right of the
+     middle, the Trader's list or the status window to the left of it - need a wide screen; on a narrower one main.js
+     shows one window at a time (PAIRS there is this same width). */
+  @media (min-width: 1820px) {
+    #bag { transform: translate(8px, -50%); }
+    #store, #hud.bagOpen #sheet { transform: translate(calc(-100% - 8px), -50%); }
   }
+
+  /* help: every control, a row each */
+  #helpList { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: baseline; font-size: 13px; }
+  #helpList h3 { grid-column: 1 / -1; margin: 8px 0 0; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85; }
+  #helpList h3:first-child { margin-top: 0; }
+  #helpList kbd { margin: 0 2px 0 0; padding: 1px 7px; }
+  #helpList span { opacity: .9; }
 
   /* item tooltip */
   #tip { display: none; width: 250px; padding: 10px 12px; font-size: 13px; line-height: 1.35; background: rgba(4, 16, 14, .94); pointer-events: none; z-index: 5; }
@@ -156,19 +226,18 @@
   .classes button.on { border-color: var(--teal); box-shadow: 0 0 18px rgba(127, 232, 214, .45); }
   .classes b { display: block; font-size: 17px; color: var(--teal); }
   .classes small { font-size: 12px; font-weight: 400; opacity: .85; }
-  #hint { position: absolute; bottom: 14px; left: 16px; right: 16px; text-align: center; font-size: 12px; opacity: .85;
-    text-shadow: 0 1px 3px #000; }
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
     background: radial-gradient(transparent 40%, rgba(255, 60, 110, .55)); transition: opacity .25s; }
 
-  /* dev bar: only for whoever may edit the map. It sits above the band of the skill bar, which grows towards it */
-  #devbar { right: 16px; bottom: 150px; display: none; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; font-size: 13px;
+  /* dev bar: only for whoever may edit the map. It sits above the band of the action bar */
+  #devbar { right: 16px; bottom: 92px; display: none; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; font-size: 13px;
     white-space: nowrap; }
   #devbar.on { display: flex; }
-  #devPos { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }   /* a region name may be 48 characters long */
+  /* a region name may be 48 characters long: it is cut where the bar would reach under a window in the middle */
+  #devPos { max-width: min(320px, 14vw); overflow: hidden; text-overflow: ellipsis; }
   #devbar button { padding: 6px 14px; font-size: 13px; box-shadow: none; }
 
-  #chat { position: absolute; left: 16px; bottom: 150px; width: min(380px, 60vw); font-size: 13px; }
+  #chat { position: absolute; left: 16px; bottom: 92px; width: min(380px, 20vw); font-size: 13px; }
   #chatLog div { padding: 1px 0; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
   #chatLog .sys { color: var(--teal); opacity: .8; }
   #chatLog b { color: var(--gold); }
@@ -214,12 +283,15 @@
     <div class="label"><span>Experience</span><span id="xpText"></span></div>
     <div class="bar"><i id="xpFill"></i></div>
   </div>
-  <div class="panel" id="side">
-    <div class="row"><span>Gold</span><b id="gold">0</b></div>
-    <div class="row"><span>Skill points</span><b id="sp">0</b></div>
-    <div class="row"><span>Weapon</span><b id="weapon">Lv 1</b></div>
-    <div class="row"><span>Online</span><b id="online">1</b></div>
-    <canvas id="minimap" width="288" height="288"></canvas>
+  <div id="right">
+    <div class="panel" id="side">
+      <div class="row"><span>Gold</span><b id="gold">0</b></div>
+      <div class="row"><span>Skill points</span><b id="sp">0</b></div>
+      <div class="row"><span>Weapon</span><b id="weapon">Lv 1</b></div>
+      <div class="row"><span>Online</span><b id="online">1</b></div>
+      <canvas id="minimap" width="288" height="288"></canvas>
+    </div>
+    <div class="panel" id="menubar"></div>
   </div>
   <div class="panel" id="target">
     <div class="title" id="tgName"></div>
@@ -232,7 +304,7 @@
   <div id="cast"><i id="castFill"></i></div>
   <div id="draw"><i id="drawFill"></i></div>
   <div id="buffs"></div>
-  <div id="skills"></div>
+  <div id="actionbar"></div>
   <div class="panel" id="sheet">
     <h2 id="sheetTitle"></h2>
     <div class="sub" id="sheetSub"></div>
@@ -251,14 +323,53 @@
   </div>
   <div class="panel" id="bag">
     <h2>Inventory</h2>
-    <div class="sub" id="bagSub"></div>
-    <div id="bagBody"><div id="doll"></div><div id="bagGrid"></div></div>
-    <div class="sub foot">Click an item to wear or drink it · click a worn item to take it off · right-click an item twice to destroy it</div>
+    <div id="bagBody">
+      <div id="bagStats"></div>
+      <div id="doll"><div class="col" id="dollLeft"></div><div id="dollStage"><canvas id="dollView"></canvas></div><div class="col" id="dollRight"></div></div>
+      <div id="bagSide">
+        <div id="bagTop">
+          <div id="bagTabs"><button data-tab="all">All</button><button data-tab="gear">Gear</button><button data-tab="potion">Potions</button></div>
+          <span id="bagCount"></span>
+        </div>
+        <div id="bagGrid"></div>
+        <div id="bagFoot"><span>Gold</span><b id="bagGold"></b></div>
+        <div id="bagHint">Click to wear or drink · click a worn item to take it off · drag onto the action bar · right-click twice to destroy</div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="help">
+    <h2>Controls</h2>
+    <div class="sub">Everything the keyboard and the mouse do. <kbd>H</kbd> or <kbd>F1</kbd> closes this window.</div>
+    <div id="helpList">
+      <h3>Moving and looking</h3>
+      <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows</div><span>Move, relative to the camera</span>
+      <div><kbd>Space</kbd></div><span>Jump; once more in the air for a double jump</span>
+      <div><kbd>X</kbd></div><span>Sit down to rest: health and mana come back much faster</span>
+      <div><kbd>RMB</kbd> drag / wheel</div><span>Turn the camera / zoom</span>
+      <h3>Fighting</h3>
+      <div><kbd>Click</kbd> / <kbd>Tab</kbd></div><span>Select a monster / the next nearest one</span>
+      <div><kbd>F</kbd></div><span>Attack the target and keep hitting it; so does a click on the selected monster, or a right click on any</span>
+      <div><kbd>1</kbd> – <kbd>9</kbd>, <kbd>0</kbd></div><span>The ten slots of the action bar: cast the skill, drink the potion or wear the gear in the slot</span>
+      <div><kbd>Shift</kbd></div><span>Dash, once the Rogue has learned Shadow Step</span>
+      <div><kbd>Esc</kbd></div><span>Close the open window, else clear the target</span>
+      <h3>Action bar</h3>
+      <div>Drag</div><span>A learned skill from the skill book, or an item from the inventory, onto a slot. Drag a slot onto another to swap them</span>
+      <div>Right click</div><span>Clear a slot; so does dragging it off the bar</span>
+      <h3>Windows</h3>
+      <div><kbd>C</kbd></div><span>Character: attributes and combat stats</span>
+      <div><kbd>I</kbd></div><span>Inventory: the bag and what the cat wears</span>
+      <div><kbd>K</kbd></div><span>Skill book; next to the Sage it sells skills and professions</span>
+      <div><kbd>T</kbd></div><span>Trade, next to the Trader</span>
+      <div><kbd>B</kbd></div><span>Buy a weapon upgrade, next to the Blacksmith</span>
+      <div><kbd>H</kbd> / <kbd>F1</kbd></div><span>This window</span>
+      <h3>Other</h3>
+      <div><kbd>Enter</kbd></div><span>Open the chat, send the message</span>
+      <div><kbd>M</kbd></div><span>Sound on and off</span>
+    </div>
   </div>
   <div class="panel" id="tip"></div>
   <div id="shop"></div>
   <div class="panel" id="devbar"><span id="devPos"></span><button id="editBtn">Edit here</button></div>
-  <div id="hint">WASD — move · click / Tab — target · F — attack · 1–8 — skills · Q / E — potions · I — inventory · K — skills · C — character · X — sit · RMB / wheel — camera · Space — jump · Enter — chat · B — Blacksmith · T — Trader</div>
 </div>
 <div id="flash"></div>
 
@@ -269,14 +380,14 @@
     <div><kbd>WASD</kbd>move</div>
     <div><kbd>Click</kbd>target</div>
     <div><kbd>F</kbd>attack</div>
-    <div><kbd>1–8</kbd>skills</div>
+    <div><kbd>1–0</kbd>action bar</div>
     <div><kbd>K</kbd>skill book</div>
     <div><kbd>I</kbd>inventory</div>
-    <div><kbd>Q</kbd><kbd>E</kbd>potions</div>
     <div><kbd>C</kbd>character</div>
     <div><kbd>X</kbd>sit</div>
     <div><kbd>RMB</kbd>camera</div>
     <div><kbd>Enter</kbd>chat</div>
+    <div><kbd>H</kbd>all controls</div>
   </div>
   <div class="classes" id="classes"></div>
   <input id="nameInput" maxlength="16" placeholder="Cat name" autocomplete="off">

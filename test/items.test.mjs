@@ -8,6 +8,7 @@ import {
   ITEMS, ITEM_KEYS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_KEYS, BONUS_NAMES, WEAPON_FAMILIES, heldFamily, fightStyle, MELEE_REACH, BOW_REACH, BAG_SIZE, STACK_MAX, SELL_RATE, SHOP, SHOP_TIER,
   STARTER_KIT, itemOf, stackMax, sellPrice, weaponFamily, equipError, equipBonus, roomFor, addItem, takeItem, cleanBag, cleanEquip,
   lookCode, lookOf, gearChance, tierForLevel, rollLoot, chestLoot, POTION_CHANCE,
+  SKILLS, SKILL_KEYS, activeSkills, BAR_SIZE, barSkill, cleanBar, defaultBar, barAdd,
 } from '../src/shared.js';
 
 // A stand-in for Math.random that hands out the given numbers in turn, then `rest` for ever.
@@ -177,6 +178,70 @@ test('a save file: an old one without items, a broken one and one with unknown i
   assert.ok(STARTER_KIT[0][1] > 0, 'a bag never shares its stacks with what it was made from');
   assert.deepEqual(cleanEquip({ weapon: 'iron_staff', head: 'iron_body', body: 'steel_body', hands: 'nothing', feet: 7, tail: 'iron_feet' }),
     { weapon: 'iron_staff', head: null, body: 'steel_body', hands: null, feet: null });
+});
+
+// ---------------------------------------------------------------- the action bar
+
+test('the action bar: ten slots, and an id says by itself whether it is a skill or an item', () => {
+  assert.equal(BAR_SIZE, 10);
+  for (const id of SKILL_KEYS) assert.equal(itemOf(id), undefined, `${id} is a skill and an item`);
+  for (const id of SKILL_KEYS) assert.equal(!!barSkill(id), SKILLS[id].kind !== 'passive', id);
+  for (const id of ['constructor', '__proto__', 'hp_small', '', 7, null, undefined, ['bolt'], {}]) assert.equal(barSkill(id), undefined);
+  // no class line has more active skills than the bar has room for beside the two potions
+  for (const cls of CLASS_KEYS) {
+    const all = Object.fromEntries(SKILL_KEYS.map((id) => [id, 1]));
+    assert.ok(activeSkills(cls, all).length <= BAR_SIZE - 2, cls);
+  }
+});
+
+test('cleanBar: always ten slots; whatever is not an active skill or an item is an empty slot', () => {
+  const EMPTY = Array(BAR_SIZE).fill(null);
+  for (const junk of [undefined, null, 'bolt', 7, {}, { 0: 'bolt', length: 1 }, []]) assert.deepEqual(cleanBar(junk), EMPTY);
+  assert.deepEqual(
+    cleanBar(['bolt', 'hp_small', null, 'mana_mastery', 'no_such_thing', 'constructor', 7, ['bolt'], { id: 'bolt' }, 'iron_sword', 'fireball', 'mp_large']),
+    ['bolt', 'hp_small', null, null, null, null, null, null, null, 'iron_sword'],
+    'a passive skill, an unknown id, a number, a list and an object are dropped, and so is an eleventh slot',
+  );
+  assert.deepEqual(cleanBar(['bolt']), ['bolt', ...EMPTY.slice(1)], 'a short list is filled up');
+  assert.deepEqual(cleanBar(['mend', 'mend', 'hp_small', 'hp_small']).slice(0, 4), ['mend', 'mend', 'hp_small', 'hp_small'], 'the same thing may stand in two slots');
+  // a skill of another class and an item the character does not own stay: the slot says so, the bar keeps its shape
+  assert.deepEqual(cleanBar(['backstab', 'hypurr_bow']).slice(0, 2), ['backstab', 'hypurr_bow']);
+  const sparse = []; sparse[9] = 'mp_small';
+  assert.deepEqual(cleanBar(sparse), [...EMPTY.slice(1), 'mp_small']);
+  const bar = cleanBar(['bolt']);
+  assert.deepEqual(cleanBar(bar), bar, 'a clean bar stays as it is');
+  assert.notEqual(cleanBar(bar), bar, 'and is a list of its own');
+});
+
+test('defaultBar: the learned skills from the first slot on, a health and a mana potion on the last two', () => {
+  assert.deepEqual(defaultBar('fighter', { power_strike: 1 }), ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+  // passive skills and skills not learned yet take no slot; the order is that of the skill table
+  assert.deepEqual(
+    defaultBar('wizard', { fireball: 1, bolt: 3, mana_mastery: 2, mend: 1, inferno: 0 }).slice(0, 4),
+    ['bolt', 'mend', 'fireball', null],
+  );
+  // the potions are the kind the character carries: the first of each in its bag, else the lesser one
+  assert.deepEqual(defaultBar('mystic', { bolt: 1 }, [['iron_sword', 1], ['mp_large', 2], ['hp_large', 1], ['hp_small', 9]]).slice(8), ['hp_large', 'mp_large']);
+  assert.deepEqual(defaultBar('mystic', {}, [['mp_small', 2]]), [null, null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+  // the class with the most skills fills the bar exactly
+  const all = Object.fromEntries(SKILL_KEYS.map((id) => [id, 1])), cleric = defaultBar('cleric', all);
+  assert.deepEqual(cleric.slice(0, 8), activeSkills('cleric', all));
+  assert.equal(cleric.length, BAR_SIZE);
+  for (const cls of CLASS_KEYS) assert.deepEqual(cleanBar(defaultBar(cls, all)), defaultBar(cls, all), cls);
+});
+
+test('barAdd: a newly learned skill takes the first empty slot, once', () => {
+  const bar = cleanBar(['bolt', null, 'hp_small', null]);
+  assert.equal(barAdd(bar, 'mend'), true);
+  assert.deepEqual(bar.slice(0, 4), ['bolt', 'mend', 'hp_small', null]);
+  assert.equal(barAdd(bar, 'mend'), false, 'it is on the bar already');
+  assert.equal(barAdd(bar, 'mana_mastery'), false, 'a passive skill has nothing to press');
+  assert.equal(barAdd(bar, 'no_such_skill'), false);
+  assert.equal(barAdd(bar, 'hp_large'), false, 'only skills are slotted for the player');
+  assert.deepEqual(bar.slice(0, 4), ['bolt', 'mend', 'hp_small', null]);
+  const full = cleanBar(Array(BAR_SIZE).fill('hp_small'));
+  assert.equal(barAdd(full, 'bolt'), false, 'a full bar stays as the player arranged it');
+  assert.ok(!full.includes('bolt'));
 });
 
 // ---------------------------------------------------------------- the look

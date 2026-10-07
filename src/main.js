@@ -9,9 +9,9 @@ import { createFx } from './fx.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
-  professionsOf, SKILLS, skillsFor, hotbar, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
+  professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
-  weaponFamily, heldFamily, fightStyle, equipError, lookCode, lookOf,
+  weaponFamily, heldFamily, fightStyle, equipError, lookCode, lookOf, BAR_SIZE,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
@@ -413,10 +413,11 @@ me.x = joinAt ? joinAt[0] : map.start.x;
 me.z = joinAt ? joinAt[1] : map.start.z;
 if (joinAt) world.snapMood(me.x, me.z);
 camera.position.set(me.x, groundY(me.x, me.z) + 1.2, me.z + 0.4);   // the opening shot starts close to the cat and pulls back
-// inv: the bag, a list of [item id, count]; eq: what is worn, by slot. The server sends both only when they change.
+// inv: the bag, a list of [item id, count]; eq: what is worn, by slot; bar: the action bar, a skill id, an item id or
+// null per slot. The server sends the three only when they change.
 const stats = {
   hp: 100, maxHp: 100, mp: 60, maxMp: 60, xp: 0, sp: 0, level: 1, gold: 0, weapon: 1, cls: 'fighter', skills: {}, buffs: [], dead: false,
-  inv: [], eq: {},
+  inv: [], eq: {}, bar: Array(BAR_SIZE).fill(null),
 };
 // every derived stat of this character (P.Atk, Atk.Spd, Speed...), recomputed whenever the server state changes
 let sheet = statsOf('fighter', 1);
@@ -803,6 +804,9 @@ function onEvent(ev) {
 
 const keys = new Set();
 const fresh = new Set();   // keys pressed since the last frame, so warnings show once per press
+const taps = new Set();    // keys "pressed" by a click on a slot of the action bar: held for one frame
+// the keys of the action bar, slot by slot: 1 - 9, then 0
+const BAR_KEYS = '1234567890', BAR_CODES = [...BAR_KEYS].map((d) => `Digit${d}`);
 const mouse = new THREE.Vector2(0, -0.3);
 const typing = () => document.activeElement === $('chatInput') || document.activeElement === $('nameInput');
 
@@ -880,7 +884,7 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (state !== 'playing') return;
-  if (e.code === 'Tab') e.preventDefault();
+  if (e.code === 'Tab' || e.code === 'F1') e.preventDefault();   // F1 is the browser's own help
   if (e.repeat) return;
   keys.add(e.code);
   fresh.add(e.code);
@@ -890,7 +894,8 @@ addEventListener('keydown', (e) => {
     if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
   }
   if (e.code === 'Escape') {
-    if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false); else if (bookOpen) toggleBook(); else if (sheetOpen) toggleSheet();
+    if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
+    else if (bookOpen) toggleBook(false); else if (sheetOpen) toggleSheet(false);
     else setTarget(0, false);
   }
   if (e.code === 'KeyF') attackKey();
@@ -900,12 +905,11 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyB') send({ t: 'b' });
   if (e.code === 'KeyI') toggleBag();
   if (e.code === 'KeyT') tradeKey();
-  if (e.code === 'KeyQ') quaff('hp');
-  if (e.code === 'KeyE') quaff('mp');
+  if (e.code === 'KeyH' || e.code === 'F1') toggleHelp();
   if (e.code === 'KeyM') muted = !muted;
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
-addEventListener('blur', () => { keys.clear(); cam.drag = null; });
+addEventListener('blur', () => { keys.clear(); cam.drag = null; endDrag(); });
 addEventListener('mousemove', (e) => {
   mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   if (!cam.drag) return;
@@ -1013,6 +1017,13 @@ function useSkill(id, tdx, tdz) {
   send(msg);
 }
 
+// The end of a frame's input: what was pressed since the last frame has been seen, and a click on a slot is let go.
+function clearPresses() {
+  for (const code of taps) keys.delete(code);
+  taps.clear();
+  fresh.clear();
+}
+
 function updateLocal(dt) {
   local.swordCd -= dt;
   local.fireCd -= dt;
@@ -1022,7 +1033,7 @@ function updateLocal(dt) {
 
   let tv = mobViews.get(targetId);
   if (targetId && (!tv || tv.killed)) { setTarget(0, false); tv = null; }   // the target died or walked out of view
-  if (stats.dead) { me.speed = 0; me.castT = -1; me.drawT = -1; me.sitting = false; attacking = false; fresh.clear(); return; }
+  if (stats.dead) { me.speed = 0; me.castT = -1; me.drawT = -1; me.sitting = false; attacking = false; clearPresses(); return; }
   const cls = CLASSES[stats.cls], style = fightStyle(stats.cls, heldFamily(stats.cls, stats.eq));   // a bow shoots, whoever holds it
 
   // where area skills will land: the terrain under the cursor (the last such point while the cursor is on the sky)
@@ -1108,18 +1119,21 @@ function updateLocal(dt) {
     }
   }
 
-  // skills on keys 1-8; Shift is a shortcut for a dash skill
-  const bar = hotbar(stats.cls, stats.skills);
+  // The action bar, keys 1 - 9 and 0. An item is used once per press; a skill is tried for as long as its key is held,
+  // so a held key casts again when the cooldown ends. Shift is a shortcut for a dash skill.
+  const learned = activeSkills(stats.cls, stats.skills);
+  BAR_CODES.forEach((code, i) => { if (fresh.has(code) && ITEMS[stats.bar[i]]) useBarItem(stats.bar[i]); });
   if (me.castT < 0 && local.fireCd <= 0 && local.dashT <= 0) {
     let pick = null, code = '';
-    for (let i = 0; i < bar.length && !pick; i++) if (keys.has(`Digit${i + 1}`)) { pick = bar[i]; code = `Digit${i + 1}`; }
-    if (!pick && bar.includes('shadow_step')) {
+    for (let i = 0; i < BAR_SIZE && !pick; i++) if (keys.has(BAR_CODES[i]) && SKILLS[stats.bar[i]]) { pick = stats.bar[i]; code = BAR_CODES[i]; }
+    if (!pick && learned.includes('shadow_step')) {
       for (const c of ['ShiftLeft', 'ShiftRight']) if (keys.has(c)) { pick = 'shadow_step'; code = c; }
     }
     if (pick) {
       const s = SKILLS[pick], targeted = NEEDS_TARGET.includes(s.kind);
       const warn = (text) => { if (fresh.has(code)) notice(text); };
-      if ((local.cds[pick] || 0) > time) warn(`${s.name} is not ready yet`);
+      if (!learned.includes(pick)) warn(`You have not learned ${s.name}`);
+      else if ((local.cds[pick] || 0) > time) warn(`${s.name} is not ready yet`);
       else if (stats.mp < s.mp) warn('Not enough mana');
       else if (targeted && !tv) warn('Select a target first');
       else if (s.kind === 'strike' && !inReach) attacking = true;   // run up to the target first; the skill fires on arrival
@@ -1150,7 +1164,7 @@ function updateLocal(dt) {
       useSkill(me.castSkill, tdx, tdz);
     }
   }
-  fresh.clear();
+  clearPresses();
 
   // The cat faces its target while fighting it, the landing spot while casting an area skill, and otherwise where it is going.
   const casting = me.castT >= 0 ? SKILLS[me.castSkill].kind : '';
@@ -1283,47 +1297,178 @@ function updateViews(dt) {
   }
 }
 
-// ---------------------------------------------------------------- skill bar & skill book
+// ---------------------------------------------------------------- action bar & skill book
 
-const TINT = { strike: '#ffb3b3', shot: '#ffe9a6', bolt: '#7fe8d6', ground: '#ffa040', heal: '#8ee68e', buff: '#ffd76a', taunt: '#ff6b6b', sleep: '#c9a6ff', dash: '#cfd8dc', revive: '#ffffff' };
+const TINT = { strike: '#ffb3b3', shot: '#ffe9a6', bolt: '#7fe8d6', ground: '#ffa040', heal: '#8ee68e', buff: '#ffd76a', taunt: '#ff6b6b', sleep: '#c9a6ff', dash: '#cfd8dc', revive: '#ffffff', passive: '#8fa8a2' };
 const FX_TINT = { frost: '#a9d8ff', fire: '#ffa040', arrow: '#ffe9a6' };
+const skillTint = (id) => FX_TINT[SKILLS[id].fx] || TINT[SKILLS[id].kind];
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-
-// The bar is rebuilt only when the set of learned active skills changes.
-let barKey = null, barSlots = [], attackSlot = null, potionSlots = [];
-function renderBar(bar) {
-  const key = bar.join(',');
-  if (key === barKey) return;
-  barKey = key;
-  const root = $('skills');
-  root.replaceChildren();
-  attackSlot = el('div', 'skill');
-  attackSlot.append(el('kbd', '', 'F'), el('i', 'icon'), 'Attack');
-  attackSlot.querySelector('.icon').style.setProperty('--tint', '#cfd8e0');
-  root.append(attackSlot);
-  barSlots = bar.map((id, i) => {
-    const k = SKILLS[id], slot = el('div', 'skill');
-    const icon = el('i', 'icon'), cd = el('i', 'cd'), left = el('span', 'time');
-    icon.style.setProperty('--tint', FX_TINT[k.fx] || TINT[k.kind]);
-    slot.append(el('kbd', '', String(i + 1)), el('span', 'mp', String(k.mp)), icon, k.name, cd, left);
-    root.append(slot);
-    return { id, k, slot, cd, left };
-  });
-  // the two potion keys close the bar: how many potions of each kind are left, and the cooldown they share
-  potionSlots = POTION_KEYS.map(([kind, key, label, tint]) => {
-    const slot = el('div', 'skill'), icon = el('i', 'icon'), count = el('span', 'mp'), cd = el('i', 'cd'), left = el('span', 'time');
-    icon.style.setProperty('--tint', tint);
-    slot.append(el('kbd', '', key), count, icon, label, cd, left);
-    root.append(slot);
-    return { kind, slot, count, cd, left };
-  });
+// the glowing orb that stands for a skill, on the bar and in the skill book
+function skillOrb(id) {
+  const icon = el('i', 'icon');
+  icon.style.setProperty('--tint', skillTint(id));
+  return icon;
 }
 
-let bookOpen = false, bookKey = null;
-function toggleBook() {
-  bookOpen = !bookOpen;
+// What a slot of the bar looks like with this in it - a skill: its orb and its name; an item: its glyph, as in the
+// bag; nothing: an empty slot. The ghost of a drag is drawn by the same function.
+function barFace(id) {
+  const face = el('div', 'act');
+  if (SKILLS[id]) face.append(skillOrb(id), SKILLS[id].name);
+  else if (ITEMS[id]) {
+    face.classList.add('item');
+    face.style.setProperty('--tint', itemTint(id));
+    face.append(itemGlyph(id));
+  } else face.classList.add('empty');
+  return face;
+}
+
+// The bar is rebuilt only when what is in its slots changes; cooldowns, counts and states are updated every frame.
+let barKey = null, barSlots = [];
+const attackSlot = barFace(null);
+attackSlot.id = 'attackBtn';
+attackSlot.classList.remove('empty');
+attackSlot.append(el('kbd', '', 'F'), el('i', 'icon'), 'Attack');
+attackSlot.querySelector('.icon').style.setProperty('--tint', '#cfd8e0');
+attackSlot.addEventListener('click', attackKey);
+function renderBar() {
+  const key = JSON.stringify(stats.bar);
+  if (key === barKey) return;
+  barKey = key;
+  if (tipAnchor && $('actionbar').contains(tipAnchor)) hideTip();   // the slot it described is about to be replaced
+  barSlots = stats.bar.map((id, i) => {
+    const k = SKILLS[id], it = ITEMS[id], node = barFace(id);
+    // note: the mana a skill costs; how many of an item the bag holds
+    const note = el('span', k ? 'mp' : 'n', k ? String(k.mp) : ''), cd = el('i', 'cd'), left = el('span', 'time');
+    node.prepend(el('kbd', '', BAR_KEYS[i]));
+    node.append(note, cd, left);
+    node.addEventListener('click', () => tapSlot(i));
+    node.addEventListener('contextmenu', () => { if (stats.bar[i]) setBar(stats.bar.map((entry, j) => (j === i ? null : entry))); });
+    dragFrom(node, () => stats.bar[i] && { id: stats.bar[i], from: i });
+    tipOn(node, () => slotTip(i));
+    return { id, k, it, node, note, cd, left };
+  });
+  $('actionbar').replaceChildren(attackSlot, ...barSlots.map((slot) => slot.node));
+}
+tipOn(attackSlot, () => [el('b', 'name', 'Attack'), el('div', '', 'Runs up to the target and keeps hitting it with the weapon.'), el('div', 'hint', 'Key F or click')]);
+
+// A click on a slot is a press of its key that lasts one frame.
+function tapSlot(i) {
+  if (state !== 'playing') return;
+  for (const set of [keys, fresh, taps]) set.add(BAR_CODES[i]);
+}
+// A new arrangement of the bar: shown at once, and kept by the server with the character.
+function setBar(bar) {
+  stats.bar = bar;
+  send({ t: 'bar', bar });
+  sfx(480, 0.06, 'triangle', 0.04, 160);
+}
+// What a slot does with its item: a potion is drunk, a piece of gear is put on. A piece that is worn already stays
+// on - a second press in the middle of a fight must not strip the cat; taking it off is done in the inventory.
+function useBarItem(id) {
+  const it = ITEMS[id], i = stats.inv.findIndex((stack) => stack[0] === id);
+  if (it.slot && stats.eq[it.slot] === id) notice(`${it.name} is already worn`);
+  else if (i < 0) notice(`No ${it.name} in the bag`);
+  else useStack(i);
+}
+const bagCount = (id) => stats.inv.reduce((sum, [item, n]) => sum + (item === id ? n : 0), 0);
+
+// What the tooltip says about a skill. `hints` are the lines about what can be done with it here.
+function skillTip(id, hints = []) {
+  const k = SKILLS[id], rank = stats.skills[id] | 0, known = activeSkills(stats.cls, stats.skills).includes(id), out = [];
+  const line = (text, cls = '') => out.push(el('div', cls, text));
+  const name = el('b', 'name', k.name);
+  name.style.color = skillTint(id);
+  out.push(name);
+  line(known ? `Skill · rank ${rank}/${k.sp.length}` : 'Skill · not learned', known ? 'kind' : 'kind bad');
+  line(k.text);
+  const facts = [k.mp && `${k.mp} mana`, k.cast && `${castTime(k, sheet).toFixed(2)}s cast`, k.cd && `${k.cd}s cooldown`].filter(Boolean).join(' · ');
+  if (facts) line(facts, 'dim');
+  for (const hint of hints) line(hint, 'hint');
+  return out;
+}
+function slotTip(i) {
+  const id = stats.bar[i], key = BAR_KEYS[i], it = ITEMS[id];
+  if (!id) return [el('div', 'kind', `Slot ${key} · empty`), el('div', 'hint', 'Drag a skill from the skill book (K) or an item from the inventory (I) here')];
+  const arrange = 'Drag to move · drag off the bar or right-click to clear';
+  if (SKILLS[id]) return skillTip(id, [`Key ${key} or click to use it`, arrange]);
+  const worn = !!it.slot && stats.eq[it.slot] === id;
+  const use = it.kind === 'potion' ? `Key ${key} or click to drink one · ${bagCount(id)} in the bag`
+    : `Key ${key} or click to wear it; pressed again, it stays on`;
+  return itemTip(id, [use, arrange], worn);
+}
+
+// ---- dragging onto the action bar
+// Skills from the skill book, items from the inventory and the slots of the bar itself are dragged with the pointer: a
+// ghost follows the cursor and the slot under it lights up. (The browser's own drag-and-drop is unreliable over a
+// WebGL canvas.) A press that does not move stays a click.
+let drag = null;        // { id, from, x, y, ghost }; from: the slot of the bar it came from, -1 for the book and the bag
+let dragEnded = false;  // a drag was let go this very moment: the click that follows the release is not a click
+// `what` returns { id, from? } for the thing under the pointer, or nothing when there is nothing to drag.
+function dragFrom(node, what) {
+  node.addEventListener('pointerdown', (e) => {
+    const src = e.button === 0 && state === 'playing' && what();
+    if (src) drag = { from: -1, ...src, x: e.clientX, y: e.clientY, ghost: null };
+  });
+}
+const within = (node, x, y) => { const r = node.getBoundingClientRect(); return x >= r.left && x < r.right && y >= r.top && y < r.bottom; };
+const slotAt = (x, y) => barSlots.findIndex(({ node }) => within(node, x, y));
+addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  if (!drag.ghost) {
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;   // still a click
+    drag.ghost = barFace(drag.id);
+    drag.ghost.id = 'ghost';
+    $('hud').append(drag.ghost);
+    hideTip();
+  }
+  drag.ghost.style.left = `${e.clientX}px`;
+  drag.ghost.style.top = `${e.clientY}px`;
+  const over = slotAt(e.clientX, e.clientY);
+  barSlots.forEach(({ node }, i) => node.classList.toggle('drop', i === over));
+});
+// The end of a drag. `e` is the release; without it (the window lost the pointer) nothing is dropped anywhere.
+function endDrag(e) {
+  const d = drag;
+  drag = null;
+  if (!d?.ghost) return;
+  d.ghost.remove();
+  for (const { node } of barSlots) node.classList.remove('drop');
+  dragEnded = true;
+  setTimeout(() => { dragEnded = false; }, 0);
+  if (e?.type !== 'pointerup') return;
+  const to = slotAt(e.clientX, e.clientY), bar = [...stats.bar];
+  if (to >= 0) {
+    if (to === d.from) return;
+    if (d.from >= 0) bar[d.from] = bar[to];   // slot onto slot: the two swap
+    bar[to] = d.id;
+  } else if (d.from >= 0 && !within($('actionbar'), e.clientX, e.clientY)) bar[d.from] = null;   // off the bar: the slot is cleared
+  else return;   // let go between two slots, or a skill or an item dropped beside the bar
+  setBar(bar);
+}
+addEventListener('pointerup', endDrag);
+addEventListener('pointercancel', endDrag);
+addEventListener('click', (e) => { if (dragEnded) { e.stopPropagation(); e.preventDefault(); } }, true);
+
+// ---- windows
+// Windows that would lie on top of each other never stand open together. The skill book and the help fill the middle:
+// opening one of them closes everything else. On a wide screen the inventory stands to the right of the middle and
+// the status window or the Trader's list - one of the two - to the left of it; a narrower one has room for a single
+// window between the chat and the radar, so there every window closes the others. (index.html has the same width.)
+const PAIRS = matchMedia('(min-width: 1720px)');
+PAIRS.addEventListener('change', () => { if (!PAIRS.matches && (storeOpen || sheetOpen)) toggleBag(false); });
+let bookOpen = false, bookKey = null, helpOpen = false;
+function toggleBook(open = !bookOpen) {
+  if (open) { toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); }
+  bookOpen = open;
   bookKey = null;
-  $('book').classList.toggle('on', bookOpen);
+  $('book').classList.toggle('on', open);
+  if (!open && tipAnchor && $('book').contains(tipAnchor)) hideTip();
+}
+function toggleHelp(open = !helpOpen) {
+  if (open) { toggleBook(false); toggleSheet(false); toggleStore(false); toggleBag(false); }
+  helpOpen = open;
+  $('help').classList.toggle('on', open);
 }
 
 // The skill book lists everything the class can learn. Buying is only possible next to a Sage - and a map need not have one.
@@ -1336,7 +1481,8 @@ function renderBook(atSage) {
   $('bookTitle').textContent = `${cls.name} skills`;
   const where = atSage ? 'The Sage will teach you what you can afford.'
     : hasSage ? 'Find a Sage to learn skills.' : 'There is no Sage in this world to learn skills from.';
-  $('bookSub').textContent = `Skill points: ${stats.sp} · ${where}`;
+  $('bookSub').textContent = `Skill points: ${stats.sp} · ${where} Drag a learned skill onto the action bar.`;
+  if (tipAnchor && $('book').contains(tipAnchor)) hideTip();   // the row it described is about to be replaced
   const list = $('bookList');
   list.replaceChildren();
   const button = (label, enabled, onClick) => {
@@ -1361,11 +1507,16 @@ function renderBook(atSage) {
 
   for (const id of skillsFor(stats.cls)) {
     const k = SKILLS[id], rank = stats.skills[id] | 0, max = k.sp.length, tooLow = stats.level < k.lvl;
-    const row = el('div', `sk${tooLow ? ' locked' : ''}`), info = el('div', 'info'), name = el('div', 'name', k.name);
+    const row = el('div', `sk${tooLow ? ' locked' : ''}`), info = el('div', 'info'), name = el('div', 'name', k.name), orb = skillOrb(id);
     name.append(el('small', '', `${k.kind === 'passive' ? 'passive · ' : ''}rank ${rank}/${max}${tooLow ? ` · level ${k.lvl}` : ''}`));
     const facts = [k.mp && `${k.mp} mana`, k.cast && `${castTime(k, sheet).toFixed(2)}s cast`, k.cd && `${k.cd}s cooldown`].filter(Boolean).join(' · ');
     info.append(name, el('div', 'text', facts ? `${k.text} ${facts}.` : k.text));
-    row.append(info, rank >= max
+    row.dataset.skill = id;
+    if (k.kind !== 'passive' && rank > 0) {   // a learned active skill is dragged by its orb or its text onto the action bar
+      for (const part of [orb, info]) { part.classList.add('grab'); dragFrom(part, () => ({ id })); }
+      tipOn(orb, () => skillTip(id, ['Drag onto the action bar']));
+    }
+    row.append(orb, info, rank >= max
       ? button('Mastered', false, () => {})
       : button(`${rank ? 'Upgrade' : 'Learn'} · ${k.sp[rank]} SP`, atSage && !tooLow && stats.sp >= k.sp[rank], () => send({ t: 'learn', s: id })));
     list.append(row);
@@ -1387,22 +1538,30 @@ const ICONS = {
   potion: '<path d="M9 2h6v2h-1v4.500l4.5 7.500a3.5 3.5 0 01-3 5.500h-7a3.5 3.5 0 01-3-5.500l4.5-7.500v-4.500h-1z"/>',
 };
 const POTION_TINT = { hp: '#ff6b8e', mp: '#6fa4ff' };
-// [what it restores, key, label on the bar, tint]
-const POTION_KEYS = [['hp', 'Q', 'Health', POTION_TINT.hp], ['mp', 'E', 'Mana', POTION_TINT.mp]];
 const FAMILY_NAMES = { sword: 'Sword', daggers: 'Daggers', bow: 'Bow', staff: 'Staff' };
 const itemTint = (id) => { const it = ITEMS[id]; return it.kind === 'potion' ? POTION_TINT[it.hp ? 'hp' : 'mp'] : css(TIERS[it.tier].color); };
 const stackText = (id, n) => (n > 1 ? `${ITEMS[id].name} ×${n}` : ITEMS[id].name);
 
-// A square tile: an empty slot (with a faint `tag`), or an item with its icon and, for a stack, its count.
-function tile(id, n = 1, tag = '') {
-  const t = el('div', 'slot');
-  if (!id) { if (tag) t.append(el('span', 'tag', tag)); return t; }
-  const it = ITEMS[id], svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+// A glyph as an element; it takes the colour of the text around it.
+function glyph(paths) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
-  svg.innerHTML = ICONS[it.kind === 'potion' ? 'potion' : it.family || it.slot];
+  svg.innerHTML = paths;
+  return svg;
+}
+const itemGlyph = (id) => glyph(ICONS[ITEMS[id].kind === 'potion' ? 'potion' : ITEMS[id].family || ITEMS[id].slot]);
+
+// A square tile: an empty slot (with the faint outline of a `shape`, when one is named), or an item with its icon
+// and, for a stack, its count.
+function tile(id, n = 1, shape = '') {
+  const t = el('div', 'slot');
+  if (!id) {
+    if (shape) { t.classList.add('hollow'); t.append(glyph(ICONS[shape])); }
+    return t;
+  }
   t.classList.add('full');
   t.style.setProperty('--tint', itemTint(id));
-  t.append(svg);
+  t.append(itemGlyph(id));
   if (n > 1) t.append(el('span', 'n', String(n)));
   return t;
 }
@@ -1410,15 +1569,20 @@ function tile(id, n = 1, tag = '') {
 // The tooltip follows the cursor over whatever `tipOn` was called for; `build` returns its content when it is needed.
 let tipAnchor = null;
 function tipOn(node, build) {
-  node.addEventListener('mouseenter', (e) => { tipAnchor = node; $('tip').replaceChildren(...build()); $('tip').classList.add('on'); placeTip(e); });
-  node.addEventListener('mousemove', placeTip);
+  node.addEventListener('mouseenter', (e) => {
+    if (drag?.ghost) return;   // what is being dragged covers the spot, and says what it is
+    tipAnchor = node; $('tip').replaceChildren(...build()); $('tip').classList.add('on'); placeTip(e);
+  });
+  node.addEventListener('mousemove', (e) => { if (tipAnchor === node) placeTip(e); });
   node.addEventListener('mouseleave', () => { if (tipAnchor === node) hideTip(); });
 }
 function placeTip(e) {
   const tip = $('tip'), w = tip.offsetWidth, h = tip.offsetHeight;
-  // to the right of the cursor and below it, or on the other side where the window ends
+  // to the right of the cursor and below it, or on the other side where the window ends. At the lower edge that is
+  // above the cursor - and above the whole action bar for one of its slots, so that the tooltip does not lie on the bar
+  const bar = tipAnchor?.closest('#actionbar'), floor = bar ? bar.getBoundingClientRect().top - 8 : e.clientY - 12;
   tip.style.left = `${e.clientX + 16 + w > innerWidth ? Math.max(4, e.clientX - 12 - w) : e.clientX + 16}px`;
-  tip.style.top = `${Math.max(4, Math.min(innerHeight - h - 4, e.clientY + 14))}px`;
+  tip.style.top = `${Math.max(4, e.clientY + 14 + h > innerHeight - 4 ? floor - h : e.clientY + 14)}px`;
 }
 function hideTip() {
   tipAnchor = null;
@@ -1429,7 +1593,8 @@ function hideTip() {
 const buffsNow = () => Object.fromEntries(stats.buffs.map(([stat, , mult]) => [stat, mult]));
 const bareSheet = () => statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), null);
 
-// What the tooltip says about an item. `hint` is the line about what a click does; `worn`: the item is the one in its slot.
+// What the tooltip says about an item. `hint` is the line - or the lines - about what can be done with it here;
+// `worn`: the item is the one in its slot.
 function itemTip(id, hint, worn = false) {
   const it = ITEMS[id], out = [];
   const line = (text, cls = '') => out.push(el('div', cls, text));
@@ -1453,19 +1618,25 @@ function itemTip(id, hint, worn = false) {
     }
   }
   line(`Sells for ${sellPrice(id)} gold`, 'dim');
-  if (hint) line(hint, 'hint');
+  for (const text of [hint].flat()) if (text) line(text, 'hint');
   return out;
 }
 
-// ---- inventory: the paper doll and the bag
+// ---- inventory: the character's numbers, the paper doll and the bag, side by side
 
-let bagOpen = false, bagKey = null, bagCds = [];
+let bagOpen = false, bagKey = null, bagCds = [], bagTab = 'all', statsKey = null;
 function toggleBag(open = !bagOpen) {
+  if (open) { toggleBook(false); toggleHelp(false); }
+  if (open && !PAIRS.matches) { toggleSheet(false); toggleStore(false); }
   bagOpen = open;
-  bagKey = null;
+  bagKey = statsKey = null;
   $('bag').classList.toggle('on', open);
   $('hud').classList.toggle('bagOpen', open);   // the status window moves aside for it
   if (!open) hideTip();
+}
+// the tabs above the bag show all of it, or only the gear, or only the potions
+for (const b of $('bagTabs').children) {
+  b.addEventListener('click', () => { bagTab = b.dataset.tab; bagKey = null; b.blur(); });
 }
 
 // A click on an item of the bag wears it or drinks it. The server decides; what it would refuse anyway is said at once.
@@ -1492,21 +1663,6 @@ function drink(i) {
   local.potionAt = time + 0.5;   // until the server answers: one press must not drink twice
   send({ t: 'use', i, id });
 }
-// The potion keys: of the potions of that kind in the bag, the strongest that would not be wasted on what is missing,
-// else the weakest.
-function quaff(kind) {
-  if (stats.dead) return;
-  const missing = kind === 'hp' ? stats.maxHp - stats.hp : stats.maxMp - stats.mp;
-  let pick = -1;
-  stats.inv.forEach(([id], i) => {
-    const power = ITEMS[id]?.[kind];
-    if (!power) return;
-    const best = pick < 0 ? 0 : ITEMS[stats.inv[pick][0]][kind];
-    if (pick < 0 || (power <= missing ? power > best || best > missing : power < best)) pick = i;
-  });
-  if (pick < 0) notice(`No ${kind === 'hp' ? 'health' : 'mana'} potions`);
-  else drink(pick);
-}
 // Destroying asks twice: the second right-click on the same stack within a moment does it.
 let doomed = { key: '', until: 0 };
 function destroyStack(i) {
@@ -1524,25 +1680,37 @@ function destroyStack(i) {
 }
 
 function renderBag() {
-  const key = [stats.cls, stats.level, stats.gold, JSON.stringify(stats.inv), JSON.stringify(stats.eq)].join('|');
+  const key = [bagTab, stats.cls, stats.level, stats.gold, JSON.stringify(stats.inv), JSON.stringify(stats.eq)].join('|');
   if (key === bagKey) return;
   bagKey = key;
   if (tipAnchor && $('bag').contains(tipAnchor)) hideTip();   // the tile it described is about to be replaced
-  $('bagSub').textContent = `Gold: ${stats.gold} · ${stats.inv.length} / ${BAG_SIZE} slots`;
-  $('doll').replaceChildren(...EQUIP_SLOTS.map((slot) => {
-    const id = ITEMS[stats.eq[slot]] ? stats.eq[slot] : null, t = tile(id, 1, SLOT_NAMES[slot]);
-    t.style.gridArea = slot;
+  for (const b of $('bagTabs').children) b.classList.toggle('on', b.dataset.tab === bagTab);
+  $('bagCount').textContent = `${stats.inv.length} / ${BAG_SIZE}`;
+  $('bagGold').textContent = stats.gold;
+  // The equipment slots stand around the cat: armour down its left, the weapon by its paw. An empty one shows the
+  // outline of what belongs in it - for the weapon, the kind the class fights with.
+  const worn = (slot) => {
+    const id = ITEMS[stats.eq[slot]] ? stats.eq[slot] : null, t = tile(id, 1, slot === 'weapon' ? weaponFamily(stats.cls) : slot);
     t.dataset.slot = slot;
-    if (!id) return t;
+    if (!id) {
+      tipOn(t, () => [el('b', 'name', SLOT_NAMES[slot]), el('div', 'kind', 'Empty slot'), el('div', 'dim', 'Click a piece in the bag to wear it')]);
+      return t;
+    }
     t.addEventListener('click', () => takeOff(slot));
-    tipOn(t, () => itemTip(id, 'Click to take it off', true));
+    dragFrom(t, () => ({ id }));
+    tipOn(t, () => itemTip(id, 'Click to take it off · drag onto the action bar', true));
     return t;
-  }));
+  };
+  $('dollLeft').replaceChildren(...EQUIP_SLOTS.filter((slot) => slot !== 'weapon').map(worn));
+  $('dollRight').replaceChildren(worn('weapon'));
+  // The grid shows the stacks the tab lets through, then empty cells; a stack keeps its place in the bag (i), which
+  // is what the server is told.
+  const shown = stats.inv.map(([id, n], i) => ({ id, n, i }))
+    .filter(({ id }) => ITEMS[id] && (bagTab === 'all' || (bagTab === 'potion') === (ITEMS[id].kind === 'potion')));
   bagCds = [];
-  $('bagGrid').replaceChildren(...Array.from({ length: BAG_SIZE }, (_, i) => {
-    const [id, n] = stats.inv[i] || [];
-    if (!ITEMS[id]) return tile(null);
-    const it = ITEMS[id], t = tile(id, n);
+  $('bagGrid').replaceChildren(...Array.from({ length: BAG_SIZE }, (_, cell) => {
+    if (!shown[cell]) return tile(null);
+    const { id, n, i } = shown[cell], it = ITEMS[id], t = tile(id, n);
     t.dataset.item = id;
     if (it.kind === 'potion') {
       const cd = el('i', 'cd');
@@ -1551,9 +1719,105 @@ function renderBag() {
     } else if (equipError(stats.cls, stats.level, id)) t.classList.add('bad');
     t.addEventListener('click', () => useStack(i));
     t.addEventListener('contextmenu', () => destroyStack(i));
-    tipOn(t, () => itemTip(id, `Click to ${it.kind === 'potion' ? 'drink' : 'wear'} it · right-click twice to destroy`));
+    dragFrom(t, () => ({ id }));
+    tipOn(t, () => itemTip(id, [`Click to ${it.kind === 'potion' ? 'drink' : 'wear'} it · drag onto the action bar`, 'Right-click twice to destroy']));
     return t;
   }));
+}
+
+// One number of the character: its label and its value. `raised`: a buff holds it up; `gear`: the part of the value
+// that comes from the equipment, shown beside it.
+function statCell(label, value, raised = false, gear = 0) {
+  const c = el('div', 'cell'), b = el('b', raised ? 'up' : '', String(value));
+  if (gear) b.prepend(el('small', 'eq', `${gear > 0 ? '+' : ''}${gear}`));
+  c.append(el('span', '', label), b);
+  return c;
+}
+function statGrid(cells, cls = 'grid') {
+  const box = el('div', cls);
+  box.append(...cells);
+  return box;
+}
+
+// The first part of the inventory: the numbers of the status window, a value a row. While the cursor is on a piece
+// of gear in the bag that the character could wear, the combat rows show what wearing it would make of them.
+function renderBagStats() {
+  const hover = tipAnchor && $('bagGrid').contains(tipAnchor) ? tipAnchor.dataset.item : null;
+  const tried = hover && ITEMS[hover].slot && !equipError(stats.cls, stats.level, hover) ? hover : null;
+  const who = names.get(myId) || 'Cat';
+  const key = [who, stats.cls, stats.level, stats.hp, stats.maxHp, stats.mp, stats.maxMp, stats.weapon, tried,
+    JSON.stringify(stats.skills), JSON.stringify(stats.buffs), JSON.stringify(stats.eq)].join('|');
+  if (key === statsKey) return;
+  statsKey = key;
+  const base = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, {}, stats.eq), bare = bareSheet();
+  const after = tried ? statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), { ...stats.eq, [ITEMS[tried].slot]: tried }) : sheet;
+  const combat = SHEET_ROWS.flat().filter(Boolean).map(([label, k]) => {
+    if (after[k] === sheet[k]) return statCell(label, sheet[k], sheet[k] > base[k], sheet[k] - bare[k]);
+    const c = statCell(label, after[k]), b = c.lastChild;   // "83 → 95", green for more and red for less
+    b.className = after[k] > sheet[k] ? 'good' : 'bad';
+    b.prepend(el('small', '', `${sheet[k]} →`));
+    return c;
+  });
+  $('bagStats').replaceChildren(
+    el('div', 'who', who), el('div', 'sub', `${CLASSES[stats.cls].name} · level ${stats.level}`),
+    statGrid([statCell('HP', `${stats.hp} / ${stats.maxHp}`), statCell('MP', `${stats.mp} / ${stats.maxMp}`)]),
+    el('h3', '', 'Attributes'), statGrid(ATTR_NAMES.map((n) => statCell(n, sheet[n])), 'grid two'),
+    el('h3', tried ? 'try' : '', tried ? `With ${ITEMS[tried].name}` : 'Combat'), statGrid(combat),
+  );
+}
+
+// ---- the paper doll: the player's own cat as the world shows it, alive in a small canvas between its equipment
+// slots. It has a little renderer of its own, made the first time the inventory opens and kept from then on, and it
+// is drawn only while the window is open. Dragging turns the cat.
+let doll = null;
+function makeDoll() {
+  const canvas = $('dollView');
+  const d = {
+    cat: createCat(CLASSES[stats.cls]), cls: '', look: 0, yaw: 0.5, frames: 0, w: 0, h: 0, view: null,
+    scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera(30, 1, 0.5, 30),
+  };
+  const sun = new THREE.DirectionalLight(0xfff4dc, 2.4);
+  sun.position.set(2.5, 5, 6);
+  d.scene.add(d.cat.group, new THREE.HemisphereLight(0xdff5ff, 0x4c6a55, 1.5), sun);
+  d.camera.position.set(0, 1.9, 8);
+  d.camera.lookAt(0, 1.25, 0);
+  try {
+    d.view = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    d.view.setPixelRatio(Math.min(devicePixelRatio, 2));
+    d.view.toneMapping = THREE.ACESFilmicToneMapping;
+  } catch (err) {   // no second WebGL context to be had: the slots work without the picture
+    console.warn('The paper doll cannot be drawn', err);
+  }
+  let grab = null;   // where the pointer was when it last turned the cat
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    grab = e.clientX;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* the drag then ends at the edge of the picture */ }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (grab === null) return;
+    d.yaw += (e.clientX - grab) * 0.012;
+    grab = e.clientX;
+  });
+  for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, () => { grab = null; });
+  return d;
+}
+function drawDoll(dt) {
+  doll ??= makeDoll();
+  setLook(doll, stats.cls, lookCode(stats.eq));   // the same look the world gives the cat
+  doll.cat.group.rotation.y = doll.yaw;
+  doll.cat.update(dt, {});                        // standing idle: it breathes, blinks and swings its tail
+  if (!doll.view) return;
+  const canvas = doll.view.domElement, w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  if (w !== doll.w || h !== doll.h) {   // the picture is as tall as the window's longest part makes it
+    Object.assign(doll, { w, h });
+    doll.view.setSize(w, h, false);
+    doll.camera.aspect = w / h;
+    doll.camera.updateProjectionMatrix();
+  }
+  doll.view.render(doll.scene, doll.camera);
+  doll.frames++;
 }
 
 // ---- the Trader's shop
@@ -1561,10 +1825,13 @@ function renderBag() {
 let storeOpen = false, storeTab = 'buy', storeKey = null;
 const hasTrader = npcsOf(map, 'trader').length > 0;
 function toggleStore(open = !storeOpen) {
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); }
   storeOpen = open;
   storeKey = null;
   $('store').classList.toggle('on', open);
-  if (open) toggleBag(true);   // what is in the bag is half of every deal
+  // what is in the bag is half of every deal: it opens beside the list where there is room for both (the Sell tab
+  // lists the bag anyway)
+  if (open) toggleBag(PAIRS.matches);
   else hideTip();
 }
 function tradeKey() {
@@ -1626,10 +1893,34 @@ function renderStore() {
 // ---------------------------------------------------------------- character status window
 
 let sheetOpen = false, sheetKey = null;
-function toggleSheet() {
-  sheetOpen = !sheetOpen;
+function toggleSheet(open = !sheetOpen) {
+  if (open) { toggleBook(false); toggleHelp(false); toggleStore(false); }
+  if (open && !PAIRS.matches) toggleBag(false);
+  sheetOpen = open;
   sheetKey = null;
-  $('sheet').classList.toggle('on', sheetOpen);
+  $('sheet').classList.toggle('on', open);
+}
+
+// ---- the strip of window buttons under the radar: a click does what the key does, and a button is lit while its
+// window is open. The Trader's button is there only while he is in reach, like his key.
+const MENU = [
+  { name: 'Character', key: 'C', toggle: () => toggleSheet(), isOpen: () => sheetOpen,
+    icon: '<circle cx="12" cy="7.500" r="4.500"/><path d="M3.500 21.500a8.500 8.500 0 0117 0z"/>' },
+  { name: 'Inventory', key: 'I', toggle: () => toggleBag(), isOpen: () => bagOpen,
+    icon: '<path d="M9 2h6a2 2 0 012 2v2h-2v-2h-6v2h-2v-2a2 2 0 012-2z"/><path d="M5 7h14a2 2 0 012 2v10.500a2 2 0 01-2 2h-14a2 2 0 01-2-2v-10.500a2 2 0 012-2zM9.500 11v3.500h5v-3.500z" fill-rule="evenodd"/>' },
+  { name: 'Skills', key: 'K', toggle: () => toggleBook(), isOpen: () => bookOpen,
+    icon: '<path d="M2.500 4.500c3-1.200 6-1.200 8.500.500v15c-2.500-1.700-5.500-1.700-8.500-.500zM21.500 4.500c-3-1.200-6-1.200-8.500.500v15c2.500-1.700 5.500-1.700 8.500-.500z"/>' },
+  { name: 'Trader', key: 'T', toggle: () => tradeKey(), isOpen: () => storeOpen, near: 'trader',
+    icon: '<path d="M12 2.500a9.500 9.500 0 100 19 9.500 9.500 0 000-19zM11 6h2v1.300c1.600.300 2.700 1.300 2.800 2.900h-2c-.100-.700-.700-1.200-1.800-1.200-1 0-1.700.400-1.700 1.100 0 .600.500.900 2 1.300 2.300.500 3.700 1.300 3.700 3.200 0 1.600-1.200 2.700-3 3v1.400h-2v-1.400c-1.900-.300-3.100-1.500-3.200-3.300h2c.100.900.900 1.500 2.100 1.500 1.200 0 1.900-.500 1.900-1.200s-.500-1-2.200-1.400c-2.200-.500-3.500-1.300-3.500-3.100 0-1.500 1.100-2.600 2.900-2.900z" fill-rule="evenodd"/>' },
+  { name: 'Help', key: 'H', toggle: () => toggleHelp(), isOpen: () => helpOpen,
+    icon: '<path d="M12 2.500a9.500 9.500 0 100 19 9.500 9.500 0 000-19zM12 6c2.300 0 4 1.500 4 3.500 0 1.500-.800 2.300-1.900 3-.900.600-1.100.900-1.100 1.800h-2.200c0-1.700.500-2.500 1.700-3.300.900-.600 1.200-.900 1.200-1.500 0-.800-.700-1.400-1.700-1.400s-1.700.600-1.800 1.600h-2.200c.100-2.200 1.700-3.700 4-3.700zM10.700 15.500h2.600v2.500h-2.600z" fill-rule="evenodd"/>' },
+];
+for (const m of MENU) {
+  m.node = el('div', 'mbtn');
+  m.node.append(glyph(m.icon), el('kbd', '', m.key));
+  m.node.addEventListener('click', () => { if (state === 'playing') m.toggle(); });
+  tipOn(m.node, () => [el('b', 'name', m.name), el('div', 'hint', m.key === 'H' ? 'Key H or F1' : `Key ${m.key}`)]);
+  $('menubar').append(m.node);
 }
 
 const BUFF_NAMES = { patk: 'Attack up', pdef: 'Defence up', atk: 'Might' };
@@ -1648,18 +1939,7 @@ function renderSheet() {
   sheetKey = key;
   const base = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, {}, stats.eq);   // without buffs, to highlight what they raise
   const bare = bareSheet();                                                                // without equipment, to show what it adds
-  // `gear`: the part of the value that comes from the equipment, shown beside it
-  const cell = (label, value, raised, gear = 0) => {
-    const c = el('div', 'cell'), b = el('b', raised ? 'up' : '', String(value));
-    if (gear) b.prepend(el('small', 'eq', `${gear > 0 ? '+' : ''}${gear}`));
-    c.append(el('span', '', label), b);
-    return c;
-  };
-  const section = (title, cells) => {
-    const box = el('div', 'grid');
-    box.append(...cells);
-    return [el('h3', '', title), box];
-  };
+  const cell = statCell, section = (title, cells) => [el('h3', '', title), statGrid(cells)];
   const need = xpNext(stats.level);
   $('sheetTitle').textContent = names.get(myId) || 'Cat';
   $('sheetSub').textContent = `${CLASSES[stats.cls].name} · level ${stats.level}`;
@@ -1693,24 +1973,33 @@ function updateHud() {
   $('buffs').replaceChildren(...stats.buffs.map(([stat, left]) => el('span', '', `${BUFF_NAMES[stat] || stat} ${left}s`)));
   if (sheetOpen) renderSheet();
 
-  renderBar(hotbar(stats.cls, stats.skills));
+  renderBar();
   attackSlot.classList.toggle('active', attacking);
-  for (const { id, k, slot, cd, left } of barSlots) {
-    const wait = (local.cds[id] || 0) - time;
-    cd.style.height = `${Math.max(0, Math.min(1, wait / Math.max(k.cd, 0.3))) * 100}%`;
-    left.textContent = wait > 0.5 ? Math.ceil(wait) : '';
-    slot.classList.toggle('active', me.castT >= 0 && me.castSkill === id);
-    slot.classList.toggle('dim', stats.mp < k.mp);
-  }
+  const learned = activeSkills(stats.cls, stats.skills);
   const potionWait = local.potionAt - time, potionCd = `${Math.max(0, Math.min(1, potionWait / POTION_CD)) * 100}%`;
-  for (const { kind, slot, count, cd, left } of potionSlots) {
-    const n = stats.inv.reduce((sum, [id, c]) => sum + (ITEMS[id]?.[kind] ? c : 0), 0);
-    count.textContent = `×${n}`;
-    cd.style.height = potionCd;
-    left.textContent = potionWait > 0.5 ? Math.ceil(potionWait) : '';
-    slot.classList.toggle('dim', !n);
+  const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
+  for (const { id, k, it, node, note, cd, left } of barSlots) {
+    if (k) {
+      const wait = (local.cds[id] || 0) - time, known = learned.includes(id);
+      cd.style.height = `${Math.max(0, Math.min(1, wait / Math.max(k.cd, 0.3))) * 100}%`;
+      say(left, wait > 0.5 ? String(Math.ceil(wait)) : '');
+      node.classList.toggle('active', me.castT >= 0 && me.castSkill === id);
+      node.classList.toggle('dim', known && stats.mp < k.mp);
+      node.classList.toggle('off', !known);
+    } else if (it) {
+      // a potion: how many the bag holds, and the cooldown all potions share; gear: a mark while it is worn
+      const n = bagCount(id), worn = !!it.slot && stats.eq[it.slot] === id, potion = it.kind === 'potion';
+      say(note, potion ? String(n) : worn ? '✓' : '');
+      cd.style.height = potion ? potionCd : '0';
+      say(left, potion && potionWait > 0.5 ? String(Math.ceil(potionWait)) : '');
+      node.classList.toggle('dim', !n && !worn);   // none left: the slot keeps its item and waits for more
+    }
   }
   for (const cd of bagCds) cd.style.height = potionCd;
+  for (const m of MENU) {
+    m.node.classList.toggle('on', m.isOpen());
+    if (m.near) m.node.style.display = m.isOpen() || nearNpc(map, me, m.near) ? '' : 'none';
+  }
 
   // target frame: name and level tinted by how dangerous the monster is for this player
   const tv = mobViews.get(targetId);
@@ -1728,14 +2017,14 @@ function updateHud() {
   if (bookOpen) renderBook(atSage);
   if (storeOpen && !atTrader) toggleStore(false);   // walking away ends the deal
   if (storeOpen) renderStore();
-  if (bagOpen) renderBag();
+  if (bagOpen) { renderBag(); renderBagStats(); }
   const cost = upgradeCost(stats.weapon);
   // the Blacksmith and the Trader may stand close enough together for both to be in reach
   const tips = [];
   if (atSage) tips.push('K — learn skills from the Sage');
   else if (nearNpc(map, me, 'blacksmith')) tips.push(stats.gold >= cost ? `B — upgrade weapon for ${cost} gold` : `Weapon upgrade: ${cost} gold (you have ${stats.gold})`);
   if (atTrader && !storeOpen) tips.push('T — trade with the Trader');
-  const tip = bookOpen ? '' : tips.join(' · ');
+  const tip = bookOpen || helpOpen || storeOpen ? '' : tips.join(' · ');   // those three reach down to where the line stands
   $('shop').style.display = tip ? 'block' : 'none';
   $('shop').textContent = tip;
 
@@ -1847,6 +2136,7 @@ function tick(dt) {
   me.bar.set(0, false);
   me.root.visible = !stats.dead;   // a hit shows as a flinch of the cat (cat.js), not as blinking in and out
   updateCamera(dt);
+  if (bagOpen && state === 'playing') drawDoll(dt);
 
   composer.render();
 }
@@ -1857,7 +2147,7 @@ function frame() {
 frame();
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, quaff, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, toggleBook, toggleSheet, toggleHelp, setBar, get doll() { return doll; }, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
 
 // A play-test, and a page that has reloaded itself for a saved map, go straight in.
 if (autoJoin) {

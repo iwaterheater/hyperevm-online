@@ -150,12 +150,11 @@ export const SKILLS = {
     text: 'Raises fallen players nearby on the spot.' },
 };
 export const SKILL_KEYS = Object.keys(SKILLS);
-export const MAX_SLOTS = 8;
 
 // every skill a character of this class can ever learn, starting class first
 export const skillsFor = (cls) => SKILL_KEYS.filter((id) => classLine(cls).includes(SKILLS[id].cls));
-// learned active skills in hotbar order (keys 1, 2, 3…)
-export const hotbar = (cls, learned) => skillsFor(cls).filter((id) => SKILLS[id].kind !== 'passive' && learned[id] > 0).slice(0, MAX_SLOTS);
+// the active skills a character has learned and can use, in the order of the skill table
+export const activeSkills = (cls, learned) => skillsFor(cls).filter((id) => SKILLS[id].kind !== 'passive' && learned[id] > 0);
 
 // ---------------------------------------------------------------- items
 
@@ -326,6 +325,38 @@ export function lookOf(code) {
   const look = Object.fromEntries(EQUIP_SLOTS.map((slot, i) => [slot, Math.min(TIERS.length, digit(i)) - 1]));
   look.family = WEAPON_FAMILIES[digit(EQUIP_SLOTS.length) - 1] ?? null;
   return look;
+}
+
+// ---- the action bar: BAR_SIZE slots on the keys 1 - 9 and 0. A slot is empty (null) or holds the id of an active skill
+// or of an item; the two tables share no id (a test keeps it that way), so the id alone says which of the two it is.
+
+export const BAR_SIZE = 10;
+// The skill of an id that came from outside, when it is one a slot can hold: a passive skill has nothing to press.
+export const barSkill = (id) => (typeof id === 'string' && Object.hasOwn(SKILLS, id) && SKILLS[id].kind !== 'passive' ? SKILLS[id] : undefined);
+// A bar as a client or a save file gives it, made safe: always BAR_SIZE slots, and whatever is not an active skill or an
+// item is an empty slot. Whether the character has learned the skill or owns the item is not asked: a slot keeps its
+// potion when the last one is drunk, and says "not learned" for a skill the character does not have.
+export function cleanBar(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  return Array.from({ length: BAR_SIZE }, (_, i) => (barSkill(list[i]) || itemOf(list[i]) ? list[i] : null));
+}
+// The bar of a character that has never arranged one: its learned skills from the first slot on, and a health and a
+// mana potion on the last two - the kind it carries, else the lesser one, which is what every new cat starts with.
+export function defaultBar(cls, learned, inv = []) {
+  const bar = cleanBar(activeSkills(cls, learned).slice(0, BAR_SIZE - 2));
+  ['hp', 'mp'].forEach((kind, i) => {
+    const carried = inv.find((s) => itemOf(s[0])?.[kind]);
+    bar[BAR_SIZE - 2 + i] = carried ? carried[0] : `${kind}_small`;
+  });
+  return bar;
+}
+// Puts a newly learned skill into the first empty slot. False when it is on the bar already, or when the bar is full:
+// then it waits in the skill book to be dragged.
+export function barAdd(bar, id) {
+  const i = barSkill(id) && !bar.includes(id) ? bar.indexOf(null) : -1;
+  if (i < 0) return false;
+  bar[i] = id;
+  return true;
 }
 
 // ---- loot. `rnd` is Math.random or a test's stand-in; every function draws from it in a fixed order.

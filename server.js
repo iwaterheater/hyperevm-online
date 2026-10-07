@@ -10,7 +10,7 @@ import {
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
   ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, stackMax, sellPrice, heldFamily, fightStyle, equipError, roomFor, addItem, takeItem,
-  cleanBag, cleanEquip, lookCode, rollLoot, chestLoot,
+  cleanBag, cleanEquip, lookCode, rollLoot, chestLoot, cleanBar, defaultBar, barAdd,
 } from './src/shared.js';
 import {
   normalize, validate, serialize, stringifyMap, regionIndex, pushOutOfSafe, nearNpc, startPoint, spawnHome, pickType, pickLevel,
@@ -414,7 +414,7 @@ function persist(p) {
   if (!p.persist) return;
   saved[p.token] = {
     name: p.name, cls: p.cls, level: p.level, xp: p.xp, sp: p.sp, skills: p.skills, gold: p.gold, weapon: p.weapon,
-    inv: p.inv, equip: p.equip,
+    inv: p.inv, equip: p.equip, bar: p.bar,
   };
 }
 function flush() {
@@ -576,11 +576,16 @@ function refresh(p) {
   p.mp = Math.min(p.mp, p.maxMp);
 }
 
+// A skill the character has just learned goes onto its action bar, into the first empty slot. Only then: a skill the
+// player has taken off the bar stays off. (A character that is still joining has no bar yet; it gets one right after.)
+function slotSkill(p, id) {
+  if (p.bar && barAdd(p.bar, id)) p.barDirty = true;
+}
 // Skills whose first rank costs nothing come with the class.
 function grantFree(p) {
   for (const id of skillsFor(p.cls)) {
     const s = SKILLS[id];
-    if (s.sp[0] === 0 && p.level >= s.lvl && !p.skills[id]) p.skills[id] = 1;
+    if (s.sp[0] === 0 && p.level >= s.lvl && !p.skills[id]) { p.skills[id] = 1; slotSkill(p, id); }
   }
 }
 
@@ -956,6 +961,10 @@ function tick() {
       snap.me.eq = p.equip;
       p.bagDirty = false;
     }
+    if (p.barDirty) {   // and so does the action bar
+      snap.me.bar = p.bar;
+      p.barDirty = false;
+    }
     for (const q of players.values()) {
       if (q !== p && near(q)) {
         snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls), lookCode(q.equip)]);
@@ -1112,6 +1121,7 @@ const handlers = {
     if (p.level < s.lvl || rank >= s.sp.length || p.sp < s.sp[rank]) return;
     p.sp -= s.sp[rank];
     p.skills[id] = rank + 1;
+    if (!rank) slotSkill(p, id);
     refresh(p);
     p.events.push({ k: 'learned', s: id, rank: rank + 1 });
   },
@@ -1198,6 +1208,12 @@ const handlers = {
     if (p.dead) { refuse(p, DEAD); return; }
     takeItem(p.inv, msg.i, n);
     p.bagDirty = true;
+  },
+  bar(p, msg) {   // arrange the action bar: all of its slots at once
+    p.bar = cleanBar(msg.bar);
+    // The owner shows its own arrangement at once and still gets the kept one back: what was not a skill or an item is
+    // gone from it, and a skill the server slotted while this message was on its way is not lost from view.
+    p.barDirty = true;
   },
   c(p, msg) {   // chat
     const text = String(msg.m || '').trim().slice(0, 140);
@@ -1289,11 +1305,15 @@ function join(ws, msg, conn) {
     level, xp: Math.min(data.xp || 0, xpNext(level) - 1), sp: data.sp || 0, skills: { ...(data.skills || {}) },
     gold: data.gold || 0, weapon: data.weapon || 1,
     inv: cleanBag(fresh ? STARTER_KIT : data.inv), equip: cleanEquip(data.equip), bagDirty: true, potionAt: 0,
+    bar: Array.isArray(data.bar) ? cleanBar(data.bar) : null, barDirty: true,
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
     castAt: 0, swingAt: 0, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
     lastMoveAt: now, graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
   };
   grantFree(p);
+  // A character without a saved bar - a new one, or one from before the game had the bar - gets its skills and potions
+  // laid out as the keys 1 - 8 and Q / E used to have them.
+  if (!p.bar) p.bar = defaultBar(p.cls, p.skills, p.inv);
   refresh(p);   // also brings health and mana down to their maximum
   players.set(p.id, p);
   const hello = { t: 'w', id: p.id, x: r2(p.x), z: r2(p.z), rev };
