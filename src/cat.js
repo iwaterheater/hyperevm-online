@@ -14,7 +14,17 @@ const OUTLINE = 0x0c1a17;
 const PAW = 0.365;                  // from the shoulder down the arm to the middle of the paw, model units
 // the bow, in model units: how far above and below the grip the string is tied, how far behind the grip it runs,
 // how far a full draw pulls it back, and from the middle of the arrow to its nock
-const BOW_TIP = 0.655, BOW_STRING = 0.16, BOW_PULL = 0.3, ARROW_NOCK = 0.38;
+const BOW_TIP = 0.655, BOW_STRING = 0.16, BOW_PULL = 0.42, ARROW_NOCK = 0.38;
+// The archer's stance, in the frame of the body (model units, the cat facing +Z, the bow in the paw on -X): how far
+// the body turns away, where the bow arm points, where its paw then is, the way from there back to the body, the
+// shoulder of the string paw, where that paw hangs and where it finds the quiver.
+const STANCE = Math.PI / 2;
+const DOWN = new THREE.Vector3(0, -1, 0), UP = new THREE.Vector3(0, 1, 0), TO_BODY = new THREE.Vector3(1, 0, 0);
+const BOW_ARM = new THREE.Vector3(-Math.cos(0.12), Math.sin(0.12), 0);
+const GRIP = new THREE.Vector3(-0.255, 0.72, 0).addScaledVector(BOW_ARM, PAW);
+const SHOULDER = new THREE.Vector3(0.255, 0.72, 0), HANG = new THREE.Vector3(0.36, 0.38, 0), QUIVER = new THREE.Vector3(0.32, 1.04, -0.24);
+const V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), Q1 = new THREE.Quaternion();
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // what leaves the shoulder: the direction the arm was modelled in (x is mirrored for the left arm)
 const ARM_DIR = new THREE.Vector3(0.52, -0.85, 0.06).normalize();
 // the soft, closed shapes that get a dark contour
@@ -149,7 +159,30 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       arrow.rotation.x = Math.PI / 2;      // modelled point up: laid along the shot
       arrow.visible = false;
       bow.add(string, arrow);
-      rig.bow = { bow, string, arrow };
+      // the same arrow in the other paw, on its way from the quiver to the bow
+      const inPaw = rig.weapons.Arrow.clone(true);
+      inPaw.rotation.x = Math.PI / 2;
+      inPaw.position.set(0, 0, 0.2);
+      inPaw.visible = false;
+      hold(1).add(inPaw);
+      // the quiver on the back, leaning towards the shoulder the paw reaches over
+      const quiver = new THREE.Group(), leather = S.mats.get('w_leather'), feather = S.mats.get('w_glow'), gold = S.mats.get('w_gold');
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.06, 0.44, 12), leather);
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.082, 0.04, 12), gold);
+      rim.position.y = 0.21;
+      quiver.add(tube, rim);
+      for (const [x, z, h] of [[-0.03, 0.02, 0.3], [0.03, 0.025, 0.33], [0, -0.03, 0.28]]) {
+        const fletch = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.11, 0.008), feather);
+        fletch.position.set(x, h, z);
+        fletch.rotation.y = x * 20;
+        quiver.add(fletch);
+      }
+      quiver.position.set(0.1, 0.62, -0.29);
+      quiver.rotation.set(-0.12, 0, -0.5);
+      quiver.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      rig.model.getObjectByName('PBody').add(quiver);
+      rig.gear.push(quiver);
+      rig.bow = { bow, string, arrow, inPaw };
     },
     staff() {
       const g = hold(1), staff = rig.weapons.Staff.clone(true);
@@ -218,6 +251,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     legs[0].rotation.x = swing + air * 0.5;
     legs[1].rotation.x = -swing - air * 0.35;
     arms[0].rotation.x = -swing * 0.8;
+    arms[0].rotation.y = 0;   // the archer's stance below turns this paw freely: start every frame from the plain pose
     arms[0].rotation.z = -0.35 - air * 0.9;
     // right arm points forward while firing
     arms[1].rotation.x = swing * 0.8 * (1 - shoot) - 1.5 * shoot;
@@ -269,29 +303,33 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     tail.rotation.y = Math.sin(t * (3 + move * 5)) * (0.16 + move * 0.12);
     tail.rotation.x = Math.sin(t * 2) * 0.05 - move * 0.12;
 
-    // The bow: the paw that holds it comes up towards the target, the other one takes the arrow at the string and
-    // pulls it back; the cat turns side-on as it draws. After the release the bow paw stays up for a moment.
-    aim += ((draw >= 0 ? 1 : 0) - aim) * Math.min(1, dt * 16);
+    // The bow. The cat stands side-on to its target, as an archer does: the paw with the bow straight out at it, the
+    // head turned to look along the arrow. The other paw goes over the shoulder to the quiver, comes back with an
+    // arrow, lays it on the bow and pulls the string to the cheek. `draw` runs through all of that, 0..1; for a
+    // moment after the arrow has left (shoot) the stance is held.
+    aim += ((draw >= 0 ? 1 : 0) - aim) * Math.min(1, dt * 14);
+    head.rotation.y = 0;
     if (rig.bow) {
-      const pull = draw >= 0 ? Math.min(1, draw) : 0, up = Math.max(aim, shoot);
-      if (up > 0.01) {
-        arms[0].rotation.x += (-1.5 - arms[0].rotation.x) * up;
-        arms[0].rotation.z += (0.22 - arms[0].rotation.z) * up;
-        if (aim > 0.01) {
-          arms[1].rotation.x += (-1.5 + 0.75 * pull - arms[1].rotation.x) * aim;
-          arms[1].rotation.z += (-0.3 + 0.55 * pull - arms[1].rotation.z) * aim;
-          inner.rotation.y -= 0.4 * pull * aim;
-        }
-        // just loosed: the string paw is still back by the cheek, not thrown forward as with a spell
-        arms[1].rotation.x += (-0.75 - arms[1].rotation.x) * shoot * (1 - aim);
-        arms[1].rotation.z += (0.25 - arms[1].rotation.z) * shoot * (1 - aim);
+      const { bow, string, arrow, inPaw } = rig.bow;
+      const p = draw >= 0 ? Math.min(1, draw) : 0, stance = Math.max(aim, shoot);
+      const reach = smooth(0, 0.2, p), toBow = smooth(0.24, 0.45, p), pull = draw >= 0 ? smooth(0.5, 1, p) : 0;
+      if (stance > 0.01) {
+        inner.rotation.y += STANCE * stance;
+        head.rotation.y = -STANCE * 0.9 * stance;
+        arms[0].quaternion.slerp(Q1.setFromUnitVectors(DOWN, BOW_ARM), stance);
+        // where the string paw wants to be: hanging -> at the quiver -> at the nock, which then moves back with the string
+        const back = draw >= 0 ? pull : 1;                       // just loosed: still at the cheek
+        V1.copy(GRIP).addScaledVector(TO_BODY, BOW_STRING + BOW_PULL * back);
+        V2.copy(HANG).lerp(QUIVER, draw >= 0 ? reach : 0).lerp(V1, draw >= 0 ? toBow : 1).sub(SHOULDER).normalize();
+        arms[1].quaternion.slerp(Q1.setFromUnitVectors(DOWN, V2), stance);
       }
-      const { bow, string, arrow } = rig.bow;
-      bow.rotation.x = -arms[0].rotation.x;          // the bow stays upright whatever the paw does
+      // upright whatever the paw does, and turned with the stance so that its belly faces the target
+      bow.quaternion.copy(arms[0].quaternion).invert().multiply(Q1.setFromAxisAngle(UP, -STANCE * stance));
       const nock = -BOW_STRING - BOW_PULL * pull, at = string.geometry.attributes.position;
       if (at.getZ(1) !== nock) { at.setZ(1, nock); at.needsUpdate = true; }
-      arrow.visible = draw >= 0;
+      arrow.visible = draw >= 0 && toBow >= 1;                    // on the bow once it is nocked
       arrow.position.z = nock + ARROW_NOCK;
+      inPaw.visible = draw >= 0 && reach > 0.8 && toBow < 1;      // in the paw on the way from the quiver
     }
 
     blink -= dt;

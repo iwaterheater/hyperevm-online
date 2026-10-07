@@ -990,7 +990,7 @@ const camTarget = new THREE.Vector3(me.x, groundY(me.x, me.z) + 0.45, me.z - 6),
 const prev = { x: 0, z: 0 };   // where the cat stood before it moved this frame
 
 const NEEDS_TARGET = ['strike', 'shot', 'bolt', 'sleep'];
-const DRAW_SHARE = 0.55;   // the part of the time between two shots that is spent drawing the bow
+const DRAW_SHARE = 0.9;   // the part of the time between two shots in which the cat takes an arrow, nocks it and draws
 
 // where an area skill lands: the cursor, pulled in to the skill's range
 function groundPoint(range) {
