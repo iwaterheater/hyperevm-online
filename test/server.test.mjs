@@ -808,3 +808,388 @@ check('start-up removes a temp file that a cut-short save left behind, and nothi
   assert.deepEqual(fs.readdirSync(s.dir).filter((f) => f !== 'data').sort(), ['other.tmp', 'world.json', 'world.json.bak']);
   assert.ok(fs.readFileSync(s.mapFile, 'utf8') === BAKED);
 }));
+
+// ---------------------------------------------------------------- items
+
+const TRADER = FILE.npcs.find((n) => n.kind === 'trader');
+const AT_TRADER = [TRADER.x + 1.5, TRADER.z + 1.5];
+const KING = FILE.spawns.find((spawn) => spawn.types.boss);
+const NAKED = { weapon: null, head: null, body: null, hands: null, feet: null };
+// Characters as players.json holds them. OLD is one from before the game had items: no bag, no equipment.
+const OLD = { name: 'Old', cls: 'fighter', level: 6, xp: 394, sp: 0, skills: {}, gold: 2000, weapon: 2 };
+const seed = (characters) => (s) => {
+  fs.mkdirSync(s.dataDir, { recursive: true });
+  fs.writeFileSync(path.join(s.dataDir, 'players.json'), JSON.stringify(characters));
+};
+
+// Joins and follows a client: its latest private state, its bag and equipment (which travel only when they change),
+// the other players it sees, and every event it was sent.
+async function enter(s, msg) {
+  const c = await join(s, msg);
+  const f = { c, me: null, inv: null, eq: null, others: [], mobs: [], events: [], snaps: 0, send: (m) => c.send(m) };
+  c.ws.on('message', (data) => {
+    const m = JSON.parse(data);
+    if (m.t !== 's') return;
+    f.snaps++;
+    f.me = m.me; f.others = m.p; f.mobs = m.m;
+    if (m.me.inv) f.inv = m.me.inv;
+    if (m.me.eq) f.eq = m.me.eq;
+    f.events.push(...m.e);
+  });
+  // waits until fn() returns something truthy, and resolves with it
+  f.until = async (what, fn, ms = 30000) => {
+    for (const end = Date.now() + ms; ;) {
+      const got = fn();
+      if (got) return got;
+      assert.ok(Date.now() < end, `${what}: not within ${ms} ms`);
+      await sleep(15);
+    }
+  };
+  // the next event of kind k, taken off the list
+  f.event = (k, ms) => f.until(`a "${k}" event`, () => {
+    const i = f.events.findIndex((ev) => ev.k === k);
+    return i >= 0 && f.events.splice(i, 1)[0];
+  }, ms);
+  // Everything sent so far has been handled and its effects have arrived: a chat line comes back at once, and the
+  // snapshot after it carries what the messages before it changed. (The server takes one chat line per half second.)
+  f.settled = async () => {
+    await sleep(550);
+    const mark = `mark-${Math.random()}`;
+    await c.send({ t: 'c', m: mark });
+    await c.take('c', (m) => m.m === mark);
+    const n = f.snaps;
+    await f.until('a snapshot', () => f.snaps > n);
+  };
+  f.w = await c.take('w');
+  await f.until('the first snapshot', () => f.inv && f.eq);
+  return f;
+}
+
+check('items: an old save loads with an empty bag, a new cat gets the starter kit, and both keep what they own', async () => {
+  const first = await withServer({ setup: seed({ 'old-token': OLD }) }, async (s) => {
+    const old = await enter(s, { token: 'old-token', name: 'Old', at: AT_TRADER });
+    assert.deepEqual(old.inv, []);
+    assert.deepEqual(old.eq, NAKED);
+    assert.deepEqual([old.me.level, old.me.gold, old.me.weapon, old.me.cls], [6, 2000, 2, 'fighter']);
+    const fresh = await enter(s, { token: 'new-token', name: 'New', cls: 'mystic' });
+    assert.deepEqual(fresh.inv, [['hp_small', 5]]);
+    assert.deepEqual(fresh.eq, NAKED);
+    // the bag travels when it changes, not with every snapshot
+    const n = old.snaps;
+    await old.until('more snapshots', () => old.snaps > n + 3);
+    assert.equal(old.me.inv, undefined);
+    assert.equal(old.me.eq, undefined);
+
+    for (const id of ['iron_head', 'iron_sword', 'hp_small']) await old.send({ t: 'buy', id, n: id === 'hp_small' ? 7 : 1 });
+    await old.until('three purchases', () => old.inv.length === 3);
+    await old.send({ t: 'eq', i: 0, id: 'iron_head' });
+    await old.until('the helmet on', () => old.eq.head === 'iron_head');
+    assert.deepEqual(old.inv, [['iron_sword', 1], ['hp_small', 7]]);
+    assert.equal(old.me.gold, 2000 - 120 - 240 - 7 * 12);
+    await old.settled();
+  });
+  const file = savedPlayers(first);
+  assert.deepEqual(file['old-token'].inv, [['iron_sword', 1], ['hp_small', 7]]);
+  assert.deepEqual(file['old-token'].equip, { ...NAKED, head: 'iron_head' });
+  assert.deepEqual(file['new-token'].inv, [['hp_small', 5]]);
+  assert.equal(file['new-token'].cls, 'mystic');
+
+  // the next run of the server reads what this one wrote
+  await withServer({ setup: seed(file) }, async (s) => {
+    const old = await enter(s, { token: 'old-token', name: 'Old' });
+    assert.deepEqual(old.inv, [['iron_sword', 1], ['hp_small', 7]]);
+    assert.deepEqual(old.eq, { ...NAKED, head: 'iron_head' });
+    assert.equal(old.me.gold, 2000 - 120 - 240 - 7 * 12);
+    const back = await enter(s, { token: 'new-token', name: 'New' });
+    assert.deepEqual(back.inv, [['hp_small', 5]], 'the starter kit is given once');
+  });
+});
+
+check('items: a save with junk in it loads as far as it makes sense', () => withServer({
+  setup: seed({
+    junk: { ...OLD, inv: [['hp_small', 3], ['no_such_item', 2], ['iron_head', -1], 'x', ['constructor', 1], ['mp_small', 250]], equip: { weapon: 'iron_head', head: 'iron_head', body: 7, tail: 'iron_feet' } },
+    worse: { ...OLD, inv: 'all of it', equip: [1, 2, 3] },
+  }),
+}, async (s) => {
+  const a = await enter(s, { token: 'junk' });
+  assert.deepEqual(a.inv, [['hp_small', 3], ['mp_small', 99], ['mp_small', 99], ['mp_small', 52]]);
+  assert.deepEqual(a.eq, { ...NAKED, head: 'iron_head' });
+  const b = await enter(s, { token: 'worse' });
+  assert.deepEqual(b.inv, []);
+  assert.deepEqual(b.eq, NAKED);
+}));
+
+check('items: wearing and taking off - class and level rules, the swap, the stats, and what others see', () => withServer({
+  setup: seed({
+    fighter: { ...OLD, inv: [['iron_head', 1], ['leather_head', 1], ['iron_staff', 1], ['steel_body', 1], ['iron_sword', 1], ['hp_small', 2], ['iron_feet', 1]] },
+    watcher: { ...OLD, name: 'Watcher', cls: 'mystic' },
+  }),
+}, async (s) => {
+  const f = await enter(s, { token: 'fighter', name: 'Fighter', at: [100, 100] });
+  const w = await enter(s, { token: 'watcher', name: 'Watcher', at: [102, 100] });
+  const seen = () => w.others.find((row) => row[0] === f.w.id);
+  await w.until('the fighter in view', seen);
+  assert.equal(seen()[12], 0, 'a cat that wears nothing has the look code 0');
+  const { lookOf } = await import('../src/shared.js');
+
+  // refused, each with a line for the player: the wrong class, a level too low, a potion
+  await f.send({ t: 'eq', i: 2, id: 'iron_staff' });
+  assert.match((await f.event('err')).m, /Fighter cannot use that weapon/);
+  await f.send({ t: 'eq', i: 3, id: 'steel_body' });
+  assert.match((await f.event('err')).m, /Steel Cuirass requires level 10/);
+  await f.send({ t: 'eq', i: 5, id: 'hp_small' });
+  assert.match((await f.event('err')).m, /cannot be equipped/);
+  // ignored without a word: a stack that is not there, the wrong item for the place, junk, a slot that does not exist
+  for (const msg of [{ t: 'eq', i: 0, id: 'leather_head' }, { t: 'eq', i: 40, id: 'iron_head' }, { t: 'eq', i: -1, id: 'iron_head' }, { t: 'eq', i: '0', id: 'iron_head' },
+    { t: 'eq', i: 0.5, id: 'iron_head' }, { t: 'eq' }, { t: 'eq', i: 0, id: ['iron_head'] }, { t: 'uneq', slot: 'tail' }, { t: 'uneq', slot: 'head' },
+    { t: 'uneq', slot: '__proto__' }, { t: 'uneq' }, { t: 'use', i: 0, id: 'hp_small' }, { t: 'drop', i: 9, id: 'iron_head' }, { t: 'drop', i: 0, id: 'iron_head', n: 2 },
+    { t: 'sell', i: 0, id: 'iron_sword' }, { t: 'buy', id: 'steel_sword' }, { t: 'buy', id: 'constructor' }, { t: 'buy', id: 'hp_small', n: 0 },
+    { t: 'buy', id: 'hp_small', n: 100 }, { t: 'buy', id: 'iron_head', n: 2 }, { t: 'buy', id: 'hp_small', n: 1.5 }, { t: 'sell', i: 5, id: 'hp_small', n: 3 }]) await f.send(msg);
+  await f.settled();
+  assert.deepEqual(f.events.filter((ev) => ev.k === 'err'), []);
+  assert.equal(f.inv.length, 7);
+  assert.deepEqual(f.eq, NAKED);
+  assert.equal(f.me.gold, 2000);
+
+  // the helmet goes on
+  await f.send({ t: 'eq', i: 0, id: 'iron_head' });
+  await f.until('the helmet on', () => f.eq.head === 'iron_head');
+  assert.deepEqual(f.inv.map((stack) => stack[0]), ['leather_head', 'iron_staff', 'steel_body', 'iron_sword', 'hp_small', 'iron_feet']);
+  await w.until('the watcher sees the helmet', () => lookOf(seen()[12]).head === 1);
+  assert.deepEqual(lookOf(seen()[12]), { weapon: -1, head: 1, body: -1, hands: -1, feet: -1 });
+  // another helmet swaps with it, in place
+  await f.send({ t: 'eq', i: 0, id: 'leather_head' });
+  await f.until('the cap on', () => f.eq.head === 'leather_head');
+  assert.deepEqual(f.inv[0], ['iron_head', 1]);
+  assert.equal(f.inv.length, 6);
+  await f.send({ t: 'eq', i: 0, id: 'iron_head' });
+  await f.send({ t: 'eq', i: 3, id: 'iron_sword' });
+  await f.send({ t: 'eq', i: 4, id: 'iron_feet' });   // the sword left the bag: the boots moved up
+  await f.until('sword, helmet and boots on', () => f.eq.weapon === 'iron_sword' && f.eq.feet === 'iron_feet' && f.eq.head === 'iron_head');
+  assert.deepEqual(f.inv.map((stack) => stack[0]), ['leather_head', 'iron_staff', 'steel_body', 'hp_small']);
+  await w.until('the watcher sees all three', () => lookOf(seen()[12]).weapon === 1);
+  assert.deepEqual(lookOf(seen()[12]), { weapon: 1, head: 1, body: -1, hands: -1, feet: 1 });
+  // what the watcher gets is the look and nothing more: no bag, no item ids
+  assert.equal(seen().length, 13);
+  assert.ok(seen().every((v) => typeof v === 'number'));
+
+  // off again; a full bag refuses
+  await f.send({ t: 'uneq', slot: 'head' });
+  await f.until('the helmet off', () => f.eq.head === null);
+  assert.deepEqual(f.inv.at(-1), ['iron_head', 1]);
+  await w.until('the watcher sees it gone', () => lookOf(seen()[12]).head === -1);
+  await f.send({ t: 'drop', i: 1, id: 'iron_staff' });
+  await f.send({ t: 'drop', i: 2, id: 'hp_small', n: 1 });
+  await f.until('the staff and one potion gone', () => f.inv.length === 4 && f.inv[2][1] === 1);
+  assert.deepEqual(f.inv, [['leather_head', 1], ['steel_body', 1], ['hp_small', 1], ['iron_head', 1]]);
+}));
+
+check('items: the server computes with the stats of what is worn', () => withServer({
+  setup: seed({
+    bare: { ...OLD, cls: 'mystic', skills: { mend: 1 } },
+    staffed: { ...OLD, cls: 'mystic', skills: { mend: 1 }, equip: { weapon: 'iron_staff' } },
+    later: { ...OLD, cls: 'mystic', skills: { mend: 1 }, inv: [['iron_staff', 1]] },
+  }),
+}, async (s) => {
+  const { statsOf } = await import('../src/shared.js');
+  // Mend heals by the caster's M.Atk, and says by how much: the one number of the server's stats a client is told
+  const mend = (mAtk) => Math.round(40 * (0.4 + 0.6 * mAtk / 24));
+  const cast = async (p) => { await p.send({ t: 'sk', s: 'mend' }); return (await p.event('healed')).n; };
+  const bare = await enter(s, { token: 'bare', at: [100, 100] }), staffed = await enter(s, { token: 'staffed', at: [100, 100] });
+  const without = statsOf('mystic', 6, { mend: 1, bolt: 1 }, 2).mAtk, withStaff = statsOf('mystic', 6, { mend: 1, bolt: 1 }, 2, {}, { weapon: 'iron_staff' }).mAtk;
+  assert.ok(withStaff > without);
+  assert.equal(await cast(bare), mend(without));
+  assert.equal(await cast(staffed), mend(withStaff));
+  // and from the moment it is put on
+  const later = await enter(s, { token: 'later', at: [100, 100] });
+  await later.send({ t: 'eq', i: 0, id: 'iron_staff' });
+  assert.equal(await cast(later), mend(withStaff));
+}));
+
+check('items: the bag is full - nothing more goes in, and nothing is lost', () => withServer({
+  setup: seed({ full: { ...OLD, inv: [...Array.from({ length: 29 }, () => ['leather_head', 1]), ['hp_small', 98]], equip: { feet: 'iron_feet' } } }),
+}, async (s) => {
+  const f = await enter(s, { token: 'full', at: AT_TRADER });
+  assert.equal(f.inv.length, 30);
+  await f.send({ t: 'uneq', slot: 'feet' });
+  assert.match((await f.event('err')).m, /bag is full/);
+  await f.send({ t: 'buy', id: 'iron_head' });
+  assert.match((await f.event('err')).m, /bag is full/);
+  await f.send({ t: 'buy', id: 'hp_small', n: 2 });
+  assert.match((await f.event('err')).m, /bag is full/);
+  await f.send({ t: 'buy', id: 'hp_small', n: 1 });   // the open stack takes one more
+  assert.deepEqual(await f.event('bought'), { k: 'bought', id: 'hp_small', n: 1, gold: 12 });
+  await f.settled();
+  assert.deepEqual(f.inv.at(-1), ['hp_small', 99]);
+  assert.equal(f.eq.feet, 'iron_feet');
+  assert.equal(f.me.gold, 2000 - 12);
+  // a swap needs no room
+  await f.send({ t: 'sell', i: 0, id: 'leather_head' });
+  await f.event('sold');
+  await f.send({ t: 'buy', id: 'leather_feet' });
+  await f.until('boots bought', () => f.inv.some((stack) => stack[0] === 'leather_feet'));
+  assert.equal(f.inv.length, 30);
+  await f.send({ t: 'eq', i: 29, id: 'leather_feet' });
+  await f.until('the boots swapped', () => f.eq.feet === 'leather_feet');
+  assert.deepEqual(f.inv[29], ['iron_feet', 1]);
+}));
+
+check('items: the Trader - buying and selling change gold and bag, and only beside him', () => withServer({
+  setup: seed({ rich: { ...OLD, gold: 300, inv: [['steel_sword', 1], ['hp_small', 4]] }, far: { ...OLD, gold: 300, inv: [['steel_sword', 1]] } }),
+}, async (s) => {
+  const { ITEMS, sellPrice } = await import('../src/shared.js');
+  const far = await enter(s, { token: 'far', at: [100, 100] });
+  await far.send({ t: 'buy', id: 'hp_small', n: 1 });
+  assert.match((await far.event('err')).m, /Trader is too far away/);
+  await far.send({ t: 'sell', i: 0, id: 'steel_sword', n: 1 });
+  assert.match((await far.event('err')).m, /Trader is too far away/);
+  await far.settled();
+  assert.deepEqual([far.me.gold, far.inv], [300, [['steel_sword', 1]]]);
+
+  const p = await enter(s, { token: 'rich', at: AT_TRADER });
+  await p.send({ t: 'buy', id: 'iron_sword', n: 1 });
+  assert.deepEqual(await p.event('bought'), { k: 'bought', id: 'iron_sword', n: 1, gold: 240 });
+  await p.send({ t: 'buy', id: 'iron_head', n: 1 });   // 60 gold left: not enough for 120
+  assert.match((await p.event('err')).m, /Not enough gold/);
+  await p.send({ t: 'buy', id: 'hp_small', n: 5 });
+  assert.deepEqual(await p.event('bought'), { k: 'bought', id: 'hp_small', n: 5, gold: 60 });
+  await p.until('the purchases in the bag', () => p.inv.length === 3 && p.inv[1][1] === 9);
+  assert.deepEqual(p.inv, [['steel_sword', 1], ['hp_small', 9], ['iron_sword', 1]]);
+  assert.equal(p.me.gold, 0);
+
+  // he buys anything back - also what he does not sell - at about 30 %
+  await p.send({ t: 'sell', i: 0, id: 'steel_sword', n: 1 });
+  assert.deepEqual(await p.event('sold'), { k: 'sold', id: 'steel_sword', n: 1, gold: sellPrice('steel_sword') });
+  assert.equal(sellPrice('steel_sword'), Math.floor(ITEMS.steel_sword.price * 0.3));
+  await p.send({ t: 'sell', i: 0, id: 'hp_small', n: 4 });
+  assert.deepEqual(await p.event('sold'), { k: 'sold', id: 'hp_small', n: 4, gold: 4 * sellPrice('hp_small') });
+  await p.send({ t: 'sell', i: 0, id: 'hp_small', n: 9 });   // only five are left: no deal, no answer
+  await p.settled();
+  assert.deepEqual(p.inv, [['hp_small', 5], ['iron_sword', 1]]);
+  assert.equal(p.me.gold, sellPrice('steel_sword') + 4 * sellPrice('hp_small'));
+  assert.deepEqual(p.events.filter((ev) => ev.k === 'sold' || ev.k === 'err'), []);
+}));
+
+check('items: without a Trader on the map nothing is bought or sold, and nothing breaks', () => withServer({
+  map: edited((f) => { f.npcs = f.npcs.filter((n) => n.kind !== 'trader'); }), setup: seed({ p: { ...OLD, inv: [['hp_small', 2]] } }),
+}, async (s) => {
+  const p = await enter(s, { token: 'p', at: AT_TRADER });
+  await p.send({ t: 'buy', id: 'hp_small', n: 1 });
+  assert.match((await p.event('err')).m, /too far away/);
+  await p.send({ t: 'sell', i: 0, id: 'hp_small', n: 1 });
+  assert.match((await p.event('err')).m, /too far away/);
+  await p.settled();
+  assert.deepEqual([p.me.gold, p.inv], [2000, [['hp_small', 2]]]);
+}));
+
+check('items: a potion restores what is missing, the next one has to wait, and a full bar takes none', () => withServer({
+  setup: seed({ mage: { ...OLD, cls: 'mystic', level: 5, xp: 0, skills: { mend: 1 }, inv: [['mp_small', 3], ['hp_small', 2], ['iron_head', 1]] } }),
+}, async (s) => {
+  const p = await enter(s, { token: 'mage', at: [100, 100] });
+  const full = p.me.maxMp;
+  await p.send({ t: 'use', i: 1, id: 'hp_small' });
+  assert.match((await p.event('err')).m, /health is full/);
+  await p.send({ t: 'use', i: 0, id: 'mp_small' });
+  assert.match((await p.event('err')).m, /mana is full/);
+  await p.send({ t: 'use', i: 2, id: 'iron_head' });
+  assert.match((await p.event('err')).m, /cannot be used/);
+
+  // Mend costs 14 mana; the potion right behind it gives them back (the field restores next to nothing in between)
+  await p.send({ t: 'sk', s: 'mend' });
+  await p.send({ t: 'use', i: 0, id: 'mp_small' });
+  await p.send({ t: 'use', i: 0, id: 'mp_small' });   // the cooldown is shared and still running
+  const drunk = await p.event('potion');
+  assert.equal(drunk.id, 'mp_small');
+  assert.ok(drunk.n >= 12 && drunk.n <= 14, `the potion restored ${drunk.n} of the 14 mana spent`);
+  assert.match((await p.event('err')).m, /not ready yet/);
+  await p.until('one potion less', () => p.inv[0][1] === 2);
+  assert.equal(p.me.mp, full);
+  assert.deepEqual(p.inv, [['mp_small', 2], ['hp_small', 2], ['iron_head', 1]]);
+  assert.equal(p.events.filter((ev) => ev.k === 'potion').length, 0, 'one press, one potion');
+}));
+
+check('items: death keeps the bag and the equipment, and the dead neither drink nor dress', () => withServer({
+  setup: seed({ victim: { name: 'Victim', cls: 'fighter', level: 1, xp: 0, sp: 0, skills: {}, gold: 0, weapon: 1, inv: [['hp_small', 3], ['leather_body', 1]], equip: { head: 'leather_head' } } }),
+}, async (s) => {
+  const p = await enter(s, { token: 'victim', at: [KING.x, KING.z + 8] });
+  await p.until('the King to strike the cat down', () => p.me.dead === 1, 90000);
+  for (const msg of [{ t: 'use', i: 0, id: 'hp_small' }, { t: 'eq', i: 1, id: 'leather_body' }, { t: 'uneq', slot: 'head' }, { t: 'drop', i: 0, id: 'hp_small' }]) {
+    await p.send(msg);
+    assert.match((await p.event('err')).m, /while dead/);
+  }
+  await p.until('the respawn', () => p.me.dead === 0, 30000);
+  await p.settled();
+  assert.deepEqual(p.inv, [['hp_small', 3], ['leather_body', 1]]);
+  assert.deepEqual(p.eq, { ...NAKED, head: 'leather_head' });
+  // alive again and hurt no more (the start point heals): the potion is refused for another reason now
+  await p.send({ t: 'eq', i: 1, id: 'leather_body' });
+  await p.until('dressed after the respawn', () => p.eq.body === 'leather_body');
+}));
+
+check('items: a wounded cat drinks a health potion', () => withServer({
+  setup: seed({ brave: { name: 'Brave', cls: 'fighter', level: 3, xp: 0, sp: 0, skills: {}, gold: 0, weapon: 1, inv: [['hp_small', 3]] } }),
+}, async (s) => {
+  const camp = FILE.spawns[0];
+  const p = await enter(s, { token: 'brave', at: [camp.x, camp.z] });
+  await p.until('a monster to hurt the cat', () => p.me.hp < p.me.maxHp - 5 && !p.me.dead, 90000);
+  const before = p.me.hp;
+  await p.send({ t: 'use', i: 0, id: 'hp_small' });
+  const drunk = await p.event('potion');
+  assert.equal(drunk.id, 'hp_small');
+  assert.ok(drunk.n >= 1 && drunk.n <= 80, `restored ${drunk.n}`);
+  assert.ok(drunk.n >= Math.min(80, p.me.maxHp - before) - 30, 'about what was missing, or the whole potion');
+  await p.until('one potion less', () => p.inv[0][1] === 2);
+}));
+
+check('items: the King leaves a piece of the top tier in the bag of who brought him down', () => withServer({}, async (s) => {
+  const { ITEMS, MOB_KEYS } = await import('../src/shared.js');
+  // a level 40 wizard who cannot be hurt, a few steps from the throne
+  const p = await enter(s, { test: { at: [KING.x, KING.z + 10], god: true, lvl: 40, cls: 'wizard' } });
+  assert.deepEqual(p.inv, [['hp_small', 5]]);
+  const king = await p.until('the King in view', () => p.mobs.find((m) => MOB_KEYS[m[1]] === 'boss'));
+  let loot = null;
+  for (let i = 0; i < 80 && !loot; i++) {
+    await p.send({ t: 'sk', s: 'fireball', tid: king[0] });
+    await sleep(700);
+    loot = p.events.find((ev) => ev.k === 'loot' && ITEMS[ev.id].kind !== 'potion');
+  }
+  assert.ok(loot, 'the King fell without leaving gear');
+  assert.equal(ITEMS[loot.id].tier, 3);
+  assert.equal(loot.n, 1);
+  assert.ok(Math.abs(loot.x - KING.x) < 40 && Math.abs(loot.z - KING.z) < 40, 'the loot event says where the monster fell');
+  await p.until('the piece in the bag', () => p.inv.some((stack) => stack[0] === loot.id));
+  const potions = p.events.find((ev) => ev.k === 'loot' && ITEMS[ev.id].kind === 'potion');
+  assert.equal(potions.n, 3);
+  assert.ok(p.inv.some((stack) => stack[0] === potions.id && stack[1] >= 3));
+}));
+
+check('items: a change of profession puts a weapon of the wrong kind back into the bag', async () => {
+  const sage = FILE.npcs.find((n) => n.kind === 'sage');
+  const at = [sage.x + 1, sage.z + 1];
+  const veteran = { ...OLD, level: 20, xp: 0, equip: { weapon: 'iron_sword', head: 'iron_head' } };
+  await withServer({ setup: seed({ a: { ...veteran, inv: [] }, k: { ...veteran, inv: [] }, full: { ...veteran, inv: Array.from({ length: 30 }, () => ['leather_head', 1]) } }) }, async (s) => {
+    const { statsOf } = await import('../src/shared.js');
+    const archer = await enter(s, { token: 'a', at });
+    await archer.send({ t: 'prof', cls: 'archer' });
+    await archer.until('the archer', () => archer.me.cls === 'archer' && archer.eq.weapon === null);
+    assert.deepEqual(archer.inv, [['iron_sword', 1]]);
+    assert.equal(archer.eq.head, 'iron_head');
+    // a knight still fights with a sword
+    const knight = await enter(s, { token: 'k', at });
+    await knight.send({ t: 'prof', cls: 'knight' });
+    await knight.until('the knight', () => knight.me.cls === 'knight');
+    await knight.settled();
+    assert.equal(knight.eq.weapon, 'iron_sword');
+    assert.deepEqual(knight.inv, []);
+    // no room: the sword stays where it is, counts for nothing, and is not shown to others
+    const full = await enter(s, { token: 'full', at });
+    await full.send({ t: 'prof', cls: 'rogue' });
+    await full.until('the rogue', () => full.me.cls === 'rogue');
+    await full.settled();
+    assert.equal(full.eq.weapon, 'iron_sword');
+    assert.equal(full.inv.length, 30);
+    assert.deepEqual(statsOf('rogue', 20, full.me.skills, 2, {}, full.eq).pAtk, statsOf('rogue', 20, full.me.skills, 2).pAtk);
+    const row = await knight.until('the rogue in view', () => knight.others.find((r) => r[0] === full.w.id));
+    assert.equal(row[12] % 5, 0, 'the weapon digit of the look code');
+  });
+});

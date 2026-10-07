@@ -83,6 +83,7 @@
   /* character status window */
   #sheet { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(400px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
   #sheet.on { display: block; }
+  #hud.bagOpen #sheet { transform: translate(calc(-100% - 8px), -50%); }   /* beside the inventory, which opens to the right of the middle */
   #sheet h2 { margin: 0; font-size: 20px; color: var(--teal); }
   #sheet .sub { font-size: 13px; opacity: .8; }
   #sheet h3 { margin: 12px 0 4px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85; }
@@ -90,6 +91,56 @@
   #sheet .cell { display: flex; justify-content: space-between; font-size: 14px; padding: 2px 0; border-bottom: 1px solid rgba(127, 232, 214, .12); }
   #sheet .cell span { opacity: .8; }
   #sheet .cell b.up { color: var(--gold); }
+  #sheet .cell small.eq { margin-right: 6px; font-weight: 400; color: #8ee68e; }   /* what the equipment adds to the value */
+
+  /* item tiles: the bag, the paper doll, the Trader's list */
+  .slot { position: relative; flex: none; width: 52px; height: 52px; overflow: hidden; border-radius: 10px; background: rgba(255, 255, 255, .05);
+    border: 2px solid rgba(127, 232, 214, .16); }
+  .slot.full { cursor: pointer; color: var(--tint); border-color: var(--tint); background: rgba(6, 24, 21, .8); box-shadow: inset 0 0 16px -5px var(--tint); }
+  .slot.full:hover { filter: brightness(1.3); }
+  .slot.bad { border-style: dashed; opacity: .6; }   /* this character cannot wear it */
+  .slot svg { position: absolute; inset: 8px; width: 32px; height: 32px; fill: currentColor; }
+  .slot .n { position: absolute; right: 4px; bottom: 1px; font-size: 12px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
+  .slot .tag { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; letter-spacing: .06em;
+    text-transform: uppercase; opacity: .45; }
+  .slot .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
+
+  /* inventory: to the right of the middle, so that the Trader's window fits beside it */
+  #bag { top: 50%; left: 50%; transform: translate(8px, -50%); display: none; padding: 16px 18px; pointer-events: auto; }
+  #bag.on { display: block; }
+  #bag h2, #store h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
+  #bag .sub, #store .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
+  #bag .foot { max-width: 530px; margin: 10px 0 0; font-size: 12px; }
+  #bagBody { display: flex; gap: 18px; align-items: center; }
+  #doll { display: grid; gap: 6px; grid-template-areas: ". head ." "weapon body hands" ". feet ."; }
+  #bagGrid { display: grid; gap: 6px; grid-template-columns: repeat(6, 52px); }
+
+  /* the Trader's shop: to the left of the middle */
+  #store { top: 50%; left: 50%; transform: translate(calc(-100% - 8px), -50%); width: min(440px, 46vw); max-height: 78vh; display: none;
+    flex-direction: column; padding: 16px 18px; pointer-events: auto; overflow: hidden; }
+  #store.on { display: flex; }
+  #storeTabs { display: flex; gap: 8px; margin-bottom: 6px; }
+  #storeTabs button, #storeList button { padding: 7px 12px; font-size: 13px; box-shadow: none; white-space: nowrap; }
+  #storeTabs button:not(.on) { color: #e8fffa; background: rgba(255, 255, 255, .12); }
+  #storeList { overflow-y: auto; padding-right: 6px; }
+  #storeList button:disabled { background: rgba(255, 255, 255, .15); color: rgba(255, 255, 255, .5); cursor: default; transform: none; }
+
+  /* a window too narrow for two panels around its middle: they keep to its edges instead */
+  @media (max-width: 1250px) {
+    #bag { left: auto; right: 8px; transform: translateY(-50%); }
+    #store, #hud.bagOpen #sheet { left: 8px; transform: translateY(-50%); }
+  }
+
+  /* item tooltip */
+  #tip { display: none; width: 250px; padding: 10px 12px; font-size: 13px; line-height: 1.35; background: rgba(4, 16, 14, .94); pointer-events: none; z-index: 5; }
+  #tip.on { display: block; }
+  #tip .name { display: block; font-size: 15px; }
+  #tip .kind { margin: 1px 0 5px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); opacity: .85; }
+  #tip .name + .kind { margin-top: 0; }
+  #tip .dim { opacity: .7; }
+  #tip .good { color: #8ee68e; }
+  #tip .bad { color: #ff8095; }
+  #tip .hint { margin-top: 6px; font-size: 12px; color: var(--gold); }
 
   /* class picker in the menu */
   .classes { display: flex; gap: 10px; justify-content: center; margin-bottom: 12px; }
@@ -184,9 +235,22 @@
     <div class="sub" id="bookSub"></div>
     <div id="bookList"></div>
   </div>
+  <div class="panel" id="store">
+    <h2>Trader</h2>
+    <div class="sub" id="storeSub"></div>
+    <div id="storeTabs"><button data-tab="buy">Buy</button><button data-tab="sell">Sell</button></div>
+    <div id="storeList"></div>
+  </div>
+  <div class="panel" id="bag">
+    <h2>Inventory</h2>
+    <div class="sub" id="bagSub"></div>
+    <div id="bagBody"><div id="doll"></div><div id="bagGrid"></div></div>
+    <div class="sub foot">Click an item to wear or drink it · click a worn item to take it off · right-click an item twice to destroy it</div>
+  </div>
+  <div class="panel" id="tip"></div>
   <div id="shop"></div>
   <div class="panel" id="devbar"><span id="devPos"></span><button id="editBtn">Edit here</button></div>
-  <div id="hint">WASD — move · click / Tab — target · F — attack · 1–8 — skills · K — skill book · C — character · X — sit · RMB drag — camera · wheel — zoom · Space — jump · Enter — chat · B — Blacksmith</div>
+  <div id="hint">WASD — move · click / Tab — target · F — attack · 1–8 — skills · Q / E — potions · I — inventory · K — skills · C — character · X — sit · RMB / wheel — camera · Space — jump · Enter — chat · B — Blacksmith · T — Trader</div>
 </div>
 <div id="flash"></div>
 
@@ -199,6 +263,8 @@
     <div><kbd>F</kbd>attack</div>
     <div><kbd>1–8</kbd>skills</div>
     <div><kbd>K</kbd>skill book</div>
+    <div><kbd>I</kbd>inventory</div>
+    <div><kbd>Q</kbd><kbd>E</kbd>potions</div>
     <div><kbd>C</kbd>character</div>
     <div><kbd>X</kbd>sit</div>
     <div><kbd>RMB</kbd>camera</div>

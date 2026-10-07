@@ -1,13 +1,13 @@
 # HyperCat Online
 
 A small open-world browser MMORPG starring a chibi cat in a hoodie, modelled on classic target-based MMORPGs.
-Players share one seamless world, pick a class, hunt skeletons together, level up, learn skills and choose a profession.
+Players share one seamless world, pick a class, hunt skeletons together, level up, learn skills, choose a profession, and find, buy and wear weapons and armour.
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0)
 - **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0); the King's fortress, ruins, chests and coins from [KayKit Dungeon Remastered](https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0) — all by Kay Lousberg (CC0)
 - **Townsfolk:** guards, blacksmith, sage and trader from the [KayKit Character Pack: Adventurers](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) by Kay Lousberg (CC0)
-- **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP and loot
+- **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP, loot, items and gold
 
 ## Quick start
 
@@ -39,11 +39,14 @@ PORT=3000 npm start
 | `Esc` | Clear the target |
 | `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack) |
 | `1` – `8` | Skills, in the order they were learned; they cost mana and most have a cast time or a cooldown. The cat stands still while casting |
-| `C` | Character status window: attributes and combat stats |
+| `Q` / `E` | Drink a health / mana potion from the bag. Potions share a cooldown of 6 seconds |
+| `I` | Inventory: the five equipment slots and the bag. Click an item to wear or drink it, click a worn item to take it off, right-click an item twice to destroy it; hover for its stats and what it would change |
+| `C` | Character status window: attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn. Buying skills and choosing a profession only works next to the Sage in town |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
 | `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
+| `T` | Trade (stand next to the Trader in town): buy potions and gear, sell anything from the bag |
 | `Enter` | Open chat / send message |
 | `M` | Mute sound |
 
@@ -55,7 +58,7 @@ In the map that ships with the game, zones get harder the further you go from th
 
 | Zone | Distance from centre | Monster levels |
 | --- | --- | --- |
-| Hypercat Town | 0 – 24 | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon shop |
+| Hypercat Town | 0 – 24 | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon upgrades, the Trader's shop |
 | Green Meadows | 24 – 95 | 1 – 4 |
 | Graveyard Wastes | 95 – 175 | 5 – 9 |
 | Cursed Lands | 175 – 260 | 10 – 15 |
@@ -90,7 +93,7 @@ Each class has its own hoodie colour and gear.
 
 ### Character stats
 
-Press `C` for the character status window. Every class has six fixed base attributes, and all combat stats are derived from them, the level, the weapon upgrade, passive skills and active buffs — there are no points to assign.
+Press `C` for the character status window. Every class has six fixed base attributes, and all combat stats are derived from them, the level, the weapon upgrade, passive skills, active buffs and the equipment — there are no points to assign. A value raised by a buff is shown in gold; the part of a value that comes from equipment stands beside it in green.
 
 | Attribute | Raises |
 | --- | --- |
@@ -113,13 +116,35 @@ Press `C` for the character status window. Every class has six fixed base attrib
 - Active skills go onto keys `1`–`8`; passive skills raise stats permanently.
 - Monsters can be stunned, put to sleep, slowed and made to bleed; the Skeleton King ignores stuns and sleep.
 
+### Items and equipment
+
+Press `I` for the inventory: a bag of 30 slots and five equipment slots — weapon, head, body, hands, feet. What a cat wears is drawn on it, each piece in the colour of its tier, for everybody to see.
+
+| Tier | Level | Armour (P. Def: head / body / hands / feet) | Sword · Daggers · Bow (P. Atk) | Staff (M. Atk) | From |
+| --- | --- | --- | --- | --- | --- |
+| Leather / Bronze | 1 | 2 / 5 / 2 / 2 | +4 · +3 · +5 | +5 | Trader, loot |
+| Iron | 5 | 5 / 11 / 4 / 5 | +8 · +7 · +12 | +11 | Trader, loot |
+| Steel | 10 | 8 / 18 / 7 / 8 | +14 · +12 · +20 | +18 | loot only |
+| Hypurr | 15 | 12 / 27 / 10 / 12 | +20 · +18 · +29 | +26 | loot only |
+
+- **Armour** can be worn by any class. Besides P. Def, helmets give M. Def (3 / 6 / 10 / 15), gloves Accuracy (1 – 4) and boots Speed (2 – 8).
+- **Weapons** come in four families and a class can only use its own: swords (Fighter, Knight — the Knight's shield is part of his look), daggers (Rogue, +10 – 40 Critical), bows (Archer) and staves (Mystic, Wizard, Cleric). With an empty weapon slot the cat fights with the basic weapon of its class, as before. After a change of profession a weapon of the wrong family goes back into the bag.
+- The bonus of an item is added to the base value of the class, so it grows with the level, and the Blacksmith's upgrade (`B`), passive skills and buffs multiply a weapon item like the basic weapon. The tooltip of an item shows what wearing it would change in the numbers of the status window.
+- **Potions** stack up to 99: Lesser Health Potion (80 HP), Health Potion (250 HP), Lesser Mana Potion (50 MP), Mana Potion (160 MP). `Q` drinks a health potion and `E` a mana potion — the strongest in the bag that would not be wasted; all potions share a 6-second cooldown.
+- **Loot** goes straight into the bag of whoever lands the killing blow, with a line in the chat. A minion leaves a piece of gear about one time in sixteen, a warrior one time in five, and the chance grows a little with the monster's level; the tier matches the level of the monster (now and then one tier lower). The Skeleton King leaves a Hypurr piece and three potions to everyone who wounded him. Chests sometimes hold a potion and seldom a piece of gear — the richer the chest, the better. Loot that does not fit into a full bag is lost.
+- A new character starts with five Lesser Health Potions. Dying loses no items.
+
+### The Trader
+
+Stand next to the Trader in town and press `T`. He sells the four potions and all Leather and Iron gear (24 – 240 gold a piece; what a character cannot wear is listed last, with the reason), and buys anything from the bag for 30 % of its price. A worn item has to be taken off before it can be sold.
+
 ### Progression
 
 - Killing monsters gives XP and SP to every player who damaged them. A level needs `100 × level²` experience.
 - Levelling up raises health and mana and fully restores both.
 - Mana is spent on skills and comes back slowly in the field, quickly while sitting, and fastest in town.
-- Monsters drop gold coins.
-- Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold. The King's hoard waits inside his fortress.
+- Monsters drop gold coins, and now and then potions and gear (see [Items and equipment](#items-and-equipment)).
+- Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold and the better what else may lie in them. The King's hoard waits inside his fortress.
 - Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises P. Atk and M. Atk.
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
 
@@ -230,7 +255,7 @@ server.js         HTTP static server + WebSocket game server; loads the map and,
 map/world.json    The world: terrain, scenery, regions, monster camps, chests, townsfolk, start point
 map/backups/      The map before each save (created by the server, git-ignored)
 src/main.js       Client: rendering, input, networking, HUD
-src/cat.js        The cat: a Blender model of rigid parts (assets/cat/hypercat.glb), animated in code; weapons and armour
+src/cat.js        The cat: a Blender model of rigid parts (assets/cat/hypercat.glb), animated in code; weapons and armour, tinted by tier
 art/              The Blender source of the cat, its weapons and its armour (hypercat.blend)
 src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations
 assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
@@ -248,17 +273,20 @@ src/map/builtin.js  The models that are code: fountain, lamp posts, bushes, crys
 src/postfx.js     Bloom and tone mapping of the finished frame
 src/editor/       The map editor: the map store with undo, viewport, markers, tools/, panels/, css/
 src/geo.js        Helpers for building vertex-coloured low-poly geometry
-src/shared.js     Constants and formulas used by both client and server
+src/shared.js     Constants, tables (monsters, classes, skills, items) and formulas used by both client and server
 tools/bake-map.mjs      Wrote the first map/world.json from the old world generator; refuses to overwrite an edited map without --force
 tools/check-imports.mjs Checks every import and page reference of this bundler-less project (npm run check)
-test/             Tests of the map format, the server and the editor's logic (npm test)
+test/             Tests of the map format, the items, the server and the editor's logic (npm test)
 data/             Saved player progress (created at runtime, git-ignored)
 ```
 
 ## How it works
 
 - The server simulates the world at 15 ticks per second and sends each player a snapshot of everything nearby.
-- Monsters, projectile hits, damage, XP, gold, chests and upgrades are decided by the server.
+- Monsters, projectile hits, damage, XP, gold, loot, chests, items and upgrades are decided by the server.
+- Items are one table, `ITEMS` in `src/shared.js`, used by the server, the client and the tests alike; `statsOf()` in the same file turns class, level, skills, buffs and equipment into combat stats, so the server's damage and the client's status window always agree.
+- Every item request — wear, take off, drink, buy, sell, destroy — names the stack by its place in the bag and by its item, and the server checks all of it: the stack is there, the class and the level fit, the Trader is in reach, the gold and the room in the bag suffice, the cat is alive. A request that cannot be done is answered with a line the player sees; nothing changes on the client until the server says so.
+- The owner of a bag receives it, and what it wears, only when they change. Other players get one number per cat — which pieces it wears and of which tier — and nothing of anybody's bag.
 - Player movement is simulated on the client for responsiveness; the server sanity-checks the speed and snaps cheaters back.
 - The world is one file. The server reads `map/world.json` when it starts and refuses to run with a map that does not validate; the client fetches the same map from `/api/map` and draws it. Scenery is drawn as instanced batches, one per model, so thousands of trees and walls stay cheap to draw.
 - From the map the server takes where monsters live (camps: a disc, a count, a mix of monster types, a level range, a respawn time), where chests and townsfolk stand, where new cats appear and which regions are safe. Monsters never appear on water or lava, or inside a safe region.
@@ -267,7 +295,8 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Melee monsters telegraph their attacks: they stop, raise the weapon and the hit lands 0.4 seconds later, so it can be dodged.
 - Combat is target-based, as in classic MMORPGs: the server checks that the selected monster is alive and within reach before a swing or a bolt lands.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
-- Progress (class, level, XP, SP, skills, gold, weapon) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
+- A character saved before the game had items loads with an empty bag; whatever a save holds that is not a known item is left out when it is read.
+- Progress (class, level, XP, SP, skills, gold, weapon upgrade, bag and equipment) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 
 ## Playing with friends over the internet
 
@@ -276,7 +305,8 @@ The server is a single Node.js process, so any host that can run Node and accept
 ## Limitations
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
-- No accounts, no PvP, no parties, no inventory beyond gold and a weapon level.
+- No accounts, no PvP, no parties. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
+- Every piece of armour is one model in four tints, and all tiers of a weapon share the model of the class's basic weapon.
 - Clerics can only heal and bless players standing near them; there is no targeting of other players yet.
 - The cat and a handful of built-in models (the fountain, lamp posts, bushes, crystals, spikes, the ring of the King's lair) are built from code; everything else is imported models placed by the map.
 - The ground is flat: a grid of ground types two units wide, with no heights. Hills are models.

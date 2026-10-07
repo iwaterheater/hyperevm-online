@@ -16,11 +16,8 @@ const PAW = 0.365;                  // from the shoulder down the arm to the mid
 const ARM_DIR = new THREE.Vector3(0.52, -0.85, 0.06).normalize();
 // the soft, closed shapes that get a dark contour
 const OUTLINED = /^(Head|Body|Hem|Hood|Collar|Sleeve|Cuff|Paw|Leg|Foot|Ear[LR]|Tail)/;
-// Until the game has an inventory, what a cat wears follows what it fights with.
-const ARMOR_FOR = {
-  shield: { helmet: true, chest: true, gloves: true, boots: true },
-  sword: { gloves: true, boots: true },
-};
+// The pieces of armour, by the names of their objects in the model. Each is shown on its own; its plates (the material
+// a_steel) take the colour of the item's tier, its trim and straps stay as modelled.
 const PIECES = { helmet: ['ArmorHelmet'], chest: ['ArmorChest'], gloves: ['ArmorGloveL', 'ArmorGloveR'], boots: ['ArmorBootL', 'ArmorBootR'] };
 
 function makeGradientMap() {
@@ -30,7 +27,8 @@ function makeGradientMap() {
   return tex;
 }
 
-// The file is loaded once; every cat is a clone of it that shares its geometry and all but its hoodie materials.
+// The file is loaded once; every cat is a clone of it that shares its geometry and all materials but those it colours
+// for itself: its hoodie, the plates of its armour, and the blade and the glow of a weapon better than the basic one.
 let shared = null;
 function getShared() {
   if (shared) return shared;
@@ -65,15 +63,16 @@ function getShared() {
   return shared;
 }
 
-// -> { group, update(dt, state), setLook({ hoodie, weapon, armor }) }. The group is there at once, standing on its
-// origin and facing +Z; the model appears in it when the file has arrived.
-export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null } = {}) {
+// -> { group, update(dt, state), setLook({ hoodie, weapon, armor, weaponTint }) }. The group is there at once, standing
+// on its origin and facing +Z; the model appears in it when the file has arrived.
+export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, weaponTint = null } = {}) {
   const S = getShared();
   const group = new THREE.Group();   // origin at the feet, facing +Z
   const inner = new THREE.Group();   // bob / lean
   group.add(inner);
-  const own = { hoodie: S.toon(hoodie), trim: S.toon(new THREE.Color(hoodie).multiplyScalar(0.62)) };
-  let look = { hoodie, weapon, armor };
+  // Materials of this cat alone. Those of the armour and the weapon are made when first needed: most cats wear nothing.
+  const own = { hoodie: S.toon(hoodie), trim: S.toon(new THREE.Color(hoodie).multiplyScalar(0.62)), plates: {}, blade: null, glow: null };
+  let look = { hoodie, weapon, armor, weaponTint };
   let rig = null;                    // the pivots, once the model is in
 
   S.ready.then((scene) => {
@@ -84,6 +83,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null } = 
     model.traverse((o) => { if (o.isMesh) meshes.push(o); });   // listed first: the contours added below are meshes too
     for (const o of meshes) {
       const swap = (m) => (m.name === 'cat_hoodie' ? own.hoodie : m.name === 'cat_hoodie_trim' ? own.trim : S.mats.get(m.name));
+      o.userData.mat = o.material.name;   // the shared materials carry no names: this is how a part is found again
       o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
       o.castShadow = true;
       if (OUTLINED.test(o.name)) o.add(new THREE.Mesh(o.geometry, S.outline));
@@ -105,10 +105,17 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null } = 
     for (const name of ['Sword', 'Bow', 'Arrow', 'Staff']) {
       const w = scene.getObjectByName(name).clone(true);
       w.position.set(0, 0, 0); w.rotation.set(0, 0, 0); w.scale.setScalar(1);
-      w.traverse((o) => { if (o.isMesh) { o.material = S.mats.get(o.material.name); o.castShadow = true; } });
+      w.traverse((o) => { if (o.isMesh) { o.userData.mat = o.material.name; o.material = S.mats.get(o.material.name); o.castShadow = true; } });
       weapons[name] = w;
     }
-    rig = { model, arms, weapons, head: node('PHead'), legs: [node('PLegL'), node('PLegR')], tail: node('PTail'), eyes: [node('EyeL'), node('EyeR')], gear: [] };
+    // each piece of armour: the objects to show and hide, and those of their meshes that are plates
+    const pieces = {};
+    for (const [piece, names] of Object.entries(PIECES)) {
+      const nodes = names.map(node).filter(Boolean), plates = [];
+      for (const n of nodes) n.traverse((o) => { if (o.isMesh && o.userData.mat === 'a_steel') plates.push(o); });
+      pieces[piece] = { nodes, plates };
+    }
+    rig = { model, arms, weapons, pieces, head: node('PHead'), legs: [node('PLegL'), node('PLegR')], tail: node('PTail'), eyes: [node('EyeL'), node('EyeR')], gear: [] };
     inner.add(model);
     setLook(look);
   }, () => {});
@@ -144,19 +151,34 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null } = 
     hold(i).add(sword);
   }
 
-  // Recolours the hoodie and swaps what is held and worn, e.g. when the character changes class.
-  // armor: { helmet, chest, gloves, boots } - which pieces show; left out, it follows the weapon.
-  function setLook({ hoodie: color = HOODIE, weapon: held = 'sword', armor: worn = null } = {}) {
-    look = { hoodie: color, weapon: held, armor: worn };
+  // Recolours the hoodie and swaps what is held and worn, e.g. when the character changes class or its equipment.
+  //   armor: { helmet, chest, gloves, boots } - for each piece the colour of its plates (a number), or nothing to hide it;
+  //          `true` shows the piece in the steel it was modelled in
+  //   weaponTint: the colour of the blade and of the glow of what is held; nothing leaves the weapon as modelled
+  function setLook({ hoodie: color = HOODIE, weapon: held = 'sword', armor: worn = null, weaponTint: tint = null } = {}) {
+    look = { hoodie: color, weapon: held, armor: worn, weaponTint: tint };
     own.hoodie.color.set(color);
     own.trim.color.set(color).multiplyScalar(0.62);
     if (!rig) return;
     for (const g of rig.gear) g.removeFromParent();
     rig.gear.length = 0;
     (GEAR[held] || GEAR.sword)();
-    const on = worn ?? ARMOR_FOR[held] ?? {};
-    for (const [piece, names] of Object.entries(PIECES)) {
-      for (const name of names) { const o = rig.model.getObjectByName(name); if (o) o.visible = !!on[piece]; }
+    if (typeof tint === 'number') {
+      // this cat's own blade and glow: a shared material tinted here would recolour the weapon of every cat
+      own.blade ??= S.toon(tint);
+      own.glow ??= new THREE.MeshBasicMaterial();
+      own.blade.color.set(tint);
+      own.glow.color.set(tint).multiplyScalar(1.9);   // as bright as the modelled glow, so it blooms too
+      const mine = { w_steel: own.blade, w_glow: own.glow };
+      for (const g of rig.gear) g.traverse((o) => { if (o.isMesh && mine[o.userData.mat]) o.material = mine[o.userData.mat]; });
+    }
+    for (const [piece, { nodes, plates }] of Object.entries(rig.pieces)) {
+      const value = worn?.[piece], on = !!value || value === 0;   // 0 is a colour too: black
+      for (const o of nodes) o.visible = on;
+      if (!on) continue;
+      const plain = typeof value !== 'number';
+      if (!plain) (own.plates[piece] ??= S.toon(value)).color.set(value);
+      for (const o of plates) o.material = plain ? S.mats.get('a_steel') : own.plates[piece];
     }
   }
 

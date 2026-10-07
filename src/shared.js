@@ -157,12 +157,209 @@ export const skillsFor = (cls) => SKILL_KEYS.filter((id) => classLine(cls).inclu
 // learned active skills in hotbar order (keys 1, 2, 3…)
 export const hotbar = (cls, learned) => skillsFor(cls).filter((id) => SKILLS[id].kind !== 'passive' && learned[id] > 0).slice(0, MAX_SLOTS);
 
-// Every combat stat of a character, derived from its class attributes, level, weapon upgrade level, passive skills
-// and active buffs (`buffs` maps a stat name to a multiplier).
+// ---------------------------------------------------------------- items
+
+// What a cat can wear, and in what order the slots travel in a look code.
+export const EQUIP_SLOTS = ['weapon', 'head', 'body', 'hands', 'feet'];
+export const SLOT_NAMES = { weapon: 'Weapon', head: 'Head', body: 'Body', hands: 'Hands', feet: 'Feet' };
+// Gear comes in tiers. id / arms: the prefix of the item ids of armour / of weapons. lvl: the level needed to wear it.
+// price: of a helmet; other pieces cost a multiple of it. color: the tint of the piece on the cat and of its icon.
+export const TIERS = [
+  { id: 'leather', arms: 'bronze', name: 'Leather', lvl: 1,  price: 30,   color: 0xa9713c },
+  { id: 'iron',    arms: 'iron',   name: 'Iron',    lvl: 5,  price: 120,  color: 0x9aa5b4 },
+  { id: 'steel',   arms: 'steel',  name: 'Steel',   lvl: 10, price: 400,  color: 0xd3e2f4 },
+  { id: 'hypurr',  arms: 'hypurr', name: 'Hypurr',  lvl: 15, price: 1200, color: 0x3fd9b0 },
+];
+// Armour by slot, one value per tier. Any class wears any of it. Bonuses are added where the class's own base values
+// are (see statsOf), so P.Def and M.Def grow with the level like the rest of the defence.
+const ARMOR = {
+  head:  { cost: 1,   names: ['Leather Cap', 'Iron Helmet', 'Steel Helm', 'Hypurr Crown'],            pDef: [2, 5, 8, 12],   mDef: [3, 6, 10, 15] },
+  body:  { cost: 1.5, names: ['Leather Tunic', 'Iron Breastplate', 'Steel Cuirass', 'Hypurr Plate'],  pDef: [5, 11, 18, 27] },
+  hands: { cost: 0.8, names: ['Leather Gloves', 'Iron Gauntlets', 'Steel Gauntlets', 'Hypurr Claws'], pDef: [2, 4, 7, 10],   acc: [1, 2, 3, 4] },
+  feet:  { cost: 0.9, names: ['Leather Boots', 'Iron Greaves', 'Steel Sabatons', 'Hypurr Striders'],  pDef: [2, 5, 8, 12],   speed: [2, 4, 6, 8] },
+};
+// Weapons by family - the kind of weapon a class fights with (see weaponFamily). A class can only equip its own family.
+const ARMS = {
+  sword:   { names: ['Bronze Sword', 'Iron Sword', 'Steel Sword', 'Hypurr Blade'],        pAtk: [4, 8, 14, 20] },
+  daggers: { names: ['Bronze Daggers', 'Iron Daggers', 'Steel Daggers', 'Hypurr Fangs'],  pAtk: [3, 7, 12, 18], crit: [10, 20, 30, 40] },
+  bow:     { names: ['Short Bow', 'Hunting Bow', 'Composite Bow', 'Hypurr Longbow'],      pAtk: [5, 12, 20, 29] },
+  staff:   { names: ['Apprentice Staff', 'Adept Staff', 'Mage Staff', 'Hypurr Staff'],    mAtk: [5, 11, 18, 26], pAtk: [1, 3, 5, 7] },
+};
+const WEAPON_COST = 2;
+export const WEAPON_FAMILIES = Object.keys(ARMS);
+export const BONUS_KEYS = ['pAtk', 'mAtk', 'pDef', 'mDef', 'acc', 'crit', 'speed'];
+export const BONUS_NAMES = { pAtk: 'P. Atk', mAtk: 'M. Atk', pDef: 'P. Def', mDef: 'M. Def', acc: 'Accuracy', crit: 'Critical', speed: 'Speed' };
+
+// Every item of the game, by id.
+//   kind: weapon | armor | potion      slot: where it is worn (gear only)       family: the weapon family (weapons only)
+//   tier: index into TIERS (gear)      lvl: level needed to wear it             price: what the Trader asks for it
+//   bonus: what it adds while worn     hp / mp: what a potion restores
+export const ITEMS = {
+  hp_small: { name: 'Lesser Health Potion', kind: 'potion', hp: 80,  price: 12 },
+  hp_large: { name: 'Health Potion',        kind: 'potion', hp: 250, price: 40 },
+  mp_small: { name: 'Lesser Mana Potion',   kind: 'potion', mp: 50,  price: 12 },
+  mp_large: { name: 'Mana Potion',          kind: 'potion', mp: 160, price: 40 },
+};
+TIERS.forEach((tier, t) => {
+  const bonusOf = (row) => Object.fromEntries(BONUS_KEYS.filter((k) => row[k]).map((k) => [k, row[k][t]]));
+  for (const [slot, row] of Object.entries(ARMOR)) {
+    ITEMS[`${tier.id}_${slot}`] = { name: row.names[t], kind: 'armor', slot, tier: t, lvl: tier.lvl, price: Math.round(tier.price * row.cost), bonus: bonusOf(row) };
+  }
+  for (const [family, row] of Object.entries(ARMS)) {
+    ITEMS[`${tier.arms}_${family}`] = { name: row.names[t], kind: 'weapon', slot: 'weapon', family, tier: t, lvl: tier.lvl, price: tier.price * WEAPON_COST, bonus: bonusOf(row) };
+  }
+});
+export const ITEM_KEYS = Object.keys(ITEMS);
+// The item of an id that came from outside (a client, a save file): "constructor" is not an item, and neither is 7.
+export const itemOf = (id) => (typeof id === 'string' && Object.hasOwn(ITEMS, id) ? ITEMS[id] : undefined);
+
+export const BAG_SIZE = 30;       // stacks a bag holds
+export const STACK_MAX = 99;      // potions in one stack; gear does not stack
+export const POTION_CD = 6;       // seconds before the next potion of any kind
+export const SELL_RATE = 0.3;     // the share of its price the Trader pays for an item
+export const SHOP_TIER = 1;       // the best tier the Trader sells; better gear is only found
+export const STARTER_KIT = [['hp_small', 5]];   // what a new character has in its bag
+export const stackMax = (id) => (ITEMS[id].kind === 'potion' ? STACK_MAX : 1);
+export const sellPrice = (id) => Math.max(1, Math.floor(ITEMS[id].price * SELL_RATE));
+// What the Trader sells, in the order of his list.
+export const SHOP = ITEM_KEYS.filter((id) => ITEMS[id].kind === 'potion' || ITEMS[id].tier <= SHOP_TIER);
+
+// The knight fights with a sword too; his shield is part of his look, not an item.
+export const weaponFamily = (cls) => (CLASSES[cls].weapon === 'shield' ? 'sword' : CLASSES[cls].weapon);
+// Why this character cannot wear an item, as a line for the player; '' when it can.
+export function equipError(cls, level, id) {
+  const it = itemOf(id);
+  if (!it || !it.slot) return 'That cannot be equipped';
+  if (it.family && it.family !== weaponFamily(cls)) return `A ${CLASSES[cls].name} cannot use that weapon`;
+  if (level < it.lvl) return `${it.name} requires level ${it.lvl}`;
+  return '';
+}
+// An item in a slot counts when it belongs there - and, for a weapon, when the class can still fight with it: after a
+// change of profession the old sword may sit in the paw of an archer whose bag was too full to take it.
+const worn = (equip, slot, cls) => {
+  const it = itemOf(equip?.[slot]);
+  return it && it.slot === slot && (!it.family || !cls || it.family === weaponFamily(cls)) ? it : null;
+};
+// The sum of what the equipment adds, by bonus key. `equip` maps a slot to an item id (or null).
+export function equipBonus(equip, cls) {
+  const sum = Object.fromEntries(BONUS_KEYS.map((k) => [k, 0]));
+  for (const slot of EQUIP_SLOTS) {
+    const it = worn(equip, slot, cls);
+    if (it) for (const [k, v] of Object.entries(it.bonus)) sum[k] += v;
+  }
+  return sum;
+}
+
+// A bag is a list of stacks, [id, count], at most BAG_SIZE of them, without holes.
+// How many of `n` more of an item would fit.
+export function roomFor(inv, id, n = 1) {
+  const max = stackMax(id);
+  let room = (BAG_SIZE - inv.length) * max;
+  for (const s of inv) if (s[0] === id) room += max - s[1];
+  return Math.min(n, room);
+}
+// Puts up to `n` of an item into the bag - onto the stacks of its kind first - and returns how many went in.
+export function addItem(inv, id, n = 1) {
+  const max = stackMax(id);
+  let left = n;
+  for (const s of inv) {
+    if (left <= 0) break;
+    if (s[0] !== id || s[1] >= max) continue;
+    const put = Math.min(left, max - s[1]);
+    s[1] += put; left -= put;
+  }
+  while (left > 0 && inv.length < BAG_SIZE) {
+    const put = Math.min(left, max);
+    inv.push([id, put]); left -= put;
+  }
+  return n - left;
+}
+// Takes `n` off the stack at index i; a stack that runs out leaves the bag. False when the stack does not hold that many.
+export function takeItem(inv, i, n = 1) {
+  const s = inv[i];
+  if (!s || !Number.isInteger(n) || n < 1 || s[1] < n) return false;
+  s[1] -= n;
+  if (!s[1]) inv.splice(i, 1);
+  return true;
+}
+// A bag and an equipment as a save file holds them, made safe: whatever is not a known item in a sane amount is left
+// out, so an old save, a hand-edited one or one from a version with other items always loads.
+export function cleanBag(raw) {
+  const inv = [];
+  if (!Array.isArray(raw)) return inv;
+  for (const s of raw) {
+    if (!Array.isArray(s) || !itemOf(s[0]) || !Number.isInteger(s[1]) || s[1] < 1) continue;
+    addItem(inv, s[0], Math.min(s[1], STACK_MAX * BAG_SIZE));
+  }
+  return inv;
+}
+export function cleanEquip(raw) {
+  const equip = {};
+  for (const slot of EQUIP_SLOTS) equip[slot] = raw && typeof raw === 'object' && worn(raw, slot) ? raw[slot] : null;
+  return equip;
+}
+
+// What other players need to DRAW a cat: per slot 0 (nothing) or the tier + 1, as the digits of one number.
+const LOOK_BASE = TIERS.length + 1;
+export function lookCode(equip, cls) {
+  let code = 0;
+  EQUIP_SLOTS.forEach((slot, i) => {
+    const it = worn(equip, slot, cls);
+    if (it) code += (it.tier + 1) * LOOK_BASE ** i;
+  });
+  return code;
+}
+// -> { weapon, head, body, hands, feet }: the tier worn in each slot, -1 for nothing
+export function lookOf(code) {
+  const n = Number.isInteger(code) && code > 0 ? code : 0;
+  return Object.fromEntries(EQUIP_SLOTS.map((slot, i) => [slot, Math.min(TIERS.length, Math.floor(n / LOOK_BASE ** i) % LOOK_BASE) - 1]));
+}
+
+// ---- loot. `rnd` is Math.random or a test's stand-in; every function draws from it in a fixed order.
+
+// The chance that a monster leaves a piece of gear, at level 1; it grows by 4 % of itself with each level.
+const GEAR_CHANCE = { chaser: 0.06, runner: 0.05, shooter: 0.08, tank: 0.2, boss: 1 };
+export const POTION_CHANCE = 0.12;
+export const gearChance = (type, lvl) => Math.min(1, GEAR_CHANCE[type] * (1 + 0.04 * (lvl - 1)));
+// The best tier a character - or the loot of a monster - of this level can be.
+export const tierForLevel = (lvl) => TIERS.reduce((best, tier, t) => (lvl >= tier.lvl ? t : best), 0);
+// One piece of gear of a tier: armour twice as often as a weapon, every family and slot alike.
+function pickGear(t, r) {
+  const pool = [];
+  for (const slot of Object.keys(ARMOR)) pool.push(`${TIERS[t].id}_${slot}`, `${TIERS[t].id}_${slot}`);
+  for (const family of WEAPON_FAMILIES) pool.push(`${TIERS[t].arms}_${family}`);
+  return pool[Math.min(pool.length - 1, Math.floor(r * pool.length))];
+}
+const pickPotion = (strong, r) => `${r < 0.6 ? 'hp' : 'mp'}_${strong ? 'large' : 'small'}`;
+// What a killed monster leaves in the bag of a player: a list of [id, count], often empty. Gear matches the monster's
+// level (one time in four it is a tier below); the boss always leaves a piece of the top tier, and potions.
+export function rollLoot(type, lvl, rnd = Math.random) {
+  const out = [], boss = type === 'boss';
+  if (rnd() < gearChance(type, lvl)) {
+    let t = boss ? TIERS.length - 1 : tierForLevel(lvl);
+    if (!boss && t > 0 && rnd() < 0.25) t--;
+    out.push([pickGear(t, rnd()), 1]);
+  }
+  if (boss || rnd() < POTION_CHANCE) out.push([pickPotion(lvl >= 8, rnd()), boss ? 3 : 1]);
+  return out;
+}
+// What a treasure chest holds besides its gold: the richer the chest, the better. `big` is the King's hoard.
+export function chestLoot(gold, big, rnd = Math.random) {
+  const out = [], t = big ? TIERS.length - 1 : gold >= 80 ? 2 : gold >= 30 ? 1 : 0;
+  if (rnd() < 0.4) out.push([pickPotion(t > 0, rnd()), rnd() < 0.3 ? 2 : 1]);
+  if (rnd() < (big ? 0.5 : 0.1)) out.push([pickGear(t, rnd()), 1]);
+  return out;
+}
+
+// ---------------------------------------------------------------- stats
+
+// Every combat stat of a character, derived from its class attributes, level, weapon upgrade level, passive skills,
+// active buffs (`buffs` maps a stat name to a multiplier) and what it wears (`equip` maps a slot to an item id).
+// A weapon item adds to what the class's basic weapon gives, so the Blacksmith's upgrades multiply both.
 //   STR -> P.Atk      DEX -> Atk.Spd, Accuracy, Evasion, Critical, Speed      CON -> HP
 //   INT -> M.Atk      WIT -> Casting Spd, M.Critical                         MEN -> M.Def, MP
-export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}) {
-  const c = CLASSES[cls], w = WEAPONS[c.weapon];
+export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}, equip = null) {
+  const c = CLASSES[cls], w = WEAPONS[c.weapon], gear = equipBonus(equip, cls);
   const [STR, DEX, CON, INT, WIT, MEN] = c.attr;
   const passive = (stat) => {
     let v = 0;
@@ -177,18 +374,18 @@ export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}) {
   const atkLevel = 1 + 0.1 * (level - 1), defLevel = 1 + 0.05 * (level - 1);
   const atkSpd = Math.round(w.spd * (1 + (DEX - 30) * 0.012));
   const castSpd = Math.round(333 * (1 + (WIT - 20) * 0.02));
-  const speed = Math.round(100 + DEX * 0.6);
+  const speed = Math.round(100 + DEX * 0.6) + gear.speed;
   return {
     STR, DEX, CON, INT, WIT, MEN,
     maxHp: Math.round((80 + 20 * (level - 1)) * (1 + (CON - 30) * 0.03)),
     maxMp: Math.round((40 + 9 * (level - 1)) * (1 + (MEN - 20) * 0.05) * (1 + passive('mp'))),
-    pAtk: Math.round(w.pAtk * grade * atkLevel * (1 + (STR - 40) * 0.025) * (1 + passive('patk')) * buff('patk') * buff('atk')),
-    mAtk: Math.round(w.mAtk * grade * atkLevel * (1 + (INT - 41) * 0.03) * (1 + passive('matk')) * buff('atk')),
-    pDef: Math.round((c.armor + w.pDef) * defLevel * (1 + passive('pdef')) * buff('pdef')),
-    mDef: Math.round(20 * defLevel * (1 + (MEN - 20) * 0.04)),
-    acc: Math.round(level + DEX * 0.3 + 5),
+    pAtk: Math.round((w.pAtk + gear.pAtk) * grade * atkLevel * (1 + (STR - 40) * 0.025) * (1 + passive('patk')) * buff('patk') * buff('atk')),
+    mAtk: Math.round((w.mAtk + gear.mAtk) * grade * atkLevel * (1 + (INT - 41) * 0.03) * (1 + passive('matk')) * buff('atk')),
+    pDef: Math.round((c.armor + w.pDef + gear.pDef) * defLevel * (1 + passive('pdef')) * buff('pdef')),
+    mDef: Math.round((20 + gear.mDef) * defLevel * (1 + (MEN - 20) * 0.04)),
+    acc: Math.round(level + DEX * 0.3 + 5) + gear.acc,
     eva: Math.round(level + DEX * 0.3),
-    crit: Math.round(DEX * 2 + w.crit + passive('crit') * 1000),   // per 1000, as the status window shows it
+    crit: Math.round(DEX * 2 + w.crit + passive('crit') * 1000) + gear.crit,   // per 1000, as the status window shows it
     mCrit: Math.round(WIT * 2),
     atkSpd, castSpd, speed,
     atkCd: 150 / atkSpd,          // seconds between auto-attacks
@@ -216,5 +413,5 @@ export const upgradeCost = (weapon) => 40 * weapon;
 
 // The world itself - regions, monster camps, chests, townsfolk, the start point - is data: map/world.json, read through
 // src/map/format.js. Only how far a player can reach is a rule of the game.
-export const SHOP_RANGE = 5.5;    // how close to the Blacksmith or the Sage a player has to stand to deal with them
+export const SHOP_RANGE = 5.5;    // how close to the Blacksmith, the Sage or the Trader a player has to stand to deal with them
 export const CHEST_REACH = 1.9;   // how close to a chest a player has to come to open it

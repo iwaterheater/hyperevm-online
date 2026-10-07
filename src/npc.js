@@ -15,7 +15,7 @@ const KINDS = {
   guard: { model: 'Knight', gear: ['1H_Sword', 'Badge_Shield'], clip: 'Idle', name: 'Town Guard', line: 'Stay close to the walls, traveller.' },
   blacksmith: { model: 'Barbarian', gear: ['1H_Axe'], clip: 'Idle', name: 'Blacksmith', line: 'Need a sharper blade? Press B.' },
   sage: { model: 'Mage', gear: ['2H_Staff'], clip: 'Idle', name: 'Sage', line: 'Press K — I teach skills and professions.' },
-  trader: { model: 'Rogue_Hooded', gear: [], clip: 'Idle', name: 'Trader', line: 'Gold talks. Bring more of it.' },
+  trader: { model: 'Rogue_Hooded', gear: [], clip: 'Idle', name: 'Trader', line: 'Gold talks. Press T to trade.' },
 };
 const GEAR = /^(1H_|2H_|Knife|Throwable|Mug|Spellbook|.*_Shield)/;
 

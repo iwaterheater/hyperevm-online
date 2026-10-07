@@ -9,6 +9,8 @@ import {
   TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R,
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
+  ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, stackMax, sellPrice, weaponFamily, equipError, roomFor, addItem, takeItem,
+  cleanBag, cleanEquip, lookCode, rollLoot, chestLoot,
 } from './src/shared.js';
 import {
   normalize, validate, serialize, stringifyMap, regionIndex, pushOutOfSafe, nearNpc, startPoint, spawnHome, pickType, pickLevel,
@@ -410,7 +412,10 @@ try { Object.assign(saved, JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'))); } ca
 
 function persist(p) {
   if (!p.persist) return;
-  saved[p.token] = { name: p.name, cls: p.cls, level: p.level, xp: p.xp, sp: p.sp, skills: p.skills, gold: p.gold, weapon: p.weapon };
+  saved[p.token] = {
+    name: p.name, cls: p.cls, level: p.level, xp: p.xp, sp: p.sp, skills: p.skills, gold: p.gold, weapon: p.weapon,
+    inv: p.inv, equip: p.equip,
+  };
 }
 function flush() {
   for (const p of players.values()) persist(p);
@@ -560,11 +565,11 @@ function segDist2(px, pz, ax, az, bx, bz) {
 
 // ---------------------------------------------------------------- characters
 
-// Recomputes every stat from class, level, weapon, passive skills and the buffs active right now.
+// Recomputes every stat from class, level, weapon, passive skills, equipment and the buffs active right now.
 function refresh(p) {
   const buffs = {};
   for (const [stat, b] of Object.entries(p.buffs)) if (now < b.until) buffs[stat] = b.mult;
-  p.st = statsOf(p.cls, p.level, p.skills, p.weapon, buffs);
+  p.st = statsOf(p.cls, p.level, p.skills, p.weapon, buffs, p.equip);
   p.maxHp = p.st.maxHp;
   p.maxMp = p.st.maxMp;
   p.hp = Math.min(p.hp, p.maxHp);
@@ -577,6 +582,34 @@ function grantFree(p) {
     const s = SKILLS[id];
     if (s.sp[0] === 0 && p.level >= s.lvl && !p.skills[id]) p.skills[id] = 1;
   }
+}
+
+// ---------------------------------------------------------------- items
+
+// The bag or the equipment changed: the owner gets both with its next snapshot, and what is worn changes the stats.
+function bagChanged(p) {
+  p.bagDirty = true;
+  refresh(p);
+}
+// An item request that cannot be done is answered with a line the client shows; nothing else happens.
+function refuse(p, text) {
+  p.events.push({ k: 'err', m: text });
+}
+// Loot goes straight into the bag; (x, z) is where the client floats its name up. What does not fit is lost, and said so.
+function giveItem(p, id, n, x, z) {
+  const got = addItem(p.inv, id, n);
+  if (got) {
+    p.bagDirty = true;
+    p.events.push({ k: 'loot', id, n: got, x: r2(x), z: r2(z) });
+  }
+  if (got < n) refuse(p, `Your bag is full: ${ITEMS[id].name} was lost`);
+}
+// A weapon the class can no longer fight with goes back into the bag - if the bag has room. Otherwise it stays in the
+// paw and counts for nothing (see equipBonus) until its owner makes room and takes it off.
+function shedWeapon(p) {
+  const it = itemOf(p.equip.weapon);
+  if (it && it.family !== weaponFamily(p.cls) && addItem(p.inv, p.equip.weapon, 1)) p.equip.weapon = null;
+  bagChanged(p);
 }
 
 // A physical attack on a monster: it can miss (Accuracy against Evasion) and can be a critical hit; P.Def reduces it.
@@ -634,6 +667,9 @@ function damageMob(m, hit, dx, dz, knock, p) {
     const q = players.get(id);
     if (q && !q.dead) addXp(q, m.xp);
   }
+  // Loot is the killer's. The King is brought down together: everyone alive who wounded him gets a roll of their own.
+  const looters = m.type === 'boss' ? [...m.dmgBy].map((id) => players.get(id)).filter((q) => q && !q.dead) : [p];
+  for (const q of looters) for (const [id, n] of rollLoot(m.type, m.lvl)) giveItem(q, id, n, m.x, m.z);
   if (m.type === 'boss') broadcast({ t: 'c', sys: 1, m: `The Skeleton King has fallen! Final blow: ${p.name}` });
   m.dmgBy.clear();
   m.target = 0;
@@ -901,6 +937,7 @@ function tick() {
       const gold = Math.round(c.gold * rand(0.8, 1.3));
       p.gold += gold;
       p.events.push({ k: 'chest', gold });
+      for (const [id, n] of chestLoot(c.gold, c.big)) giveItem(p, id, n, c.x, c.z);
       emit({ k: 'open', i: c.i }, c.x, c.z);
       c.openUntil = now + c.respawn;
       break;
@@ -921,9 +958,14 @@ function tick() {
       c: chests.filter((c) => now < c.openUntil && near(c)).map((c) => c.i),   // chests that currently stand open
       e: p.events,
     };
+    if (p.bagDirty) {   // the bag and the equipment travel only when they changed
+      snap.me.inv = p.inv;
+      snap.me.eq = p.equip;
+      p.bagDirty = false;
+    }
     for (const q of players.values()) {
       if (q !== p && near(q)) {
-        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls)]);
+        snap.p.push([q.id, r2(q.x), r2(q.y), r2(q.z), r2(q.yaw), q.speed, Math.ceil(q.hp), q.maxHp, q.level, q.dead ? 1 : 0, q.sit ? 1 : 0, CLASS_KEYS.indexOf(q.cls), lookCode(q.equip, q.cls)]);
       }
     }
     for (const m of mobs) {
@@ -1007,6 +1049,15 @@ const SKILL_EFFECTS = {
   },
 };
 
+const DEAD = 'You cannot do that while dead';
+// The stack an item request means. It names the stack by its place in the bag AND by its item, so that a click which
+// crossed another change of the bag on the wire can never sell, drink or destroy a different item. A request for a
+// stack that is not there is dropped without an answer: the client's bag is simply a snapshot behind.
+function stackOf(p, msg) {
+  const stack = Number.isInteger(msg.i) ? p.inv[msg.i] : undefined;
+  return stack && stack[0] === msg.id ? stack : null;
+}
+
 const handlers = {
   m(p, msg) {   // movement (client-side, sanity-checked here)
     if (p.dead) return;
@@ -1076,7 +1127,7 @@ const handlers = {
     if (p.dead || !c || c.base !== p.cls || p.level < PROFESSION_LEVEL || !nearNpc(map, p, 'sage', SHOP_RANGE)) return;
     p.cls = target;
     grantFree(p);
-    refresh(p);
+    shedWeapon(p);   // a rogue has no use for the fighter's sword; this also recomputes the stats
     p.hp = p.maxHp;
     p.mp = p.maxMp;
     p.events.push({ k: 'prof', cls: target });
@@ -1090,6 +1141,70 @@ const handlers = {
     p.weapon++;
     refresh(p);
     p.events.push({ k: 'up', weapon: p.weapon });
+  },
+  eq(p, msg) {   // wear an item from the bag; what was in its slot takes its place in the bag
+    const stack = stackOf(p, msg);
+    if (!stack) return;
+    const err = p.dead ? DEAD : equipError(p.cls, p.level, stack[0]);
+    if (err) { refuse(p, err); return; }
+    const slot = ITEMS[stack[0]].slot, old = p.equip[slot];
+    p.equip[slot] = stack[0];
+    if (old) p.inv[msg.i] = [old, 1];
+    else p.inv.splice(msg.i, 1);
+    bagChanged(p);
+  },
+  uneq(p, msg) {   // take a worn item off, into the bag
+    const slot = EQUIP_SLOTS.includes(msg.slot) ? msg.slot : '', id = slot && p.equip[slot];
+    if (!id) return;
+    if (p.dead) { refuse(p, DEAD); return; }
+    if (!addItem(p.inv, id, 1)) { refuse(p, 'Your bag is full'); return; }
+    p.equip[slot] = null;
+    bagChanged(p);
+  },
+  use(p, msg) {   // drink a potion
+    const stack = stackOf(p, msg), it = stack && ITEMS[stack[0]];
+    if (!stack) return;
+    if (p.dead) { refuse(p, DEAD); return; }
+    if (it.kind !== 'potion') { refuse(p, `${it.name} cannot be used`); return; }
+    if (now < p.potionAt) { refuse(p, 'The potion is not ready yet'); return; }
+    if (it.hp ? p.hp >= p.maxHp : p.mp >= p.maxMp) { refuse(p, `Your ${it.hp ? 'health' : 'mana'} is full`); return; }
+    const hp = Math.min(p.maxHp, p.hp + (it.hp || 0)) - p.hp, mp = Math.min(p.maxMp, p.mp + (it.mp || 0)) - p.mp;
+    p.hp += hp; p.mp += mp;
+    p.potionAt = now + POTION_CD;
+    takeItem(p.inv, msg.i, 1);
+    p.bagDirty = true;
+    p.events.push({ k: 'potion', id: stack[0], n: Math.round(hp || mp) });
+  },
+  buy(p, msg) {   // buy from a trader
+    const id = msg.id, n = msg.n ?? 1;
+    if (!itemOf(id) || !SHOP.includes(id) || !Number.isInteger(n) || n < 1 || n > stackMax(id)) return;
+    if (p.dead) { refuse(p, DEAD); return; }
+    if (!nearNpc(map, p, 'trader', SHOP_RANGE)) { refuse(p, 'The Trader is too far away'); return; }
+    const cost = ITEMS[id].price * n;
+    if (p.gold < cost) { refuse(p, 'Not enough gold'); return; }
+    if (roomFor(p.inv, id, n) < n) { refuse(p, 'Your bag is full'); return; }
+    p.gold -= cost;
+    addItem(p.inv, id, n);
+    p.bagDirty = true;
+    p.events.push({ k: 'bought', id, n, gold: cost });
+  },
+  sell(p, msg) {   // sell from the bag to a trader, who pays a share of the price
+    const stack = stackOf(p, msg), n = msg.n ?? 1;
+    if (!stack || !Number.isInteger(n) || n < 1 || n > stack[1]) return;
+    if (p.dead) { refuse(p, DEAD); return; }
+    if (!nearNpc(map, p, 'trader', SHOP_RANGE)) { refuse(p, 'The Trader is too far away'); return; }
+    const id = stack[0], gold = sellPrice(id) * n;
+    takeItem(p.inv, msg.i, n);
+    p.gold += gold;
+    p.bagDirty = true;
+    p.events.push({ k: 'sold', id, n, gold });
+  },
+  drop(p, msg) {   // throw an item away for good
+    const stack = stackOf(p, msg), n = msg.n ?? stack?.[1];
+    if (!stack || !Number.isInteger(n) || n < 1 || n > stack[1]) return;
+    if (p.dead) { refuse(p, DEAD); return; }
+    takeItem(p.inv, msg.i, n);
+    p.bagDirty = true;
   },
   c(p, msg) {   // chat
     const text = String(msg.m || '').trim().slice(0, 140);
@@ -1154,7 +1269,7 @@ function join(ws, msg, conn) {
   // a play-test has no token: the designer's real character is neither read nor written, and a game tab of the same
   // browser is not its duplicate
   const token = test ? '' : String(msg.token || '').slice(0, 64);
-  let data = {}, keeps = false;
+  let data = null, keeps = false;   // data: the saved character; null for one that has never played
   if (test) data = testCharacter(test);
   else if (token) {
     // A reloading client can be back before its old socket has closed. That session ends here, saved, or the newcomer
@@ -1166,8 +1281,11 @@ function join(ws, msg, conn) {
     }
     // a second tab with the same token plays as an unsaved guest
     keeps = ![...players.values()].some((q) => q.token === token);
-    if (keeps) data = own(saved, token) || {};
+    if (keeps) data = own(saved, token) || null;
   }
+  // A character from before the game had items loads with an empty bag; only a new one gets the starter kit.
+  const fresh = !data || !!test;
+  data = data || {};
   const level = data.level || 1;
   // the class picked in the menu only counts for characters that do not have one yet
   const cls = Object.hasOwn(CLASSES, data.cls) ? data.cls : START_CLASSES.includes(msg.cls) ? msg.cls : START_CLASSES[0];
@@ -1177,6 +1295,7 @@ function join(ws, msg, conn) {
     x: spot.x, y: 0, z: spot.z, yaw: 0, speed: 0,
     level, xp: Math.min(data.xp || 0, xpNext(level) - 1), sp: data.sp || 0, skills: { ...(data.skills || {}) },
     gold: data.gold || 0, weapon: data.weapon || 1,
+    inv: cleanBag(fresh ? STARTER_KIT : data.inv), equip: cleanEquip(data.equip), bagDirty: true, potionAt: 0,
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
     castAt: 0, swingAt: 0, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
     lastMoveAt: now, graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
