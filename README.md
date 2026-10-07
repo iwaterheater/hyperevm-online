@@ -230,7 +230,8 @@ server.js         HTTP static server + WebSocket game server; loads the map and,
 map/world.json    The world: terrain, scenery, regions, monster camps, chests, townsfolk, start point
 map/backups/      The map before each save (created by the server, git-ignored)
 src/main.js       Client: rendering, input, networking, HUD
-src/cat.js        Procedural 3D cat model and its animations
+src/cat.js        The cat: a Blender model of rigid parts (assets/cat/hypercat.glb), animated in code; weapons and armour
+art/              The Blender source of the cat, its weapons and its armour (hypercat.blend)
 src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations
 assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
 assets/medieval/  KayKit buildings, walls, trees, rocks and props, with their CC0 license

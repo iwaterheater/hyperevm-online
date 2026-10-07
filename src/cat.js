@@ -1,17 +1,27 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// Procedural chibi cat built from the reference picture:
-// white fur, grey stripes, big navy eyes, dark-green hoodie with a white bow, striped tail.
+// The cat, its weapons and its armour are modelled in Blender (art/hypercat.blend) and exported as one file.
+// The model is made of rigid parts hung on pivots - head, body, two arms, two legs, tail - and it is animated here,
+// in code, by turning those pivots: running, jumping, three sword swings, casting, shooting, sitting, blinking.
+// Weapons are separate objects with their origin at the grip, so any of them can be put into a paw; each piece of
+// armour is a separate object too, shown or hidden on its own.
 
-const COLORS = {
-  fur: 0xffffff,
-  stripe: 0x9aa4b0,
-  pink: 0xf5a3b5,
-  hoodie: 0x35523f,
-  eye: 0x18203a,
-  teal: 0x7fe8d6,
-  outline: 0x0c1a17,
+const MODEL_URL = './assets/cat/hypercat.glb';
+const SCALE = 1.45;                 // model units -> game units: the cat stands about 2.5 units tall
+const HOODIE = 0x35523f;
+const OUTLINE = 0x0c1a17;
+const PAW = 0.365;                  // from the shoulder down the arm to the middle of the paw, model units
+// what leaves the shoulder: the direction the arm was modelled in (x is mirrored for the left arm)
+const ARM_DIR = new THREE.Vector3(0.52, -0.85, 0.06).normalize();
+// the soft, closed shapes that get a dark contour
+const OUTLINED = /^(Head|Body|Hem|Hood|Collar|Sleeve|Cuff|Paw|Leg|Foot|Ear[LR]|Tail)/;
+// Until the game has an inventory, what a cat wears follows what it fights with.
+const ARMOR_FOR = {
+  shield: { helmet: true, chest: true, gloves: true, boots: true },
+  sword: { gloves: true, boots: true },
 };
+const PIECES = { helmet: ['ArmorHelmet'], chest: ['ArmorChest'], gloves: ['ArmorGloveL', 'ArmorGloveR'], boots: ['ArmorBootL', 'ArmorBootR'] };
 
 function makeGradientMap() {
   const tex = new THREE.DataTexture(new Uint8Array([105, 185, 255]), 3, 1, THREE.RedFormat);
@@ -20,243 +30,134 @@ function makeGradientMap() {
   return tex;
 }
 
-// Equirectangular head texture; the face (+Z) sits at u = 0.25.
-function makeHeadTexture() {
-  const W = 1024, H = 512, cx = W * 0.25;
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const g = c.getContext('2d');
-  g.fillStyle = '#ffffff';
-  g.fillRect(0, 0, W, H);
-  g.strokeStyle = '#9aa4b0';
-  g.lineCap = 'round';
-
-  const line = (x1, y1, x2, y2, w) => {
-    g.lineWidth = w;
-    g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
-  };
-  // forehead
-  line(cx, 30, cx, 150, 20);
-  line(cx - 52, 60, cx - 44, 140, 17);
-  line(cx + 52, 60, cx + 44, 140, 17);
-  // cheeks
-  for (const s of [-1, 1]) {
-    line(cx + s * 150, 268, cx + s * 196, 262, 12);
-    line(cx + s * 146, 302, cx + s * 190, 304, 12);
-  }
-  // back of the head
-  const bx = W * 0.75;
-  line(bx - 70, 130, bx + 70, 130, 20);
-  line(bx - 95, 190, bx + 95, 190, 20);
-  line(bx - 80, 250, bx + 80, 250, 20);
-
-  // "w" mouth
-  g.strokeStyle = '#18203a';
-  g.lineWidth = 4;
-  for (const s of [-1, 1]) {
-    g.beginPath(); g.arc(cx + s * 11, 300, 11, 0, Math.PI); g.stroke();
-  }
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
-
-// Textures, geometries and fur materials are shared by every cat in the scene.
+// The file is loaded once; every cat is a clone of it that shares its geometry and all but its hoodie materials.
 let shared = null;
 function getShared() {
   if (shared) return shared;
   const gradientMap = makeGradientMap();
   const toon = (color, extra = {}) => new THREE.MeshToonMaterial({ color, gradientMap, ...extra });
-  shared = {
-    toon,
-    mats: {
-      fur: toon(COLORS.fur),
-      head: toon(COLORS.fur, { map: makeHeadTexture() }),
-      stripe: toon(COLORS.stripe),
-      pink: toon(COLORS.pink),
-      eye: new THREE.MeshBasicMaterial({ color: COLORS.eye }),
-      white: new THREE.MeshBasicMaterial({ color: 0xffffff }),
-      teal: new THREE.MeshBasicMaterial({ color: COLORS.teal }),
-      steel: toon(0xcfd8e0),
-      wood: toon(0x7a5230),
-      gold: toon(0xe7b93c),
-      outline: new THREE.MeshBasicMaterial({ color: COLORS.outline, side: THREE.BackSide }),
-    },
-    sphere: new THREE.SphereGeometry(1, 32, 24),
-    sphereLo: new THREE.SphereGeometry(1, 16, 12),
-    collar: new THREE.TorusGeometry(0.4, 0.1, 12, 28),
-    string: new THREE.CylinderGeometry(0.015, 0.015, 0.22, 6),
-    bow: new THREE.ConeGeometry(0.05, 0.085, 4),
-    ear: new THREE.ConeGeometry(0.27, 0.5, 20),
-    arm: new THREE.CapsuleGeometry(0.125, 0.26, 6, 14),
-    leg: new THREE.CapsuleGeometry(0.15, 0.14, 6, 14),
-    blade: new THREE.BoxGeometry(0.08, 0.03, 0.85),
-    guard: new THREE.BoxGeometry(0.26, 0.06, 0.07),
-    hilt: new THREE.CylinderGeometry(0.032, 0.032, 0.2, 8),
-    shield: new THREE.CylinderGeometry(0.36, 0.36, 0.06, 18),
-    staff: new THREE.CylinderGeometry(0.03, 0.035, 1.6, 8),
-    bowLimb: new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, -0.62, 0), new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0.62, 0)), 12, 0.028, 6),
-    bowString: new THREE.CylinderGeometry(0.008, 0.008, 1.24, 4),
+  const lit = (color, k = 1) => new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k) });
+  const outline = new THREE.MeshBasicMaterial({ color: OUTLINE, side: THREE.BackSide });
+  // the contour is the same mesh again, seen from inside and pushed out along its normals
+  outline.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = position + normalize( normal ) * 0.014;');
   };
+  // by the name of the material in the Blender file; anything else keeps its colour as a toon material
+  const byName = (m) => ({
+    cat_eye: () => lit(0x18203a),
+    cat_line: () => lit(0x1a1d21),
+    cat_teal: () => lit(0x7fe9c9, 1.15),
+    w_glow: () => lit(0x7fe9c9, 1.9),          // bright enough to bloom
+    w_string: () => lit(0xefe8d6),
+    cat_head: () => toon(0xffffff, { map: m.map }),
+  }[m.name]?.() ?? toon(m.color.getHex()));
+  shared = {
+    toon, outline, mats: new Map(),
+    ready: new GLTFLoader().loadAsync(MODEL_URL).then((gltf) => {
+      gltf.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        for (const m of [o.material].flat()) if (!shared.mats.has(m.name)) shared.mats.set(m.name, byName(m));
+      });
+      return gltf.scene;
+    }),
+  };
+  shared.ready.catch((e) => console.error('[cat] the model did not load', e));
   return shared;
 }
 
-export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
+// -> { group, update(dt, state), setLook({ hoodie, weapon, armor }) }. The group is there at once, standing on its
+// origin and facing +Z; the model appears in it when the file has arrived.
+export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null } = {}) {
   const S = getShared();
-  const { sphere, sphereLo } = S;
-  const mats = {
-    ...S.mats,
-    hoodie: S.toon(hoodie),
-    hoodieDark: S.toon(new THREE.Color(hoodie).multiplyScalar(0.68)),
-  };
-
-  // Adds a mesh; `outline` > 0 adds an inverted-hull contour.
-  function part(parent, geo, mat, pos, scale = 1, outline = 0) {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(...pos);
-    if (typeof scale === 'number') m.scale.setScalar(scale); else m.scale.set(...scale);
-    if (outline) {
-      const o = new THREE.Mesh(geo, mats.outline);
-      o.scale.setScalar(outline);
-      m.add(o);
-    }
-    parent.add(m);
-    return m;
-  }
-
   const group = new THREE.Group();   // origin at the feet, facing +Z
   const inner = new THREE.Group();   // bob / lean
   group.add(inner);
+  const own = { hoodie: S.toon(hoodie), trim: S.toon(new THREE.Color(hoodie).multiplyScalar(0.62)) };
+  let look = { hoodie, weapon, armor };
+  let rig = null;                    // the pivots, once the model is in
 
-  // ---- body & hoodie ----
-  part(inner, sphere, mats.hoodie, [0, 0.8, 0], [0.5, 0.525, 0.425], 1.05);
-  part(inner, sphere, mats.hoodieDark, [0, 0.66, 0.3], [0.26, 0.15, 0.12]);          // pocket
-  const collar = part(inner, S.collar, mats.hoodieDark, [0, 1.14, 0], [1, 0.92, 1]);
-  collar.rotation.x = Math.PI / 2;
-  part(inner, sphere, mats.hoodieDark, [0, 1.2, -0.4], [0.42, 0.28, 0.3], 1.06);     // hood
-  const stringGeo = S.string;
-  for (const s of [-1, 1]) {
-    const str = part(inner, stringGeo, mats.white, [s * 0.08, 0.98, 0.41], 1);
-    str.rotation.x = -0.25;
-  }
-  // bow emblem
-  const bowGeo = S.bow;
-  for (const s of [-1, 1]) {
-    const b = part(inner, bowGeo, mats.white, [0.2 + s * 0.04, 0.95, 0.385], [1, 1, 0.3]);
-    b.rotation.z = s * Math.PI / 2;
-  }
+  S.ready.then((scene) => {
+    // the parent of the pivots (the file's scene carries the same name as the cat's root, so it is not looked up by name)
+    const model = scene.getObjectByName('PHead').parent.clone(true);
+    model.scale.setScalar(SCALE);
+    const meshes = [];
+    model.traverse((o) => { if (o.isMesh) meshes.push(o); });   // listed first: the contours added below are meshes too
+    for (const o of meshes) {
+      const swap = (m) => (m.name === 'cat_hoodie' ? own.hoodie : m.name === 'cat_hoodie_trim' ? own.trim : S.mats.get(m.name));
+      o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+      o.castShadow = true;
+      if (OUTLINED.test(o.name)) o.add(new THREE.Mesh(o.geometry, S.outline));
+    }
+    const node = (name) => model.getObjectByName(name);
+    // An arm was modelled held a little away from the body. Its parts go into a group that turns it straight down, so
+    // the animation below can speak of the arm as of something that hangs from the shoulder.
+    const arms = [['PArmL', -1], ['PArmR', 1]].map(([name, s]) => {
+      const arm = node(name), hang = new THREE.Group();
+      hang.quaternion.setFromUnitVectors(new THREE.Vector3(ARM_DIR.x * s, ARM_DIR.y, ARM_DIR.z), new THREE.Vector3(0, -1, 0));
+      for (const child of [...arm.children]) hang.add(child);
+      arm.add(hang);
+      const hand = new THREE.Group();   // what the paw holds; +Z is forward
+      hand.position.set(0, -PAW, 0);
+      arm.add(hand);
+      return Object.assign(arm, { hand });
+    });
+    const weapons = {};
+    for (const name of ['Sword', 'Bow', 'Arrow', 'Staff']) {
+      const w = scene.getObjectByName(name).clone(true);
+      w.position.set(0, 0, 0); w.rotation.set(0, 0, 0); w.scale.setScalar(1);
+      w.traverse((o) => { if (o.isMesh) { o.material = S.mats.get(o.material.name); o.castShadow = true; } });
+      weapons[name] = w;
+    }
+    rig = { model, arms, weapons, head: node('PHead'), legs: [node('PLegL'), node('PLegR')], tail: node('PTail'), eyes: [node('EyeL'), node('EyeR')], gear: [] };
+    inner.add(model);
+    setLook(look);
+  }, () => {});
 
-  // ---- head ----
-  const head = new THREE.Group();
-  head.position.set(0, 1.62, 0);
-  inner.add(head);
-  part(head, sphere, mats.head, [0, 0, 0], [0.694, 0.589, 0.62], 1.04);
-
-  const earGeo = S.ear;
-  const ears = [];
-  for (const s of [-1, 1]) {
-    const ear = new THREE.Group();
-    ear.position.set(s * 0.4, 0.52, 0);
-    ear.rotation.z = -s * 0.35;
-    head.add(ear);
-    part(ear, earGeo, mats.fur, [0, 0, 0], [1, 1, 0.7], 1.1);
-    part(ear, earGeo, mats.pink, [0, -0.03, 0.07], [0.62, 0.72, 0.4]);
-    ears.push(ear);
-  }
-
-  const eyes = [];
-  for (const s of [-1, 1]) {
-    const eye = new THREE.Group();
-    eye.position.set(s * 0.26, -0.02, 0.555);
-    eye.rotation.y = s * 0.4;
-    head.add(eye);
-    part(eye, sphere, mats.eye, [0, 0, 0], [0.105, 0.135, 0.05]);
-    part(eye, sphereLo, mats.white, [-0.035, 0.055, 0.045], 0.036);
-    part(eye, sphereLo, mats.teal, [0.03, -0.06, 0.04], [0.045, 0.028, 0.02]);
-    eyes.push(eye);
-  }
-  part(head, sphereLo, mats.pink, [0, -0.115, 0.605], [0.04, 0.03, 0.03]);           // nose
-
-  // ---- arms ----
-  const armGeo = S.arm;
-  const arms = [];
-  for (const s of [-1, 1]) {
-    const arm = new THREE.Group();
-    arm.position.set(s * 0.4, 1.06, 0.02);
-    inner.add(arm);
-    part(arm, armGeo, mats.hoodie, [0, -0.2, 0], 1, 1.1);
-    part(arm, sphereLo, mats.fur, [0, -0.44, 0], 0.135, 1.1);
-    arms.push(arm);
-  }
-  // ---- gear: what the cat holds depends on its class. Everything points forward along the arm's +Z.
-  // arms[1] is the weapon paw, arms[0] the off paw.
-  const gear = [];
-  const hold = (arm) => { const g = new THREE.Group(); g.position.set(0, -0.44, 0); arm.add(g); gear.push(g); return g; };
-  function blade(arm, length) {
-    const g = hold(arm);
-    part(g, S.hilt, mats.gold, [0, 0, 0.04]).rotation.x = Math.PI / 2;
-    part(g, S.guard, mats.gold, [0, 0, 0.16], [length < 0.6 ? 0.6 : 1, 1, 1]);
-    part(g, S.blade, mats.steel, [0, 0, 0.2 + length / 2], [1, 1, length / 0.85]);
-  }
+  // ---- what the cat holds depends on its class. Everything points forward along the paw's +Z.
   const GEAR = {
-    sword() { blade(arms[1], 0.85); },
+    sword() { blade(1, 1); },
     shield() {
-      blade(arms[1], 0.85);
-      const g = hold(arms[0]);
-      part(g, S.shield, mats.steel, [0, 0.12, 0.16]).rotation.x = Math.PI / 2;
-      part(g, sphereLo, mats.gold, [0, 0.12, 0.2], 0.1);
+      blade(1, 1);
+      const g = hold(0), disc = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.04, 18), S.mats.get('a_steel') ?? S.toon(0x8e9bb0));
+      disc.rotation.x = Math.PI / 2; disc.position.set(0, 0.08, 0.11);
+      const boss = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), S.mats.get('w_gold') ?? S.toon(0xf2c14e));
+      boss.position.set(0, 0.08, 0.14);
+      g.add(disc, boss);
     },
-    daggers() { blade(arms[1], 0.42); blade(arms[0], 0.42); },
+    daggers() { blade(1, 0.55); blade(0, 0.55); },
     bow() {
-      const g = hold(arms[0]);
-      part(g, S.bowLimb, mats.wood, [0, 0, 0.1]);
-      part(g, S.bowString, mats.white, [0, 0, 0.1]);
+      const g = hold(0), bow = rig.weapons.Bow.clone(true);
+      bow.position.set(0, 0, 0.07);
+      g.add(bow);
     },
     staff() {
-      const g = hold(arms[1]);
-      part(g, S.staff, mats.wood, [0, 0.24, 0.12]);
-      part(g, sphereLo, mats.teal, [0, 1.06, 0.12], 0.11);
+      const g = hold(1), staff = rig.weapons.Staff.clone(true);
+      staff.position.set(0, 0.2, 0.08);   // held a little below the middle, so its foot is near the ground
+      g.add(staff);
     },
   };
-
-  // Recolours the hoodie and swaps the gear, e.g. when the character changes class.
-  function setLook({ hoodie: color = COLORS.hoodie, weapon = 'sword' } = {}) {
-    mats.hoodie.color.set(color);
-    mats.hoodieDark.color.set(color).multiplyScalar(0.68);
-    for (const g of gear) g.removeFromParent();
-    gear.length = 0;
-    (GEAR[weapon] || GEAR.sword)();
-    for (const g of gear) g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  }
-  setLook({ hoodie, weapon });
-
-  // ---- legs ----
-  const legGeo = S.leg;
-  const legs = [];
-  for (const s of [-1, 1]) {
-    const leg = new THREE.Group();
-    leg.position.set(s * 0.2, 0.46, 0);
-    inner.add(leg);
-    part(leg, legGeo, mats.fur, [0, -0.17, 0], 1, 1.08);
-    part(leg, sphereLo, mats.fur, [0, -0.33, 0.07], [0.19, 0.115, 0.26], 1.08);
-    part(leg, sphereLo, mats.pink, [0, -0.435, 0.09], [0.09, 0.025, 0.12]);          // paw pad
-    legs.push(leg);
+  function hold(i) { const g = new THREE.Group(); rig.arms[i].hand.add(g); rig.gear.push(g); return g; }
+  function blade(i, size) {
+    const sword = rig.weapons.Sword.clone(true);
+    sword.rotation.x = Math.PI / 2;      // modelled point up: turned to point forward out of the paw
+    sword.scale.setScalar(size);
+    hold(i).add(sword);
   }
 
-  // ---- tail: chain of joints curling up ----
-  const tail = [];
-  let joint = new THREE.Group();
-  joint.position.set(0, 0.58, -0.36);
-  inner.add(joint);
-  for (let i = 0; i < 9; i++) {
-    part(joint, sphereLo, i % 3 === 1 ? mats.stripe : mats.fur, [0, 0, 0], 0.115 + Math.sin(i / 8 * Math.PI) * 0.03, 1.12);
-    tail.push(joint);
-    const next = new THREE.Group();
-    next.position.y = 0.135;
-    joint.add(next);
-    joint = next;
+  // Recolours the hoodie and swaps what is held and worn, e.g. when the character changes class.
+  // armor: { helmet, chest, gloves, boots } - which pieces show; left out, it follows the weapon.
+  function setLook({ hoodie: color = HOODIE, weapon: held = 'sword', armor: worn = null } = {}) {
+    look = { hoodie: color, weapon: held, armor: worn };
+    own.hoodie.color.set(color);
+    own.trim.color.set(color).multiplyScalar(0.62);
+    if (!rig) return;
+    for (const g of rig.gear) g.removeFromParent();
+    rig.gear.length = 0;
+    (GEAR[held] || GEAR.sword)();
+    const on = worn ?? ARMOR_FOR[held] ?? {};
+    for (const [piece, names] of Object.entries(PIECES)) {
+      for (const name of names) { const o = rig.model.getObjectByName(name); if (o) o.visible = !!on[piece]; }
+    }
   }
 
   let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0;
@@ -270,6 +171,8 @@ export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
     cast += ((casting ? 1 : 0) - cast) * Math.min(1, dt * 14);
     sit += ((sitting ? 1 : 0) - sit) * Math.min(1, dt * 7);
     runPhase += dt * (6 + speed * 1.1);
+    if (!rig) return;
+    const { arms, legs, head, tail, eyes } = rig;
 
     const swing = Math.sin(runPhase) * 0.95 * move * (1 - air);
     legs[0].rotation.x = swing + air * 0.5;
@@ -293,7 +196,7 @@ export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
     arms[1].rotation.y = 0;
     inner.rotation.y = 0;
     if (slash >= 0) {
-      const mix = (a, b, k) => a + (b - a) * k;
+      const mix = (a, b, f) => a + (b - a) * f;
       if (slashKind === 2) {
         arms[1].rotation.x = slash < 0.3 ? mix(-1.0, -2.8, slash / 0.3)
           : slash < 0.6 ? mix(-2.8, -0.3, (slash - 0.3) / 0.3)
@@ -304,9 +207,9 @@ export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
         // wind up to one side, sweep the blade across to the other, then recover
         const dir = slashKind === 1 ? -1 : 1;
         const sweep = slash < 0.2 ? mix(0, -1, slash / 0.2) : slash < 0.55 ? mix(-1, 1, (slash - 0.2) / 0.35) : mix(1, 0, (slash - 0.55) / 0.45);
-        const hold = slash < 0.2 ? slash / 0.2 : slash < 0.55 ? 1 : 1 - (slash - 0.55) / 0.45;
-        arms[1].rotation.x = mix(arms[1].rotation.x, -0.55, hold);
-        arms[1].rotation.z = mix(arms[1].rotation.z, 0.1, hold);
+        const grip = slash < 0.2 ? slash / 0.2 : slash < 0.55 ? 1 : 1 - (slash - 0.55) / 0.45;
+        arms[1].rotation.x = mix(arms[1].rotation.x, -0.55, grip);
+        arms[1].rotation.z = mix(arms[1].rotation.z, 0.1, grip);
         arms[1].rotation.y = sweep * dir * 1.1;
         inner.rotation.y = sweep * dir * 0.9;
       }
@@ -314,7 +217,7 @@ export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
     inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0) - cast * 0.1;
     // resting: drop to the ground with the legs stretched out in front and the paws on the knees
     if (sit > 0.01) {
-      inner.position.y -= 0.36 * sit;
+      inner.position.y -= 0.3 * sit;
       inner.rotation.x -= 0.12 * sit;
       for (const leg of legs) leg.rotation.x += (-1.45 - leg.rotation.x) * sit;
       for (const arm of arms) arm.rotation.x += (-0.5 - arm.rotation.x) * sit;
@@ -322,16 +225,13 @@ export function createCat({ hoodie = COLORS.hoodie, weapon = 'sword' } = {}) {
     head.rotation.z = Math.sin(t * 1.3) * 0.04;
     head.rotation.x = -move * 0.1 + Math.sin(t * 1.7) * 0.02;
 
-    for (let i = 0; i < tail.length; i++) {
-      tail[i].rotation.x = (i === 0 ? -1.15 : 0.23) + Math.sin(t * 2 + i * 0.4) * 0.03;
-      tail[i].rotation.z = Math.sin(t * (3 + move * 5) + i * 0.55) * (0.07 + move * 0.05);
-    }
-    ears[0].rotation.x = ears[1].rotation.x = Math.sin(t * 9) * 0.03 * move;
+    // the tail is one piece: it wags from its root, faster on the run, and bobs a little
+    tail.rotation.y = Math.sin(t * (3 + move * 5)) * (0.16 + move * 0.12);
+    tail.rotation.x = Math.sin(t * 2) * 0.05 - move * 0.12;
 
     blink -= dt;
     if (blink < -0.12) blink = 1.5 + Math.random() * 3;
-    const open = blink < 0 ? 0.12 : 1;
-    eyes[0].scale.y = eyes[1].scale.y = open;
+    eyes[0].scale.y = eyes[1].scale.y = blink < 0 ? 0.12 : 1;
   }
 
   return { group, update, setLook };
