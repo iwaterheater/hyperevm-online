@@ -12,6 +12,9 @@ const SCALE = 1.45;                 // model units -> game units: the cat stands
 const HOODIE = 0x35523f;
 const OUTLINE = 0x0c1a17;
 const PAW = 0.365;                  // from the shoulder down the arm to the middle of the paw, model units
+// the bow, in model units: how far above and below the grip the string is tied, how far behind the grip it runs,
+// how far a full draw pulls it back, and from the middle of the arrow to its nock
+const BOW_TIP = 0.655, BOW_STRING = 0.16, BOW_PULL = 0.3, ARROW_NOCK = 0.38;
 // what leaves the shoulder: the direction the arm was modelled in (x is mirrored for the left arm)
 const ARM_DIR = new THREE.Vector3(0.52, -0.85, 0.06).normalize();
 // the soft, closed shapes that get a dark contour
@@ -136,6 +139,17 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       const g = hold(0), bow = rig.weapons.Bow.clone(true);
       bow.position.set(0, 0, 0.07);
       g.add(bow);
+      // The modelled string is straight. It gives way to one that bends at the nock, and an arrow lies on the bow
+      // while it is drawn (see update).
+      const stringMat = S.mats.get('w_string');
+      bow.traverse((o) => { if (o.isMesh && o.material === stringMat) o.visible = false; });
+      const string = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, BOW_TIP, -BOW_STRING), new THREE.Vector3(0, 0, -BOW_STRING), new THREE.Vector3(0, -BOW_TIP, -BOW_STRING)]),
+        new THREE.LineBasicMaterial({ color: 0xefe8d6 }));
+      const arrow = rig.weapons.Arrow.clone(true);
+      arrow.rotation.x = Math.PI / 2;      // modelled point up: laid along the shot
+      arrow.visible = false;
+      bow.add(string, arrow);
+      rig.bow = { bow, string, arrow };
     },
     staff() {
       const g = hold(1), staff = rig.weapons.Staff.clone(true);
@@ -162,6 +176,8 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     if (!rig) return;
     for (const g of rig.gear) g.removeFromParent();
     rig.gear.length = 0;
+    rig.bow?.string.geometry.dispose();
+    rig.bow = null;
     (GEAR[held] || GEAR.sword)();
     if (typeof tint === 'number') {
       // this cat's own blade and glow: a shared material tinted here would recolour the weapon of every cat
@@ -182,10 +198,11 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     }
   }
 
-  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0;
+  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0, aim = 0;
 
   // hurt: 1 at the moment the cat is hit, falling to 0 over the next half second.
-  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, sitting = false, hurt = 0, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
+  // draw: how far the bow is drawn, 0..1; below 0 = not drawing. shooting: the moment after the arrow has left.
+  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, sitting = false, hurt = 0, draw = -1, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
     t += dt;
     const k = Math.min(1, dt * 12);
     move += (Math.min(1, speed / 9) - move) * k;
@@ -251,6 +268,31 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     // the tail is one piece: it wags from its root, faster on the run, and bobs a little
     tail.rotation.y = Math.sin(t * (3 + move * 5)) * (0.16 + move * 0.12);
     tail.rotation.x = Math.sin(t * 2) * 0.05 - move * 0.12;
+
+    // The bow: the paw that holds it comes up towards the target, the other one takes the arrow at the string and
+    // pulls it back; the cat turns side-on as it draws. After the release the bow paw stays up for a moment.
+    aim += ((draw >= 0 ? 1 : 0) - aim) * Math.min(1, dt * 16);
+    if (rig.bow) {
+      const pull = draw >= 0 ? Math.min(1, draw) : 0, up = Math.max(aim, shoot);
+      if (up > 0.01) {
+        arms[0].rotation.x += (-1.5 - arms[0].rotation.x) * up;
+        arms[0].rotation.z += (0.22 - arms[0].rotation.z) * up;
+        if (aim > 0.01) {
+          arms[1].rotation.x += (-1.5 + 0.75 * pull - arms[1].rotation.x) * aim;
+          arms[1].rotation.z += (-0.3 + 0.55 * pull - arms[1].rotation.z) * aim;
+          inner.rotation.y -= 0.4 * pull * aim;
+        }
+        // just loosed: the string paw is still back by the cheek, not thrown forward as with a spell
+        arms[1].rotation.x += (-0.75 - arms[1].rotation.x) * shoot * (1 - aim);
+        arms[1].rotation.z += (0.25 - arms[1].rotation.z) * shoot * (1 - aim);
+      }
+      const { bow, string, arrow } = rig.bow;
+      bow.rotation.x = -arms[0].rotation.x;          // the bow stays upright whatever the paw does
+      const nock = -BOW_STRING - BOW_PULL * pull, at = string.geometry.attributes.position;
+      if (at.getZ(1) !== nock) { at.setZ(1, nock); at.needsUpdate = true; }
+      arrow.visible = draw >= 0;
+      arrow.position.z = nock + ARROW_NOCK;
+    }
 
     blink -= dt;
     if (blink < -0.12) blink = 1.5 + Math.random() * 3;

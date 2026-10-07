@@ -324,7 +324,7 @@ function makeAvatar(cls = 'fighter') {
   return {
     root, cat, cls, look: 0, orb, swingT: -1, swingKind: 0, castT: -1, castDur: 1, castSkill: '', bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
-    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0,
+    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0, drawT: -1, drawDur: 1,
   };
 }
 
@@ -990,6 +990,7 @@ const camTarget = new THREE.Vector3(me.x, groundY(me.x, me.z) + 0.45, me.z - 6),
 const prev = { x: 0, z: 0 };   // where the cat stood before it moved this frame
 
 const NEEDS_TARGET = ['strike', 'shot', 'bolt', 'sleep'];
+const DRAW_SHARE = 0.55;   // the part of the time between two shots that is spent drawing the bow
 
 // where an area skill lands: the cursor, pulled in to the skill's range
 function groundPoint(range) {
@@ -1021,7 +1022,7 @@ function updateLocal(dt) {
 
   let tv = mobViews.get(targetId);
   if (targetId && (!tv || tv.killed)) { setTarget(0, false); tv = null; }   // the target died or walked out of view
-  if (stats.dead) { me.speed = 0; me.castT = -1; me.sitting = false; attacking = false; fresh.clear(); return; }
+  if (stats.dead) { me.speed = 0; me.castT = -1; me.drawT = -1; me.sitting = false; attacking = false; fresh.clear(); return; }
   const cls = CLASSES[stats.cls], style = fightStyle(stats.cls, heldFamily(stats.cls, stats.eq));   // a bow shoots, whoever holds it
 
   // where area skills will land: the terrain under the cursor (the last such point while the cursor is on the sky)
@@ -1077,18 +1078,34 @@ function updateLocal(dt) {
   if (me.y <= 0) { me.y = 0; local.vy = 0; local.jumps = 0; }
 
   // ... and hits whenever its weapon is ready and the target is within reach
-  if (attacking && tv && inReach && local.swordCd <= 0 && me.castT < 0 && local.dashT <= 0) {
+  const ready = attacking && tv && inReach && me.castT < 0 && local.dashT <= 0;
+  if (ready && local.swordCd <= 0 && me.drawT < 0) {
     local.swordCd = sheet.atkCd;   // Atk.Spd
     if (style.ranged) {
-      me.shootPose = 0.3;   // the arrow itself appears when the server confirms the shot
+      // a bow is drawn first: the arrow leaves, and the server is told, when the draw is full
+      me.drawT = 0;
+      me.drawDur = Math.min(1.4, Math.max(0.3, sheet.atkCd * DRAW_SHARE));
+      sfx(180, 0.1, 'triangle', 0.03, 320);
     } else {
       me.swingT = 0;
       me.swingKind = local.combo;          // combo: left-to-right, right-to-left, overhead chop
       local.combo = (local.combo + 1) % 3;
       fx.swing(me.x, me.z, tdx, tdz, me.swingKind);
+      send({ t: 'a', id: targetId, c: me.swingKind });
+      sfx(300, 0.12, 'sawtooth', 0.04, 500);
     }
-    send({ t: 'a', id: targetId, c: me.swingKind });
-    sfx(style.ranged ? 500 : 300, 0.12, 'sawtooth', 0.04, 500);
+  }
+  if (me.drawT >= 0) {
+    if (!ready || manual || !style.ranged) {
+      // walked off, lost the target or put the bow away: the arrow is let down, and the next draw may start at once
+      me.drawT = -1;
+      local.swordCd = Math.min(local.swordCd, 0.15);
+    } else if ((me.drawT += dt) >= me.drawDur) {
+      me.drawT = -1;
+      me.shootPose = 0.3;   // the arrow itself appears when the server confirms the shot
+      send({ t: 'a', id: targetId, c: me.swingKind });
+      sfx(500, 0.12, 'sawtooth', 0.04, 500);
+    }
   }
 
   // skills on keys 1-8; Shift is a shortcut for a dash skill
@@ -1172,7 +1189,7 @@ function updateAvatar(a, dt, isMe) {
   a.orb.visible = a.castT >= 0;
   a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, swing: a.swingT, swingKind: a.swingKind });
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
 }
 
 function updateViews(dt) {
@@ -1665,6 +1682,8 @@ function updateHud() {
   $('mpText').textContent = `${stats.mp} / ${stats.maxMp}`;
   $('xpFill').style.width = `${stats.xp / need * 100}%`;
   $('xpText').textContent = `${(stats.xp / need * 100).toFixed(1)}%`;
+  $('draw').style.display = me.drawT >= 0 ? 'block' : 'none';
+  $('drawFill').style.width = `${Math.max(0, me.drawT) / me.drawDur * 100}%`;
   $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
   $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
   $('gold').textContent = stats.gold;

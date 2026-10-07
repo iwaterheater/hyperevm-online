@@ -47,6 +47,13 @@
   #cast { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); width: 150px; height: 10px; display: none;
     border-radius: 6px; background: rgba(0, 0, 0, .55); border: 1px solid rgba(127, 232, 214, .6); overflow: hidden; }
   #castFill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--teal-dim), #d9fff7); }
+  /* the bow being drawn: the same place as the cast bar (they never show together), but gold, slimmer, and tipped like an arrow */
+  #draw { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); width: 170px; height: 8px; display: none;
+    border-radius: 2px 6px 6px 2px; background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 215, 106, .7); }
+  #drawFill { display: block; position: relative; height: 100%; width: 0; background: linear-gradient(90deg, #7a5a20, var(--gold) 80%, #fff6d0); }
+  #drawFill::after { content: ''; position: absolute; right: -7px; top: 50%; transform: translateY(-50%);
+    border-left: 9px solid #fff6d0; border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
+  #draw::before { content: ''; position: absolute; left: -5px; top: -4px; bottom: -4px; width: 3px; border-radius: 2px; background: var(--gold); }
   #skills { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
   .skill { position: relative; width: 78px; height: 78px; padding: 9px 2px 0; line-height: 1.1; text-align: center; font-size: 12px; overflow: hidden;
     background: rgba(6, 24, 21, .7); border: 2px solid rgba(127, 232, 214, .3); border-radius: 12px; }
@@ -223,6 +230,7 @@
   <div id="notice"></div>
   <div id="chat"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…"></div>
   <div id="cast"><i id="castFill"></i></div>
+  <div id="draw"><i id="drawFill"></i></div>
   <div id="buffs"></div>
   <div id="skills"></div>
   <div class="panel" id="sheet">
