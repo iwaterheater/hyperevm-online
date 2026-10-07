@@ -2027,7 +2027,10 @@ thumbnails (§10.19). Hidden models (`chest`, `chest_gold`, `coin`) are not list
 - **Maps** (`file.library`): a popover in `#menu-io` that lists the map library (§7.5) when it opens - id, sizes, time,
   and a `live` badge on the entry whose `rev` is `net.info.rev`. A click on an entry loads it exactly like an import
   (`normalize(raw, { check: false })`, confirm when dirty, `store.load(map, { dirty: true })`): the game keeps its own
-  map until Save makes this one live. The `live` entry loads like Revert instead (`net.loadMap()`, not dirty).
+  map until Save makes this one live. Until its first edit such a map is not unsaved WORK - the library has it - so
+  it is replaced by New, Import, Revert or another entry without a question, writes no draft (opening it removes
+  this page's own draft) and does not hold the tab open; the first `change` event ends that. The `live` entry loads
+  like Revert instead (`net.loadMap()`, not dirty).
   **Keep a copy…** prompts for a name (turned into an id: lower case, digits, single dashes), POSTs the map in the
   editor, and asks before it replaces an entry of that name; a map with errors is refused by the server as on Save.
   `actions.run('file.library', id)` opens that entry directly. The button is disabled in read-only mode.

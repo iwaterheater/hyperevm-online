@@ -15,8 +15,9 @@ import { h, button, leaveField } from './ui/dom.js';
 //   file.revert   loads the server's map again (asks first when there are unsaved changes)
 //   file.library  opens the Maps menu: the map library of the server (map/library/) - named copies of a map to go
 //                 back to or to compare with. A click on one loads it as unsaved work, exactly like an import: the game
-//                 keeps running its own map until Save makes this one the live map. The entry that IS the live map
-//                 loads like Revert. "Keep a copy" stores the map in the editor under a name (a map with errors is
+//                 keeps running its own map until Save makes this one the live map. Until it is edited it is nobody's
+//                 unsaved work: it is replaced without a question, writes no draft and lets the tab close. The entry
+//                 that IS the live map loads like Revert. "Keep a copy" stores the map in the editor under a name (a map with errors is
 //                 refused, as on Save). actions.run('file.library', id) opens that map directly (scripts).
 //
 // The draft: 3 s after the last change the map is written to localStorage['hypercat-editor-draft'] as
@@ -104,6 +105,13 @@ export default function mount(el, ctx) {
   let kept = null;              // { draft, map }: the draft of an earlier session, offered and not answered yet
   let reminded = false;         // ... and the question was repeated once, when this page had changes of its own
 
+  // A map opened from the library counts as unsaved - Save would make it the live map - but until it is edited there is
+  // nothing of the user's in it: the library has it. Such a map is replaced without a question and needs no draft.
+  let untouched = false;        // the map in the editor is a library map exactly as it was opened
+  let openingLibrary = false;   // ... and the load that is under way brings one in
+  // Is there unsaved work in the editor that a new map, a reload or a closed tab would lose?
+  const work = () => !!store.map && store.dirty && !untouched;
+
   // The small note beside the buttons: "Draft 14:02" while the unsaved state of the map is safe in storage.
   const draftNote = h('span', { class: 'ui-hint', hidden: true });
   const showDraft = (at) => {
@@ -146,9 +154,10 @@ export default function mount(el, ctx) {
     draftTimer = 0;
     if (!store.map || offering) return;
     if (store.grouping) { scheduleDraft(DRAFT_RETRY_MS); return; }      // never half an edit
-    if (!store.dirty) {
-      // nothing is unsaved (a save, or every edit undone): a draft of ours still in storage holds changes that are
-      // gone. A draft from an earlier session that was offered and neither restored nor discarded is not ours: it stays.
+    if (!work()) {
+      // nothing is unsaved (a save, every edit undone, a library map just opened): a draft of ours still in storage
+      // holds changes that are gone. A draft from an earlier session that was offered and neither restored nor
+      // discarded is not ours: it stays.
       if (ownDraft) clearDraft();
       return;
     }
@@ -220,7 +229,7 @@ export default function mount(el, ctx) {
     if (!kept || offering) return;
     const { draft, map } = kept, when = clock(draft.at);
     const sameRev = draft.rev === (net.baseRev ?? '');   // asked again later, this page may have saved in between
-    const unsaved = !!store.map && store.dirty;       // ... or have changes of its own by now
+    const unsaved = work();                           // ... or have changes of its own by now
     let text = sameRev
       ? `Restore the unsaved draft from ${when}?\n\nIt holds changes that were never saved to the server (${sizeOf(map)}).`
       : `An unsaved draft from ${when} was found, but the map on the server has changed since it was made.\n\n`
@@ -245,7 +254,7 @@ export default function mount(el, ctx) {
       } else if (answer === 'discard') {
         clearDraft();
         ui.toast('Draft discarded');
-        if (store.map && store.dirty) writeDraft();     // the place is free: the changes of this page go there now
+        if (work()) writeDraft();           // the place is free: the changes of this page go there now
       } else {
         ui.toast({
           text: `The draft from ${when} is kept: "${keptButton.textContent}" in the menu bar asks again. Until you answer, your new changes are not kept as a draft`,
@@ -308,7 +317,7 @@ export default function mount(el, ctx) {
         return false;
       }
       if (!settled()) return false;       // an edit was opened while the file was being read
-      if (store.dirty && !(await ui.confirm(
+      if (work() && !(await ui.confirm(
         `Replace the map in the editor with ${name}?\n\nYour unsaved changes will be lost, and so will the undo history.`,
         { ok: 'Import', cancel: 'Cancel', danger: true },     // Cancel has the focus: Enter loses nothing
       ))) return false;
@@ -359,7 +368,7 @@ export default function mount(el, ctx) {
 
   async function revert() {
     if (reverting || !settled()) return false;
-    const dirty = store.dirty;
+    const dirty = work();
     if (dirty && !(await ui.confirm(
       'Revert to the saved map?\n\nEvery change since the last save will be lost, and so will the undo history.',
       { ok: 'Revert', cancel: 'Cancel', danger: true },       // Cancel has the focus: Enter loses nothing
@@ -385,7 +394,7 @@ export default function mount(el, ctx) {
     if (!settled()) return false;
     const [least] = LIMITS.radius, most = Math.min(LIMITS.radius[1], maxRadius({ cell: 2 }));
     const typed = await ui.prompt(
-      `New map: an empty island of grass with a sand shore.${store.dirty ? '\nYour unsaved changes will be lost.' : ''}\n`
+      `New map: an empty island of grass with a sand shore.${work() ? '\nYour unsaved changes will be lost.' : ''}\n`
       + `The map on the server stays as it is until you save.\n\nRadius of the island (${least}\u2013${most})`,
       String(store.map?.radius ?? 260),
     );
@@ -426,7 +435,7 @@ export default function mount(el, ctx) {
         return false;
       }
       if (!settled()) return false;       // an edit was opened while the map was on its way
-      if (store.dirty && !(await ui.confirm(
+      if (work() && !(await ui.confirm(
         `Replace the map in the editor with "${entry.id}"?\n\nYour unsaved changes will be lost, and so will the undo history.`,
         { ok: 'Open', cancel: 'Cancel', danger: true },       // Cancel has the focus: Enter loses nothing
       ))) return false;
@@ -442,7 +451,9 @@ export default function mount(el, ctx) {
         ui.toast(`Opened "${entry.id}": it is the map the game runs`);
         return true;
       }
-      loadUnsaved(map);
+      openingLibrary = true;
+      try { loadUnsaved(map); } finally { openingLibrary = false; }
+      writeDraft();                       // (nothing to write: this takes away the draft of what was given up)
       ui.toast(`Opened "${entry.id}" \u00b7 ${sizeOf(map)}. The game keeps its own map until you save`);
       reportErrors(map, 'The opened map');
       return true;
@@ -588,21 +599,23 @@ export default function mount(el, ctx) {
 
   let first = true;
   store.on('load', () => {
+    untouched = openingLibrary;
     sync();
     showDraft(0);
     if (first) {
       first = false;
       offerDraft();
-    } else if (store.dirty) scheduleDraft();      // an import, a new map, a restored draft: unsaved from the start
+    } else if (work()) scheduleDraft();           // an import, a new map, a restored draft: unsaved from the start
   });
   store.on('change', (change) => {
+    untouched = false;                            // the first edit makes an opened library map the user's own work
     scheduleDraft();
     if (change?.props?.includes('name')) sync();
   });
   store.on('history', sync);
   ui.on('readOnly', sync);
   window.addEventListener('beforeunload', (ev) => {
-    if (!store.map || !store.dirty) return;
+    if (!work()) return;
     ev.preventDefault();
     ev.returnValue = true;    // older browsers ask "Leave site? Changes you made may not be saved" only for this
   });
