@@ -1,5 +1,5 @@
 import { h, row, button, numberField, angleField, selectField, checkField, textField, colorField, rafThrottle } from '../ui/dom.js';
-import { FIELDS, withEnd } from '../fields.js';
+import { FIELDS, LAYER, withEnd } from '../fields.js';
 import { keyText } from '../keymap.js';
 import { editable } from '../tools/common.js';
 import { LIMITS, spawnCount } from '../../map/format.js';
@@ -11,7 +11,8 @@ import { MOB_TYPES } from '../../shared.js';
 // It is generic: which fields a kind has, their types and limits come from the FIELDS schema (fields.js), and this
 // file knows field TYPES, never kinds. A selection of one kind is edited as one: a field whose values differ shows a
 // dash, a typed number sets it on every item, a relative entry ('+5', '*1.2') changes every item from its own value.
-// A selection of several kinds shows only its breakdown: click a row to keep that part, Alt+click to drop it.
+// A selection of several kinds shows its breakdown - click a row to keep that part, Alt+click to drop it - and the one
+// field its objects, spawns, chests and NPCs share: the layer they are on.
 //
 // Every edit is ONE undo step and goes through a command:
 //   typing / scrubbing a number   onInput: store.begin + exec(cmd.set) on every change, onCommit: store.commit
@@ -26,6 +27,7 @@ const NOUN = {
   npc: ['NPC', 'NPCs'], region: ['region', 'regions'], start: ['start point', 'start points'],
 };
 const KIND_ORDER = ['object', 'spawn', 'chest', 'npc', 'region', 'start'];
+const LAYERED = ['object', 'spawn', 'chest', 'npc'];      // the kinds that can be on a layer of the map's own
 const COLLIDER_MODES = [
   ['default', 'Catalog default'], ['none', 'None (walk through)'], ['factor', 'Circle × factor'], ['box', 'Box'], ['circles', 'Circles (model units)'],
 ];
@@ -219,6 +221,29 @@ export default function mount(el, ctx) {
     };
   }
 
+  // The layer of the map's own that the items are on: one of map.layers, or none. A map without layers shows no such
+  // line at all.
+  function layerControl(f) {
+    const field = selectField({ onCommit: (name) => { once(setAll({ [f.key]: name })); refresh(); } });
+    const node = row(f.label, field);
+    node.title = 'The layer of the Layers panel these items are on. Its eye hides them, its lock protects them.';
+    let listed = null;
+    return {
+      field, node,
+      refresh() {
+        const layers = store.map.layers ?? [], { value, mixed } = read(f.key, (item) => item[f.key] ?? null);
+        const key = JSON.stringify(layers);
+        if (listed !== key) {
+          listed = key;
+          field.setOptions([{ value: null, label: 'None' }, ...layers.map((name) => ({ value: name, label: name }))]);
+        }
+        field.set(value, mixed);
+        node.hidden = !layers.length && value === null && !mixed;
+      },
+      disable(on) { field.setDisabled(on); },
+    };
+  }
+
   // The model of the selected objects: any model of the catalog, or the one that is armed in the palette.
   function modelControl(f) {
     const list = ctx.models ?? [];
@@ -401,6 +426,7 @@ export default function mount(el, ctx) {
       case 'select': return selectControl(f);
       case 'color': return colorControl(f);
       case 'model': return modelControl(f);
+      case 'layer': return layerControl(f);
       case 'collider': return colliderControl(f);
       case 'weights': return weightsControl(f);
       case 'intRange': return rangeControl(f, false);
@@ -491,7 +517,8 @@ export default function mount(el, ctx) {
   function refresh() {
     refreshSoon.cancel();
     if (!store.map || kind === null) return;
-    if (kind !== 'map' && items.some((item) => store.kindOf(item) !== kind)) { rebuild(); return; }   // an item left the map
+    // an item left the map (a form of several kinds knows its items by the kinds that have a layer)
+    if (kind !== 'map' && items.some((item) => (kind === 'mixed' ? !LAYERED.includes(store.kindOf(item)) : store.kindOf(item) !== kind))) { rebuild(); return; }
     drawHead();
     for (const c of controls) {
       try { c.refresh(); } catch (err) { console.error('[editor] inspector: a field failed to refresh', err); }
@@ -513,14 +540,19 @@ export default function mount(el, ctx) {
 
     const kinds = new Set();
     for (const item of store.selection) { const k = store.kindOf(item); if (k) kinds.add(k); }
-    if (kinds.size === 0) { kind = 'map'; items = targets = []; } else if (kinds.size > 1) { kind = 'mixed'; items = targets = []; } else {
+    if (kinds.size === 0) { kind = 'map'; items = targets = []; } else if (kinds.size > 1) {
+      // several kinds: no field but the layer, which is for those of them that can be on one
+      kind = 'mixed';
+      items = store.selected().filter((item) => LAYERED.includes(store.kindOf(item)));
+      targets = editable(ctx, items);
+    } else {
       kind = [...kinds][0];
       items = store.selected(kind);
       targets = editable(ctx, items);
     }
 
     const nodes = [];
-    for (const f of (kind === 'mixed' ? [] : FIELDS[kind]) ?? []) {
+    for (const f of (kind === 'mixed' ? (items.length ? [LAYER] : []) : FIELDS[kind]) ?? []) {
       let c = null;
       try { c = controlFor(f); } catch (err) { console.error(`[editor] inspector: the field '${f.label}' could not be built`, err); }
       if (!c) continue;
@@ -541,6 +573,7 @@ export default function mount(el, ctx) {
   ui.on('layers', rebuild);          // what may be edited has changed
   ui.on('hiddenModels', rebuild);
   ui.on('itemflags', rebuild);
+  ui.on('customLayers', rebuild);
 
   rebuild();
   return {

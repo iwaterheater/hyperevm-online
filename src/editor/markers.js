@@ -538,6 +538,7 @@ export class Markers {
       ui.on('layers', () => this._layers()),
       ui.on('overlays', () => this._stale()),
       ui.on('itemflags', () => this._stale(true)),
+      ui.on('customLayers', () => this._stale()),   // a camp, a chest or an NPC of a hidden layer is not drawn
       ui.on('tool', () => this._stale()),
       ui.on('preview', () => this._preview()),
     ];
@@ -879,6 +880,14 @@ export class Markers {
     this._stale();   // a lock changes which handles show
   }
 
+  // The camps, chests or NPCs that are drawn: none while their layer is hidden, and never those of a hidden layer of
+  // the map's own. (What is not drawn is not picked either: ui.isPickable refuses it.)
+  _drawn(layer) {
+    const { store, ui } = this.ctx, list = store.map?.[layer];
+    if (!list || !this.on[layer]) return NONE;
+    return ui.customLayers?.size ? list.filter((item) => !ui.layerHidden(item)) : list;
+  }
+
   _preview() {
     this.muted = this.ctx.ui.preview === 'game';
     this.body.visible = !this.muted;
@@ -987,7 +996,7 @@ export class Markers {
     }
     const byLevel = !!ui.overlays?.levelColors, everyThreat = !!ui.overlays?.threat;
     const editable = (kind, item) => (ui.isPickable ? ui.isPickable(kind, item) : true);
-    const spawns = this.on.spawns ? map.spawns : NONE, chests = this.on.chests ? map.chests : NONE, npcs = this.on.npcs ? map.npcs : NONE;
+    const spawns = this._drawn('spawns'), chests = this._drawn('chests'), npcs = this._drawn('npcs');
     const start = this.on.start ? map.start : null;
     const tinted = (color, state, out) => {
       const c = rgb(color), t = TINT[state];
@@ -1343,9 +1352,9 @@ export class Markers {
       const state = this._state(item);
       list.push({ item, kind, color, state, sx: sc.x, sy: sc.y, rank: state * 2 + (kind === 'region' ? 1 : 0), d: (x - target.x) ** 2 + (z - target.z) ** 2 });
     };
-    if (this.on.spawns) for (const item of map.spawns) offer(item, 'spawn', item.x, item.z, spawnColor(item, byLevel));
-    if (this.on.chests) for (const item of map.chests) offer(item, 'chest', item.x, item.z, CHEST_COLOR);
-    if (this.on.npcs) for (const item of map.npcs) offer(item, 'npc', item.x, item.z, NPC_COLOR[item.kind] ?? 0xffffff);
+    for (const item of this._drawn('spawns')) offer(item, 'spawn', item.x, item.z, spawnColor(item, byLevel));
+    for (const item of this._drawn('chests')) offer(item, 'chest', item.x, item.z, CHEST_COLOR);
+    for (const item of this._drawn('npcs')) offer(item, 'npc', item.x, item.z, NPC_COLOR[item.kind] ?? 0xffffff);
     if (this.on.start) offer(map.start, 'start', map.start.x, map.start.z, START_COLOR);
     for (const { region } of this.lines) {
       const c = shapeCentre(region.shape);

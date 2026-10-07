@@ -148,6 +148,7 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
   let colVersion = -1, colGround = -1;
   let brushDirty = false, actionsDone = false, loads = 0;
   let hiddenModels = new Set(ui.hiddenModels ?? []);
+  let hiddenObjects = false;   // the view hides single objects right now (those of a hidden custom layer)
   const pointer = { sx: 0, sy: 0, inside: false, ev: null };
   const rig = { x: 0, z: 0, ...HOME };
   const stats = { triangles: 0, calls: 0 };
@@ -1461,6 +1462,30 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     pickFrame = -1;
     invalidate();
   }
+  // The map's own layers hide objects one by one: the scenery of "Town" is spread over many models, and every model
+  // is used by other layers too. A full pass over the objects, made only while some layer is hidden (or was).
+  function applyCustomLayers() {
+    const map = store.map;
+    let any = false;
+    for (const state of ui.customLayers?.values() ?? []) if (!state.visible) { any = true; break; }
+    if (map && (any || hiddenObjects)) {
+      const off = any ? map.objects.filter((obj) => ui.layerHidden(obj)) : [];
+      view.setObjectsHidden(off);
+      hiddenObjects = off.length > 0;
+    }
+    pickFrame = -1;
+    setHover(null, null);
+    refreshCursor();
+    selDirty = true;
+    invalidate();
+  }
+  // One object came into the map, or changed - its layer among other things.
+  function hideByLayer(obj) {
+    if (store.kindOf(obj) !== 'object') return;
+    const off = ui.layerHidden(obj);
+    view.setObjectHidden(obj, off);
+    if (off) hiddenObjects = true;
+  }
   function syncSelection() {
     const selected = store.map ? [...store.selection] : [];
     view.setSelected(selected.filter((item) => store.kindOf(item) === 'object'));
@@ -1497,6 +1522,8 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     // the view forgets its hidden models on every load
     hiddenModels = new Set();
     applyHiddenModels(ui.hiddenModels);
+    hiddenObjects = false;   // ... and the objects it hid one by one
+    applyCustomLayers();
     applyLayers();
     syncSelection();
     let result = null;
@@ -1524,6 +1551,10 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     for (const obj of change.removed.objects) place(obj);
     for (const obj of change.added.objects) place(obj);
     for (const obj of change.updated.objects) view.updateObject(obj);
+    if (hiddenObjects || ui.customLayers?.size) {   // an object that was put on a hidden layer, or taken off one
+      for (const obj of change.added.objects) hideByLayer(obj);
+      for (const obj of change.updated.objects) hideByLayer(obj);
+    }
     if (change.added.npcs.length || change.updated.npcs.length || change.removed.npcs.length) view.setNpcObstacles(map.npcs);
     const props = change.props;
     if (props.includes('radius') || props.includes('foliage') || props.includes('ground')) {
@@ -1597,6 +1628,7 @@ export function createViewport(ctx, { el = document.querySelector('#viewport') }
     store.on('selection', syncSelection),
     ui.on('layers', applyLayers),
     ui.on('hiddenModels', applyHiddenModels),
+    ui.on('customLayers', applyCustomLayers),
     ui.on('overlays', invalidate),
     ui.on('axes', invalidate),
     ui.on('snap', invalidate),

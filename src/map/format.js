@@ -59,6 +59,7 @@ export const LIMITS = {
   monsters: 1200, monstersWarn: 800,
   chests: 200, chestGold: [1, 100000], chestRespawn: [10, 86400], chestMargin: 1,
   npcs: 40, npcMargin: 1,
+  layers: 64, layerName: [1, 32],
   bodyBytes: 8388608, issues: 100,
 };
 
@@ -619,6 +620,20 @@ export function hasBoss(spawn) {
   return Object.hasOwn(spawn.types, 'boss');
 }
 
+// ---- custom layers: names the map maker gives to parts of the map ("Town", "Bandit camp") to show, hide and lock them
+// in the editor. map.layers lists them in the order of the Layers panel; an object, spawn, chest or NPC is on the
+// layer its `l` names, or on none (null). They organise the work and nothing else: the game and the server ignore them.
+
+// What is wrong with `name` as a layer of a map whose layers are `layers`, as the end of a sentence ("The layer name
+// ..."); null when it is fine. Names are compared without case: "Town" and "town" would be one row to the eye.
+// except: a name of the list that does not count as taken - the layer that is being renamed.
+export function layerProblem(layers, name, except = null) {
+  const bad = nameProblem(name, LIMITS.layerName);
+  if (bad) return bad;
+  const key = name.toLowerCase();
+  return (layers ?? []).some((other) => other !== except && typeof other === 'string' && other.toLowerCase() === key) ? 'is taken by another layer' : null;
+}
+
 // [{ kind, item }] of every object, spawn, chest and NPC in group g.
 export function groupItems(map, g) {
   const out = [];
@@ -632,13 +647,13 @@ export function groupItems(map, g) {
 // ---------------------------------------------------------------- file form: decoding
 
 // The keys of the file form, in the order the canonical writer emits them. The decoder accepts exactly these.
-const TOP_KEYS = ['version', 'name', 'radius', 'start', 'foliage', 'fallback', 'regions', 'spawns', 'chests', 'npcs', 'ground', 'objects'];
+const TOP_KEYS = ['version', 'name', 'radius', 'start', 'foliage', 'fallback', 'layers', 'regions', 'spawns', 'chests', 'npcs', 'ground', 'objects'];
 const XZR = ['x', 'z', 'r'];
 const FILE_KEYS = {
-  object: ['m', 'x', 'y', 'z', 'rx', 'ry', 'rz', 's', 'sy', 'col', 'g'],
-  spawn: ['types', 'lvl', 'x', 'z', 'r', 'count', 'respawn', 'g'],
-  chest: ['x', 'z', 'ry', 'gold', 'big', 'respawn', 'g'],
-  npc: ['kind', 'x', 'z', 'ry', 'g'],
+  object: ['m', 'x', 'y', 'z', 'rx', 'ry', 'rz', 's', 'sy', 'col', 'g', 'l'],
+  spawn: ['types', 'lvl', 'x', 'z', 'r', 'count', 'respawn', 'g', 'l'],
+  chest: ['x', 'z', 'ry', 'gold', 'big', 'respawn', 'g', 'l'],
+  npc: ['kind', 'x', 'z', 'ry', 'g', 'l'],
   region: ['name', 'levels', 'mood', 'safe', 'color', 'shape'],
   circle: ['type', 'x', 'z', 'r'],
   poly: ['type', 'points'],
@@ -692,7 +707,7 @@ function decoder() {
       wrong(v, at(path, key), 'true or false');
       return false;
     },
-    // an optional string where null and absent mean the same: g, color
+    // an optional string where null and absent mean the same: g, l, color
     text(o, key, path) {
       const v = o[key];
       if (v === undefined || v === null || typeof v === 'string') return v ?? null;
@@ -737,7 +752,7 @@ function decodeObject(d, raw, path) {
     x: d.num(raw, 'x', path), y: d.num(raw, 'y', path, 0), z: d.num(raw, 'z', path),
     rx: toRad(d.num(raw, 'rx', path, 0)), ry: toRad(d.num(raw, 'ry', path, 0)), rz: toRad(d.num(raw, 'rz', path, 0)),
     s: d.num(raw, 's', path, 1), sy: d.num(raw, 'sy', path, 1),
-    col: decodeCol(d, raw, path), g: d.text(raw, 'g', path),
+    col: decodeCol(d, raw, path), g: d.text(raw, 'g', path), l: d.text(raw, 'l', path),
   });
 }
 
@@ -753,7 +768,7 @@ function decodeSpawn(d, raw, path) {
   }
   return quantizeItem('spawn', {
     types, lvl: d.pair(raw, 'lvl', path), x: d.num(raw, 'x', path), z: d.num(raw, 'z', path), r: d.num(raw, 'r', path),
-    count: d.num(raw, 'count', path), respawn: d.num(raw, 'respawn', path), g: d.text(raw, 'g', path),
+    count: d.num(raw, 'count', path), respawn: d.num(raw, 'respawn', path), g: d.text(raw, 'g', path), l: d.text(raw, 'l', path),
   });
 }
 
@@ -761,7 +776,8 @@ function decodeChest(d, raw, path) {
   if (!d.obj(raw, path, FILE_KEYS.chest)) return null;
   return quantizeItem('chest', {
     x: d.num(raw, 'x', path), z: d.num(raw, 'z', path), ry: toRad(d.num(raw, 'ry', path, 0)),
-    gold: d.num(raw, 'gold', path), big: d.bool(raw, 'big', path, false), respawn: d.num(raw, 'respawn', path), g: d.text(raw, 'g', path),
+    gold: d.num(raw, 'gold', path), big: d.bool(raw, 'big', path, false), respawn: d.num(raw, 'respawn', path),
+    g: d.text(raw, 'g', path), l: d.text(raw, 'l', path),
   });
 }
 
@@ -769,7 +785,7 @@ function decodeNpc(d, raw, path) {
   if (!d.obj(raw, path, FILE_KEYS.npc)) return null;
   return quantizeItem('npc', {
     kind: d.key(raw, 'kind', path, NPC_KINDS, 'NPC kind'),
-    x: d.num(raw, 'x', path), z: d.num(raw, 'z', path), ry: toRad(d.num(raw, 'ry', path, 0)), g: d.text(raw, 'g', path),
+    x: d.num(raw, 'x', path), z: d.num(raw, 'z', path), ry: toRad(d.num(raw, 'ry', path, 0)), g: d.text(raw, 'g', path), l: d.text(raw, 'l', path),
   });
 }
 
@@ -844,6 +860,17 @@ function decodeGround(d, raw) {
   return { cell, size, cells, heights };
 }
 
+// The custom layers: a list of names. A file without the key has none. What a name may be is a RANGE rule (validate).
+function decodeLayers(d, raw) {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) { d.wrong(raw, 'layers', 'an array of layer names'); return []; }
+  return raw.map((name, i) => {
+    if (typeof name === 'string') return name;
+    d.wrong(name, `layers[${i}]`, 'a string');
+    return '';
+  });
+}
+
 const DECODERS = { object: decodeObject, spawn: decodeSpawn, chest: decodeChest, npc: decodeNpc, region: decodeRegion };
 
 // File form -> runtime form, every value built from scratch from known keys only: nothing of `file` is referenced
@@ -865,6 +892,7 @@ function decode(file) {
     start: decodeStart(d, file.start),
     foliage: d.bool(file, 'foliage', ''),
     fallback: decodeFallback(d, file.fallback),
+    layers: decodeLayers(d, file.layers),
     regions: list('regions', 'region'), spawns: list('spawns', 'spawn'), chests: list('chests', 'chest'), npcs: list('npcs', 'npc'),
     ground: decodeGround(d, file.ground),
     objects: list('objects', 'object'),
@@ -934,6 +962,7 @@ const BOOL_MESSAGE = 'Expected true or false.';
 const span = (range) => `${range[0]} to ${range[1].toLocaleString('en-US')}`;
 const levelsOk = (l) => Array.isArray(l) && l.length === 2 && intIn(l[0], LIMITS.level) && intIn(l[1], LIMITS.level) && l[0] <= l[1];
 const groupOk = (g) => g == null || (typeof g === 'string' && GROUP_RE.test(g));
+const KIND_OF_LIST = Object.fromEntries(Object.entries(COLLECTION).map(([kind, list]) => [list, kind]));
 
 // what is wrong with a free-text name, as the end of a sentence; null when it is fine
 function nameProblem(s, range) {
@@ -1084,6 +1113,27 @@ function check(map, models, strictModels) {
   }
   const blocked = (x, z) => gridOk && isBlocked(map, x, z);
 
+  // ---- custom layers (a map built before they existed has no list: that is no layers)
+  const layers = map.layers ?? [], layerSet = new Set(), layerKeys = new Set(), strays = new Map();
+  if (!Array.isArray(layers)) throw new TypeError('"layers" is not a list');
+  if (layers.length > L.layers) error('too-many', 'layers', `The map has ${layers.length} layers; the limit is ${L.layers}.`);
+  for (let i = 0; i < Math.min(layers.length, L.layers); i++) {
+    const name = layers[i], key = typeof name === 'string' ? name.toLowerCase() : name;
+    if ((bad = nameProblem(name, L.layerName))) error('layer-name', `layers[${i}]`, `The layer name ${bad}.`);
+    else if (layerKeys.has(key)) error('layer-duplicate', `layers[${i}]`, `The layer "${name}" is listed twice (names are compared without case).`);
+    layerKeys.add(key);
+    layerSet.add(name);
+  }
+  // An item on a layer the map does not list. One issue per name, not per item: a layer deleted by hand from the file
+  // would otherwise bury everything else. Asked for every item of the four kinds, as the loops below pass it.
+  const onLayer = (list, i, item) => {
+    const name = item.l;
+    if (name == null || layerSet.has(name)) return;
+    if (typeof name !== 'string') { error('type', `${list}[${i}].l`, 'A layer is named by a string, or absent.', on(KIND_OF_LIST[list], i, item)); return; }
+    const seen = strays.get(name);
+    if (seen) seen.n++; else strays.set(name, { list, i, item, n: 1 });
+  };
+
   // ---- regions
   const regions = map.regions, reach = L.regionReach * half;
   if (regions.length > L.regions) error('too-many', 'regions', `The map has ${regions.length} regions; the limit is ${L.regions}.`);
@@ -1173,6 +1223,7 @@ function check(map, models, strictModels) {
       error('spawn-pos', path, `A spawn's disc must stay ${L.spawnMargin} units inside the map radius.`, here());
     }
     if (!groupOk(s.g)) error('enum', `${path}.g`, GROUP_MESSAGE, here());
+    onLayer('spawns', i, s);
     if (index.isSafe(s.x, s.z)) error('spawn-in-safe', path, 'A spawn cannot have its centre inside a safe region.', here());
     else if (safeShapes.some((shape) => shapeDistance(shape, s.x, s.z) < s.r + WANDER_R)) {
       warn('spawn-near-safe', path, 'Monsters of this spawn wander up to the edge of a safe region.', here());
@@ -1211,6 +1262,7 @@ function check(map, models, strictModels) {
       error('chest-pos', path, `A chest must stay ${L.chestMargin} unit inside the map radius.`, here());
     }
     if (!groupOk(c.g)) error('enum', `${path}.g`, GROUP_MESSAGE, here());
+    onLayer('chests', i, c);
     if (!Number.isFinite(c.ry)) error('not-finite', `${path}.ry`, ANGLE_MESSAGE, here());
     if (typeof c.big !== 'boolean') error('type', `${path}.big`, BOOL_MESSAGE, here());
     if (blocked(c.x, c.z)) warn('chest-blocked', path, 'This chest is on ground that cannot be walked on.', here());
@@ -1225,6 +1277,7 @@ function check(map, models, strictModels) {
       error('npc-pos', path, `An NPC must stay ${L.npcMargin} unit inside the map radius.`, here());
     }
     if (!groupOk(n.g)) error('enum', `${path}.g`, GROUP_MESSAGE, here());
+    onLayer('npcs', i, n);
     if (!NPC_KINDS.includes(n.kind)) error('enum', `${path}.kind`, `An NPC is one of: ${NPC_KINDS.join(', ')}.`, here());
     if (!Number.isFinite(n.ry)) error('not-finite', `${path}.ry`, ANGLE_MESSAGE, here());
     if (blocked(n.x, n.z)) warn('npc-blocked', path, 'This NPC is on ground that cannot be walked on.', here());
@@ -1261,6 +1314,7 @@ function check(map, models, strictModels) {
     }
     if (o.col != null && (bad = colProblem(o.col))) error('col', `objects[${i}].col`, bad, on('object', i, o));
     if (!groupOk(o.g)) error('enum', `objects[${i}].g`, GROUP_MESSAGE, on('object', i, o));
+    onLayer('objects', i, o);
     if (!(Number.isFinite(o.rx) && Number.isFinite(o.ry) && Number.isFinite(o.rz))) {
       error('not-finite', `objects[${i}].ry`, ANGLE_MESSAGE, on('object', i, o));
     }
@@ -1272,6 +1326,10 @@ function check(map, models, strictModels) {
   for (const [id, { i, n }] of missing) {
     (strictModels ? error : warn)('model-missing', `objects[${i}].m`,
       `The model "${id}" is not among the game's assets${n > 1 ? ` (${n} objects use it)` : ''}.`, on('object', i, objects[i]));
+  }
+  for (const [name, { list, i, item, n }] of strays) {
+    error('layer-unknown', `${list}[${i}].l`,
+      `The layer "${clip(name)}" is not among the map's layers${n > 1 ? ` (${n} items are on it)` : ''}.`, on(KIND_OF_LIST[list], i, item));
   }
   for (const [i, j] of duplicateObjects(objects, nObjects)) {
     warn('object-duplicate', `objects[${i}]`, `This object sits on top of objects[${j}], the same model.`, on('object', i, objects[i]));
@@ -1298,6 +1356,7 @@ export function encodeItem(kind, item) {
     if (Array.isArray(col)) f.col = col.map((c) => ({ x: qScale(c.x), z: qScale(c.z), r: qScale(c.r) }));
     else if (col != null) f.col = typeof col === 'number' ? qPos(col) : col;
     if (item.g != null) f.g = item.g;
+    if (item.l != null) f.l = item.l;
     return f;
   }
   if (kind === 'spawn') {
@@ -1306,6 +1365,7 @@ export function encodeItem(kind, item) {
     for (const k of Object.keys(item.types)) if (!Object.hasOwn(types, k)) types[k] = item.types[k];   // unknown ids are kept: the next load reports them
     const f = { types, lvl: pairOf(item.lvl), x: qPos(item.x), z: qPos(item.z), r: qPos(item.r), count: item.count, respawn: item.respawn };
     if (item.g != null) f.g = item.g;
+    if (item.l != null) f.l = item.l;
     return f;
   }
   if (kind === 'chest') {
@@ -1315,12 +1375,14 @@ export function encodeItem(kind, item) {
     put(f, 'big', item.big, false);
     f.respawn = item.respawn;
     if (item.g != null) f.g = item.g;
+    if (item.l != null) f.l = item.l;
     return f;
   }
   if (kind === 'npc') {
     const f = { kind: item.kind, x: qPos(item.x), z: qPos(item.z) };
     put(f, 'ry', degrees(item.ry), 0);
     if (item.g != null) f.g = item.g;
+    if (item.l != null) f.l = item.l;
     return f;
   }
   if (kind === 'region') {
@@ -1359,6 +1421,7 @@ export function serialize(map, { check = true } = {}) {
     start: { x: qPos(start.x), z: qPos(start.z), r: qPos(start.r) },
     foliage: map.foliage,
     fallback: fb,
+    ...(map.layers?.length ? { layers: map.layers.slice() } : {}),   // a map without custom layers carries no key at all
     regions: map.regions.map((r) => encodeItem('region', r)),
     spawns: map.spawns.map((s) => encodeItem('spawn', s)),
     chests: map.chests.map((c) => encodeItem('chest', c)),
@@ -1429,6 +1492,7 @@ export function emptyMap({ radius = 260 } = {}) {
     start: { x: 0, z: 0, r: 5 },
     foliage: true,
     fallback: { name: 'Open Sea', levels: null, mood: 'meadow' },
+    layers: [],
     regions: [], spawns: [], chests: [], npcs: [],
     ground,
     objects: [],

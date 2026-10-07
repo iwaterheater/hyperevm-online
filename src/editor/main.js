@@ -157,6 +157,20 @@ function registerCoreActions(ctx) {
   }
 }
 
+// ---------------------------------------------------------------- the map's own layers
+
+// map.layers belongs to the map and changes through commands (undo and redo included); which of them are shown, locked
+// and active belongs to `ui`. This keeps the second in step with the first, and tells the commands which layer a new
+// item goes on - so no tool has to know that layers exist. Wired before anything else subscribes: by the time the
+// viewport, the markers and the panels hear a 'load' or a 'change', `ui` already agrees with the map.
+function wireLayers(ctx) {
+  const { store, ui } = ctx;
+  const arm = () => cmd.setDefaultLayer(ui.activeLayer);
+  ui.on('activeLayer', arm);
+  store.on('load', () => { ui.followLayers(store.map.layers, { fresh: true }); arm(); });
+  store.on('change', (change) => { if (change.props.includes('layers')) ui.followLayers(store.map.layers); });
+}
+
 // ---------------------------------------------------------------- the options strip
 
 // The strip is one line of fixed height (a strip that grew would move the viewport at every tool switch), so in a
@@ -314,6 +328,7 @@ async function boot() {
     modelSet: new Set(listModels(assets, { hidden: true })),   // the ONLY set passed to validate()
     tools: {}, overlays: {},
   };
+  wireLayers(ctx);
   ctx.viewport = createViewport(ctx);   // creates the MapView; attaches ui.pickPoint and ui.setCursor
   ctx.view = ctx.viewport.view;
   ctx.markers = new Markers(ctx.viewport.scene, ctx);

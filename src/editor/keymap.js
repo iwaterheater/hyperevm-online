@@ -56,6 +56,7 @@ export const BINDINGS = [
   row('global', 'Escape', 'edit.cancel', 'Cancel, then back to Select, then clear the selection'),
   row('global', 'Shift+Slash', 'help.toggle', 'Show or hide this sheet'),
   row('global', 'F1', 'help.toggle', 'Show or hide this sheet'),
+  row('global', 'F2', 'layer.rename', 'Rename the active layer'),
 
   // ---- camera
   row('camera', 'KeyW', 'pan.forward', 'Pan forward (Shift: 3 times faster)', true),
@@ -289,10 +290,11 @@ export function install(ctx) {
   const cancel = () => {
     const ev = current ?? new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape' });
     if (dialog()) { closeFloating(); return; }           // a dialog first, also when its own text field has the focus
-    // (1) a focused field: it commits and gives the keys back. A field inside a popover takes the popover along -
-    // the box was opened to be typed into, and its close button says "Esc": one press, not two.
+    // (1) a focused field: it commits and gives the keys back (a field that names a new thing drops it instead: it is
+    // told that this is Escape). A field inside a popover takes the popover along - the box was opened to be typed
+    // into, and its close button says "Esc": one press, not two.
     const box = popoverOf(document.activeElement);
-    if (leaveField()) {
+    if (leaveField({ cancel: true })) {
       if (box) { try { box.hidePopover(); } catch { /* closed by the commit already */ } }
       return;
     }

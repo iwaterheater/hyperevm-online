@@ -23,22 +23,22 @@ import { emptyChange } from './store.js';
 
 // ---------------------------------------------------------------- items: fields, kinds, values
 
-const NUM = 'number', STR = 'string', TEXT = 'text', BOOL = 'boolean';
+const NUM = 'number', STR = 'string', TEXT = 'text', BOOL = 'boolean', LAYER = 'layer';
 // Every field of every kind, in the key order of the runtime form, with the type a value must have.
 const FIELDS = {
-  object: { m: STR, x: NUM, y: NUM, z: NUM, rx: NUM, ry: NUM, rz: NUM, s: NUM, sy: NUM, col: 'col', g: TEXT },
-  spawn: { types: 'types', lvl: 'pair', x: NUM, z: NUM, r: NUM, count: NUM, respawn: NUM, g: TEXT },
-  chest: { x: NUM, z: NUM, ry: NUM, gold: NUM, big: BOOL, respawn: NUM, g: TEXT },
-  npc: { kind: 'npc', x: NUM, z: NUM, ry: NUM, g: TEXT },
+  object: { m: STR, x: NUM, y: NUM, z: NUM, rx: NUM, ry: NUM, rz: NUM, s: NUM, sy: NUM, col: 'col', g: TEXT, l: LAYER },
+  spawn: { types: 'types', lvl: 'pair', x: NUM, z: NUM, r: NUM, count: NUM, respawn: NUM, g: TEXT, l: LAYER },
+  chest: { x: NUM, z: NUM, ry: NUM, gold: NUM, big: BOOL, respawn: NUM, g: TEXT, l: LAYER },
+  npc: { kind: 'npc', x: NUM, z: NUM, ry: NUM, g: TEXT, l: LAYER },
   region: { name: STR, levels: 'levels', mood: 'mood', safe: BOOL, color: TEXT, shape: 'shape' },
   start: { x: NUM, z: NUM, r: NUM },
 };
 // The optional keys with their defaults: what a file may omit, and what set(items, { key: undefined }) resets to.
 const OPTIONAL = {
-  object: { y: 0, rx: 0, ry: 0, rz: 0, s: 1, sy: 1, col: null, g: null },
-  spawn: { g: null },
-  chest: { ry: 0, big: false, g: null },
-  npc: { ry: 0, g: null },
+  object: { y: 0, rx: 0, ry: 0, rz: 0, s: 1, sy: 1, col: null, g: null, l: null },
+  spawn: { g: null, l: null },
+  chest: { ry: 0, big: false, g: null, l: null },
+  npc: { ry: 0, g: null, l: null },
   region: { levels: null, mood: null, safe: false, color: null },
   start: {},
 };
@@ -51,6 +51,7 @@ const REQUIRED = {
   region: { name: 'New region', shape: { type: 'circle', x: 0, z: 0, r: 20 } },
 };
 const LIST_OF = { ...COLLECTION, start: 'start' };       // kind -> its key in Change.updated
+const LAYERED = ['objects', 'spawns', 'chests', 'npcs']; // the lists whose items can be on a custom layer (`l`)
 const LISTS = Object.values(COLLECTION);
 const NOUNS = {
   object: ['object', 'objects'], spawn: ['spawn', 'spawns'], chest: ['chest', 'chests'], npc: ['NPC', 'NPCs'],
@@ -87,6 +88,8 @@ function take(type, v, where) {
     case NUM: return finite(v) ? v : fail(where, 'a finite number');
     case STR: return typeof v === 'string' ? v : fail(where, 'a string');
     case TEXT: return v === null || typeof v === 'string' ? v : fail(where, 'a string or null');
+    // an item built before layers existed (an old stamp, a hand-made literal) has no `l` at all: that is no layer
+    case LAYER: return v == null ? null : typeof v === 'string' ? v : fail(where, 'a layer name or null');
     case BOOL: return typeof v === 'boolean' ? v : fail(where, 'true or false');
     case 'npc': return NPC_KINDS.includes(v) ? v : fail(where, `one of ${NPC_KINDS.join(', ')}`);
     case 'mood': return v === null || (typeof v === 'string' && Object.hasOwn(MOODS, v)) ? v : fail(where, 'a mood id or null');
@@ -219,7 +222,12 @@ class Add {
       // at[i] is where items[i] ends up: i of the new items and at[i] - i old entries stand before it
       for (let i = 0; i < n; i++) if (this.at[i] - i > arr.length) throw new RangeError(`add('${this.kind}'): index ${this.at[i]} is beyond the list`);
     }
-    for (const item of items) quantizeItem(this.kind, item);
+    // An item cannot arrive on a layer the map does not have - a clip from another map, a stamp saved before the layer
+    // was renamed: it comes in on no layer. (The item is not in the map yet: this still builds it.)
+    for (const item of items) {
+      quantizeItem(this.kind, item);
+      if (item.l != null && !map.layers?.includes(item.l)) item.l = null;
+    }
     if (this.at) insertAt(arr, items, this.at);
     else for (const item of items) arr.push(item);
     change.added[this.list] = items.slice();
@@ -358,6 +366,12 @@ class SetFields {
     const only = (list) => keys.size > 0 && [...keys].every((k) => list.includes(k));
     const what = describe(this.kinds);
     if (only(['g'])) return `${grouped ? 'Group' : 'Ungroup'} ${what}`;
+    if (only(['l'])) {
+      const names = new Set(this.after.map((patch) => patch.l));
+      if (names.size !== 1) return `Change the layer of ${what}`;
+      const name = this.after[0].l;
+      return name === null ? `Take ${what} off ${this.items.length === 1 ? 'its layer' : 'their layers'}` : `Put ${what} on the layer ${name}`;
+    }
     if (only(['m'])) return `Replace the model of ${what}`;
     if (only(['name'])) return `Rename ${what}`;
     if (only(['shape'])) return `Reshape ${what}`;
@@ -372,6 +386,10 @@ class SetFields {
 
   do(map) {
     const { items, kinds, after } = this, change = emptyChange(), first = this.before === null;
+    // a layer is named, never invented: before anything is written (a typo here would be a map that cannot be saved)
+    for (const patch of after) {
+      if (patch.l != null && !map.layers?.includes(patch.l)) throw new TypeError(`set: the map has no layer "${patch.l}"`);
+    }
     if (first) this.before = new Array(items.length);
     for (let i = 0; i < items.length; i++) {
       const item = items[i], kind = kinds[i], patch = after[i];
@@ -961,6 +979,187 @@ export function heights(indices, values, label = 'Sculpt') {
   return new Heights(indices, values, label);
 }
 
+// ---------------------------------------------------------------- custom layers
+
+// map.layers is the ordered list of the map's own layer names; an item is on the layer its `l` names. These four
+// commands are the only code that writes the list. Like every command they do not judge a name (validate() does - the
+// panel asks layerProblem() before it builds one), but they refuse what would leave the list in a state no later
+// command could make sense of: a name that is not a string, a second layer of exactly the same name.
+// Their Change says 'layers' in props; a rename and a delete also list every item whose `l` they rewrote as updated.
+
+const layerName = (v, where) => (typeof v === 'string' ? v : fail(where, 'a layer name (a string)'));
+// (a map made before layers existed has no list yet: the first command that needs one gives it one)
+const layersOf = (map) => (map.layers ??= []);
+const layersChanged = () => { const change = emptyChange(); change.props.push('layers'); return change; };
+
+// Every item that is on the layer `name`, list by list, in map order.
+function itemsOn(map, name) {
+  const found = {};
+  for (const list of LAYERED) {
+    const hit = map[list].filter((item) => item.l === name);
+    if (hit.length) found[list] = hit;
+  }
+  return found;
+}
+
+// Writes `name` (or null) into every item of `found` and reports them as updated.
+function relayer(found, name, change) {
+  for (const list of Object.keys(found)) {
+    for (const item of found[list]) item.l = name;
+    change.updated[list] = found[list].slice();
+  }
+  return change;
+}
+
+class AddLayer {
+  constructor(name, at) {
+    this.name = layerName(name, 'addLayer');
+    if (at !== null && !(Number.isInteger(at) && at >= 0)) fail('addLayer', 'an index or null');
+    this.at = at;
+    this.done = false;
+  }
+
+  get label() { return `Add the layer ${this.name}`; }
+
+  get bytes() { return 64 + 2 * this.name.length; }
+
+  do(map) {
+    const layers = layersOf(map);
+    this.done = !layers.includes(this.name);
+    if (!this.done) return emptyChange();                  // it is there already: nothing to add, nothing to undo
+    this.at = Math.min(this.at ?? layers.length, layers.length);
+    layers.splice(this.at, 0, this.name);
+    return layersChanged();
+  }
+
+  undo(map) {
+    if (!this.done) return emptyChange();
+    layersOf(map).splice(this.at, 1);
+    return layersChanged();
+  }
+}
+
+// A new, empty layer. at: where in the list (default: at the end). A name the map already has adds nothing.
+export function addLayer(name, at = null) {
+  return new AddLayer(name, at);
+}
+
+class RenameLayer {
+  constructor(from, to) {
+    this.from = layerName(from, 'renameLayer');
+    this.to = layerName(to, 'renameLayer');
+    this.found = null;       // list -> the items that were on the layer, kept from the first do()
+    this.index = -1;
+  }
+
+  get label() { return `Rename the layer ${this.from} to ${this.to}`; }
+
+  get bytes() {
+    let n = 64 + 2 * (this.from.length + this.to.length);
+    for (const list of Object.keys(this.found ?? {})) n += 8 * this.found[list].length;
+    return n;
+  }
+
+  // the layer takes `name`, and so does every item that is on it
+  give(map, name) {
+    layersOf(map)[this.index] = name;
+    return relayer(this.found, name, layersChanged());
+  }
+
+  do(map) {
+    const layers = layersOf(map);
+    this.index = layers.indexOf(this.from);
+    if (this.index < 0 || this.from === this.to) { this.index = -1; return emptyChange(); }
+    // two layers of one name would be one layer with two rows: merging is not what a rename is asked for
+    if (layers.includes(this.to)) throw new TypeError(`renameLayer: the map already has a layer "${this.to}"`);
+    this.found ??= itemsOn(map, this.from);
+    return this.give(map, this.to);
+  }
+
+  undo(map) {
+    return this.index < 0 ? emptyChange() : this.give(map, this.from);
+  }
+}
+
+// Gives the layer another name - in the list, and on every item that is on it, as ONE step.
+export function renameLayer(from, to) {
+  return new RenameLayer(from, to);
+}
+
+class RemoveLayer {
+  constructor(name) {
+    this.name = layerName(name, 'removeLayer');
+    this.found = null;
+    this.index = -1;
+  }
+
+  get label() { return `Delete the layer ${this.name}`; }
+
+  get bytes() {
+    let n = 64 + 2 * this.name.length;
+    for (const list of Object.keys(this.found ?? {})) n += 8 * this.found[list].length;
+    return n;
+  }
+
+  do(map) {
+    const layers = layersOf(map);
+    this.index = layers.indexOf(this.name);
+    if (this.index < 0) return emptyChange();
+    this.found ??= itemsOn(map, this.name);
+    layers.splice(this.index, 1);
+    return relayer(this.found, null, layersChanged());
+  }
+
+  undo(map) {
+    if (this.index < 0) return emptyChange();
+    layersOf(map).splice(this.index, 0, this.name);
+    return relayer(this.found, this.name, layersChanged());
+  }
+}
+
+// Takes the layer off the list. Its items STAY on the map and are on no layer afterwards; undo puts every one of them
+// back on it. (To delete them too: batch(label, [remove(items), removeLayer(name)]).)
+export function removeLayer(name) {
+  return new RemoveLayer(name);
+}
+
+class ReorderLayer {
+  constructor(name, toIndex) {
+    this.name = layerName(name, 'reorderLayer');
+    if (!Number.isInteger(toIndex)) fail('reorderLayer', 'an index');
+    this.to = toIndex;
+    this.from = -1;
+  }
+
+  get label() { return 'Reorder layers'; }
+
+  get bytes() { return 64; }
+
+  move(map, from, to) {
+    const layers = layersOf(map);
+    if (from === to || layers[from] !== this.name) return emptyChange();
+    layers.splice(to, 0, layers.splice(from, 1)[0]);
+    return layersChanged();
+  }
+
+  do(map) {
+    const layers = layersOf(map);
+    this.from = layers.indexOf(this.name);
+    if (this.from < 0) return emptyChange();
+    this.to = Math.max(0, Math.min(layers.length - 1, this.to));
+    return this.move(map, this.from, this.to);
+  }
+
+  undo(map) {
+    return this.from < 0 ? emptyChange() : this.move(map, this.to, this.from);
+  }
+}
+
+// Moves the layer to index toIndex of the list (clamped). The order is the order of the Layers panel, nothing more.
+export function reorderLayer(name, toIndex) {
+  return new ReorderLayer(name, toIndex);
+}
+
 // ---------------------------------------------------------------- setProps
 
 const PROPS = ['name', 'radius', 'foliage', 'fallback'];
@@ -1143,8 +1342,19 @@ export function batch(label, commands) {
 
 // ---------------------------------------------------------------- helpers (not commands)
 
+// The layer make() puts a new object, spawn, chest or NPC on when its props name none: the ACTIVE layer of the editor,
+// or null for no layer. One setting for every tool that creates something, so none of them has to know about layers.
+// Whoever owns the active layer keeps this in step with it (main.js); a name the map does not have does no harm -
+// add() brings such an item in on no layer.
+let defaultLayer = null;
+export function setDefaultLayer(name) {
+  if (name !== null && typeof name !== 'string') fail('setDefaultLayer', 'a layer name or null');
+  defaultLayer = name;
+}
+
 // -> a new item of that kind with the defaults of the format - the only way editor code creates items.
 // kind: 'object' | 'spawn' | 'chest' | 'npc' | 'region'. An object needs its model `m`; everything else has a default.
+// An object, spawn, chest or NPC made without `l` lands on the default layer (setDefaultLayer); `l: null` asks for none.
 export function make(kind, props = {}) {
   if (!Object.hasOwn(REQUIRED, kind)) fail(`make('${kind}')`, 'one of object, spawn, chest, npc, region (a map has exactly one start)');
   if (!isObj(props)) fail(`make('${kind}')`, 'a props object');
@@ -1153,6 +1363,7 @@ export function make(kind, props = {}) {
   for (const key of Object.keys(fields)) {
     const where = `make('${kind}'): ${key}`;
     if (props[key] !== undefined) item[key] = take(fields[key], props[key], where);
+    else if (key === 'l') item.l = defaultLayer;       // what is made goes onto the active layer
     else if (Object.hasOwn(OPTIONAL[kind], key)) item[key] = OPTIONAL[kind][key];
     else if (Object.hasOwn(REQUIRED[kind], key)) item[key] = take(fields[key], REQUIRED[kind][key], where);
     else fail(where, 'a value (it has no default)');

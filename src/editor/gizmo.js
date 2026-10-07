@@ -319,6 +319,7 @@ export function createGizmo(ctx) {
     ui.on('layers', () => { dirty = true; }),   // a locked layer takes its items out of what may be edited
     ui.on('itemflags', () => { dirty = true; }),
     ui.on('hiddenModels', () => { dirty = true; }),
+    ui.on('customLayers', () => { dirty = true; }),   // ... and so does a hidden or locked layer of the map's own
   ];
 
   function dispose() {

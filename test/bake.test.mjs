@@ -183,7 +183,7 @@ test('ground: the vertex counts of the terrain formula', () => {
 test('35 chests, the hoard among them', () => {
   assert.equal(map.chests.length, 35);
   const big = map.chests.filter((c) => c.big);
-  assert.deepEqual(big, [{ x: 0, z: -248, ry: 0, gold: 400, big: true, respawn: 300, g: 'fortress' }]);
+  assert.deepEqual(big, [{ x: 0, z: -248, ry: 0, gold: 400, big: true, respawn: 300, g: 'fortress', l: null }]);
   assert.equal(map.chests.indexOf(big[0]), 34);   // the order is the wire index: the hoard was always the last chest
   assert.deepEqual(tally(map.chests, (c) => c.gold), { 12: 12, 40: 12, 90: 10, 400: 1 });
   for (const c of map.chests.filter((q) => !q.big)) {
@@ -216,7 +216,7 @@ test('391 monsters: camps in three zones and the boss', () => {
   assert.equal(spawnCount(map), 391);
   const bosses = map.spawns.filter(hasBoss);
   assert.equal(bosses.length, 1);
-  assert.deepEqual(bosses[0], { types: { boss: 1 }, lvl: [18, 18], x: 0, z: -228, r: 0, count: 1, respawn: 90, g: 'fortress' });
+  assert.deepEqual(bosses[0], { types: { boss: 1 }, lvl: [18, 18], x: 0, z: -228, r: 0, count: 1, respawn: 90, g: 'fortress', l: null });
   assert.equal(map.spawns.at(-1), bosses[0]);   // written last
   const ZONES = {
     'Green Meadows': { mobs: 110, types: { chaser: 3, runner: 2 }, camp: [2, 4] },

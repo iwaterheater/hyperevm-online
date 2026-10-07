@@ -3,8 +3,8 @@
 // never hard-codes a kind. The limits are the ones validate() checks (LIMITS): one table for the widgets and the server.
 //
 // Entry: { key, label, type, ...options }
-//   type      number | int | angle | text | bool | select | color | model | collider | group | weights | intRange |
-//             intRangeOrNull | computed | action
+//   type      number | int | angle | text | bool | select | color | model | collider | group | layer | weights |
+//             intRange | intRangeOrNull | computed | action
 //   min, max  numbers, or a function of the map (called when the field is drawn)
 //   patch     (item, value) -> patch: when present, EVERY editor of that key builds its command as
 //             cmd.setEach(items, items.map((it) => field.patch(it, value))) instead of cmd.set(items, { [key]: value })
@@ -62,6 +62,9 @@ const L = LIMITS;
 const X = { key: 'x', type: 'number', step: 0.1 }, Z = { key: 'z', type: 'number', step: 0.1 };
 const RY = { key: 'ry', label: 'Rotation', type: 'angle' };
 const GROUP = { key: 'g', label: 'Group', type: 'group', pattern: GROUP_PATTERN, maxLength: 32 };
+// The layer of the map's own (map.layers) that an object, spawn, chest or NPC is on: a choice of them, or none (null).
+// Exported: a selection of several kinds shows this one field, the only one they all have.
+export const LAYER = Object.freeze({ key: 'l', label: 'Layer', type: 'layer' });
 
 const SCHEMA = {
   object: [
@@ -72,7 +75,7 @@ const SCHEMA = {
     { key: 's', label: 'Scale', type: 'number', min: L.scale[0], max: L.scale[1], step: 0.05, digits: 3 },
     { key: 'sy', label: 'Height ×', type: 'number', min: L.scale[0], max: L.scale[1], step: 0.05, digits: 3 },
     { key: 'col', label: 'Collider', type: 'collider' },      // catalog default | none | factor | box | circles (JSON text)
-    GROUP,
+    GROUP, LAYER,
   ],
   spawn: [
     { key: 'types', label: 'Monsters', type: 'weights', options: [...MOB_KEYS], min: 0, max: L.spawnWeight[1], patch: typesPatch },
@@ -82,16 +85,16 @@ const SCHEMA = {
     { key: 'count', type: 'int', min: L.spawnCount[0], max: L.spawnCount[1] },
     { key: 'respawn', label: 'Respawn (s)', type: 'int', min: L.spawnRespawn[0], max: L.spawnRespawn[1] },
     { label: 'Stats', type: 'computed', text: statsText },
-    GROUP,
+    GROUP, LAYER,
   ],
   chest: [
     X, Z, RY,
     { key: 'gold', type: 'int', min: L.chestGold[0], max: L.chestGold[1] },
     { key: 'big', type: 'bool' },
     { key: 'respawn', label: 'Respawn (s)', type: 'int', min: L.chestRespawn[0], max: L.chestRespawn[1] },
-    GROUP,
+    GROUP, LAYER,
   ],
-  npc: [{ key: 'kind', type: 'select', options: [...NPC_KINDS] }, X, Z, RY, GROUP],
+  npc: [{ key: 'kind', type: 'select', options: [...NPC_KINDS] }, X, Z, RY, GROUP, LAYER],
   region: [
     { key: 'name', type: 'text', minLength: L.regionName[0], maxLength: L.regionName[1] },
     { key: 'levels', label: 'Levels', type: 'intRangeOrNull', min: L.level[0], max: L.level[1] },

@@ -36,6 +36,27 @@ test('a clip holds the four kinds; instantiate brings them all in while every la
   assert.deepEqual([made.objects[0].x, made.objects[0].z, made.npcs[0].x], [-15, 50, 15], 'moved so that the pivot is at the point');
 });
 
+test('a pasted item keeps the layer of its source while that layer is there and open; else it takes the active one', () => {
+  const { ctx, store, ui, map } = bench();
+  store.exec(cmd.addLayer('Town'));
+  store.exec(cmd.addLayer('Forest'));
+  store.exec(cmd.set([map.objects[0], map.spawns[0]], { l: 'Town' }));
+  const clip = makeClip(ctx, [map.objects[0], map.spawns[0], map.chests[0]]);
+  assert.deepEqual([clip.objects[0].l, clip.spawns[0].l, clip.chests[0].l], ['Town', 'Town', undefined], 'the clip carries the layer');
+  const layersOf = (made) => [made.objects[0].l, made.spawns[0].l, made.chests[0].l];
+  ui.set('activeLayer', 'Forest');
+  assert.deepEqual(layersOf(instantiate(ctx, clip)), ['Town', 'Town', null], 'what was on no layer stays on none');
+  ui.setLayerState('Town', { visible: false });
+  assert.deepEqual(layersOf(instantiate(ctx, clip)), ['Forest', 'Forest', null], 'a hidden layer would swallow the copy');
+  ui.setLayerState('Town', { visible: true, locked: true });
+  assert.deepEqual(layersOf(instantiate(ctx, clip)), ['Forest', 'Forest', null]);
+  ui.setLayerState('Town', { locked: false });
+  store.exec(cmd.removeLayer('Town'));
+  assert.deepEqual(layersOf(instantiate(ctx, clip)), ['Forest', 'Forest', null], 'a layer the map does not have (a stamp of another map)');
+  ui.set('activeLayer', null);
+  assert.deepEqual(layersOf(instantiate(ctx, clip)), [null, null, null]);
+});
+
 test('in the Game preview a paste leaves the markers out: they are not drawn there, so nothing unseen is added', () => {
   const { ctx, ui, clip } = bench();
   ctx.viewport.preview = 'game';

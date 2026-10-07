@@ -37,6 +37,30 @@
 }
 #layers .layer:hover .lock.off .glyph, #layers .icon:hover .glyph { opacity: 1; }
 
+/* ---- the map's own layers: the same rows, with a mark for the active one, a name that can be typed over, the
+   actions of a row under it, and a line that shows where a dragged row would land */
+#layers .mine .extra { color: var(--dim); }                       /* which layer new items go onto: a fact, not a warning */
+#layers .mine-list { position: relative; margin-bottom: 4px; }
+#layers .mine-list .ui-empty { padding: 2px 0 4px; }
+#layers .own { cursor: default; }
+#layers .mark { flex: none; width: 6px; height: 6px; margin-left: 3px; border-radius: 50%; }
+#layers .own.active { background: var(--panel-2); }
+#layers .own.active .mark { background: var(--text); }
+#layers .own.active .name { font-weight: 600; }
+#layers .own .count { margin: 0 2px 0 4px; }
+#layers .more { width: 20px; height: 20px; padding: 0; color: var(--dim); }
+#layers .more:hover, #layers .more.active { color: var(--text); }
+#layers .name-edit { flex: 1 1 auto; min-width: 0; height: 20px; margin-left: 4px; }
+#layers .adding { padding: 0 4px 0 46px; }                       /* the field starts where the names do: after eye, lock and mark */
+#layers .adding:hover { background: none; }
+#layers .actions { display: flex; flex-wrap: wrap; gap: 2px 4px; padding: 3px 4px 4px 46px; border-bottom: 1px solid var(--line); }
+#layers .actions .ui-button { height: 20px; padding: 0 6px; font-size: 11px; }
+#layers .actions .ui-button:not(.danger) { color: var(--dim); }
+#layers .actions .ui-button:not(.danger):hover:not(:disabled) { color: var(--text); }
+#layers .mine-list.reordering .own { cursor: grabbing; }
+#layers .own.dragging { opacity: .4; }
+#layers .drop { position: absolute; z-index: 1; left: 0; right: 0; height: 2px; background: var(--text); pointer-events: none; }
+
 /* ---- models and groups */
 #layers .extra { margin-left: auto; color: var(--warn); font-size: 11px; font-weight: 400; }
 #layers .tools { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }

@@ -3754,3 +3754,51 @@ CONTRACT: read the module before calling it. The differences that matter to step
       warning `steep-ground` for a chest, an NPC, a spawn centre or the start on a slope above 45° (`STEEP`). §9.13:
       the inspector's `Y` is the height above the ground (a field entry may carry `title`). §9.4: surface snap
       subtracts the ground under the point, so the object lands on the surface it was dropped on.
+17. **Custom layers ("My layers").** The map maker's own named parts of the map; each line overrides the section it
+    names.
+    - §3 / §4 format: top-level `layers` - an ordered list of names, written on one line after `fallback` and omitted
+      when empty - and `l` on an object, spawn, chest and NPC (the last key; a layer name, omitted when the item is on
+      none). Runtime: `map.layers` (always an array) and `item.l` (`string | null`); regions and the start have no
+      `l`. A name is 1..32 characters, trimmed, without control characters, unique without regard to case; at most 64
+      layers (`LIMITS.layers`, `LIMITS.layerName`). `validate` errors: `layer-name`, `layer-duplicate`, `too-many`
+      (path `layers`), `layer-unknown` (an item whose `l` the list does not have - ONE issue per name, at the first
+      such item, with the count) and `type` for an `l` that is not a string. A runtime map without `layers` and items
+      without `l` are read as "none" (the bake builds such maps). Additive export `layerProblem(layers, name, except =
+      null)`: what is wrong with a name, as the end of a sentence, or null. The server and the game pass the two keys
+      through and never look at them.
+    - §10.6 commands: `addLayer(name, at = null)`, `renameLayer(from, to)` (the list and the `l` of every item on it,
+      one step; throws when `to` exists), `removeLayer(name)` (its items stay, with `l: null`; "and its items" is
+      `batch(label, [remove(items), removeLayer(name)])`), `reorderLayer(name, toIndex)`. Their Change has `'layers'`
+      in `props` (§10.5) and lists the items whose `l` they rewrote as updated. `set` / `setEach` accept `l` (a name of
+      `map.layers` - anything else throws before a single item is written - or `null` / `undefined` for none).
+      `setDefaultLayer(name | null)` is what `make` gives an object, spawn, chest or NPC whose props have no `l`
+      (`l: null` asks for none); `clone` keeps `l`; `add` brings an item whose layer the map lacks in on no layer.
+    - §10.4 `ui`: `ui.customLayers` (`Map<name, { visible, locked }>` holding only hidden or locked layers; event
+      `'customLayers'`), `ui.activeLayer` (`string | null`, event `'activeLayer'`), `ui.layerState(name)`,
+      `ui.setLayerState(name, { visible?, locked? })`, `ui.layerHidden(item)`, `ui.followLayers(names, { fresh })`.
+      Both keys persist in `hypercat-editor-ui`, by layer name. `ui.isPickable` also refuses an item whose own layer
+      is hidden or locked, so every path of §9.2 follows. `main.js` (`wireLayers`, subscribed before every other
+      module) calls `followLayers` on `'load'` and on every Change with `'layers'` - states of layers that are gone
+      are dropped, a rename (one name replaced in place, also by undo) carries eye, lock and the active mark along,
+      and the active layer is always an open one of the list or null - and keeps `cmd.setDefaultLayer` equal to
+      `ui.activeLayer`. Hiding or locking the active layer ends it being active.
+    - §6.1 MapView, additive: `setObjectHidden(obj, hidden)` and `setObjectsHidden(iterable | null)`. A hidden object
+      keeps its instance, collapsed to a point where it stands (`_seat`); it has no halo and is skipped by
+      `pickObject` / `pickObjects`; its colliders STAY (what blocks is the map). Forgotten on `load()` and when the
+      object is removed. §10.8: the viewport is the only caller - a full pass on `'customLayers'` and after a load,
+      per object for what a Change added or updated. §10.9: markers draw, label and pick no camp, chest or NPC of a
+      hidden layer; the minimap leaves them out too.
+    - §9.14 Layers panel: the section "My layers" - "+ Add layer" (an inline name field; Enter commits, Escape drops
+      it; the new layer becomes active), a row per layer with eye (Alt+click: alone), lock, the active mark, name,
+      item count and `⋯` (Move selection here, Select items, Rename, Delete). A click on a row makes it active, a
+      second click returns to none; a double-click renames; a drag reorders. Delete of a layer that holds items is
+      `ui.choose`: keep the items (default) or delete them too (not offered for a locked layer; items on hidden or
+      locked fixed layers are always kept). "Replace" of a model leaves objects on a locked custom layer alone.
+      The status bar shows `Layer: <name>` while one is active.
+    - §10.12 / §9.13: field type `layer` (`{ key: 'l', label: 'Layer', type: 'layer' }`, exported as `LAYER` from
+      `fields.js`) on object, spawn, chest and npc: a choice of None and the map's layers, hidden while the map has
+      none. A selection of SEVERAL kinds shows this one field for those of its items that can be on a layer.
+    - §9.5: a pasted item keeps its layer while the map has it and it is open; otherwise it takes the active layer.
+    - §11 / §10.11: `F2` is `layer.rename` (registered by the Layers panel: rename the active layer). Additive in
+      `dom.js`: `CANCEL_EVENT` (`'ui-cancel'`), sent to the focused field before `COMMIT_EVENT` when Escape ends the
+      edit (`leaveField({ cancel: true })`); the stock fields ignore it and commit as before.

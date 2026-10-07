@@ -25,6 +25,7 @@ const GROUP_ID = /^g([1-9]\d*)$/;       // the ids newGroupIds() hands out: g1, 
 //   ground   null, or { ix0, iz0, ix1, iz1 }: the INCLUSIVE vertex rectangle that was repainted; with `relief: true`
 //            when heights changed inside it (what stands on the ground there has to be seated again)
 //   props    changed top-level keys: 'name' | 'radius' | 'foliage' | 'fallback' | 'ground' (the ground OBJECT was replaced)
+//            | 'layers' (the list of custom layers: one was added, renamed, deleted or moved)
 //   origin   'do' | 'undo' | 'redo' | 'cancel' - set by the store
 export function emptyChange(origin = 'do') {
   return {

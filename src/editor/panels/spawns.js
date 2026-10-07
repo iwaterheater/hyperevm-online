@@ -656,6 +656,7 @@ export default function mount(el, ctx) {
   });
   store.on('history', () => { popGo.disabled = !!populateBlock() || store.grouping; });
   ui.on('layers', renderAll);
+  ui.on('customLayers', renderAll);    // a camp on a hidden or locked layer of the map's own cannot be edited either
   ui.on('overlays', (now, before) => { if (!!now?.levelColors !== !!before?.levelColors) renderTable(); });
   // the Populate form shows the Spawn tool's settings; ctx.tools is complete by now (tools are created before panels)
   ctx.tools?.spawn?.onTemplate?.(syncPopulate);

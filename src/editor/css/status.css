@@ -27,6 +27,7 @@
 #status .region { flex: 0 1 auto; max-width: 190px; }
 #status .selection { flex: 0 4 auto; min-width: 80px; max-width: 260px; color: var(--text); }
 #status .totals { flex: 0 0 auto; }
+#status .layer { display: block; flex: 0 2 auto; min-width: 40px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 #status .text { flex: 1 0 150px; color: var(--text); }
 #status .text.note { color: var(--accent); }
 

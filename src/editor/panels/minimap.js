@@ -171,7 +171,7 @@ export default function mount(el, ctx) {
     // one fillStyle per model, not per object: the objects of a model are drawn together
     const byModel = new Map();
     for (const obj of map.objects) {
-      if (hidden.has(obj.m)) continue;
+      if (hidden.has(obj.m) || ui.layerHidden(obj)) continue;
       let list = byModel.get(obj.m);
       if (!list) byModel.set(obj.m, list = []);
       list.push(obj);
@@ -233,6 +233,7 @@ export default function mount(el, ctx) {
     // ---- spawns: the disc when it is large enough to see, and the centre
     if (layers.spawns?.visible) {
       for (const s of map.spawns) {
+        if (ui.layerHidden(s)) continue;
         const type = dominant(s.types), color = hex(MOB_TYPES[type]?.color ?? 0xffffff), r = s.r * k;
         c.fillStyle = color;
         if (r > 2 * px) {
@@ -251,6 +252,7 @@ export default function mount(el, ctx) {
       c.fillStyle = '#ffd84a';
       c.strokeStyle = 'rgba(0, 0, 0, 0.6)';
       for (const chest of map.chests) {
+        if (ui.layerHidden(chest)) continue;
         const s = (chest.big ? 5 : 3.5) * px;
         c.fillRect(X(chest.x) - s / 2, X(chest.z) - s / 2, s, s);
         c.strokeRect(X(chest.x) - s / 2, X(chest.z) - s / 2, s, s);
@@ -262,6 +264,7 @@ export default function mount(el, ctx) {
       c.fillStyle = '#7fe8ff';
       c.strokeStyle = 'rgba(0, 0, 0, 0.7)';
       for (const npc of map.npcs) {
+        if (ui.layerHidden(npc)) continue;
         const x = X(npc.x), z = X(npc.z), s = 3.2 * px;
         c.beginPath();
         c.moveTo(x, z - s); c.lineTo(x + s, z); c.lineTo(x, z + s); c.lineTo(x - s, z);
@@ -403,6 +406,7 @@ export default function mount(el, ctx) {
   store.on('selection', drawSoon);
   ui.on('layers', () => { touchDots(); drawSoon(); });
   ui.on('hiddenModels', () => { touchDots(); drawSoon(); });
+  ui.on('customLayers', () => { touchDots(); drawSoon(); });
   ui.on('overlays', drawSoon);
   new ResizeObserver(() => drawSoon()).observe(canvas);   // also when the collapsed panel is opened
 

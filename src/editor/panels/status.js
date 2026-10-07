@@ -8,7 +8,7 @@ import { GROUND_TYPES, heightAt, regionIndex, regionLabel, spawnCount } from '..
 // It only shows state and asks for changes through `ui` and actions; it never writes the map.
 //
 // Left to right: save state and map revision · issues · cursor x, z and the height of the ground there · ground type ·
-// region · selection · totals ·
+// region · selection · totals · the active layer (when there is one) ·
 // the status text (ui.setStatus) · snap · fps, triangles, draw calls · help.
 
 const PERF_MS = 250;    // the frame numbers change on every frame: four readings a second are plenty
@@ -47,6 +47,7 @@ export default function mount(el, ctx) {
   // ---- the map and the selection
   const selection = text('selection', 'Selection');
   const totals = text('totals', 'Objects and monsters on the map');
+  const layer = text('layer', 'The active layer of the Layers panel: what is placed now goes onto it');
   const status = text('text', null);
   status.setAttribute('role', 'status');
 
@@ -70,7 +71,7 @@ export default function mount(el, ctx) {
   const help = button('?', () => actions.run('help.toggle'), { title: `Keyboard shortcuts${helpHint ? ` (${helpHint})` : ''}` });
   help.classList.add('flat', 'icon', 'help');
 
-  el.replaceChildren(save, issues, cursor, ground, region, selection, totals, status,
+  el.replaceChildren(save, issues, cursor, ground, region, selection, totals, layer, status,
     h('span', { class: 'cell snap' }, snap, step), perf, help);
 
   // ---------------------------------------------------------------- what each cell shows
@@ -154,6 +155,13 @@ export default function mount(el, ctx) {
   }
   const totalsSoon = rafThrottle(syncTotals);
 
+  // The active layer of the map's own - only while there is one: a map without layers shows nothing here.
+  function syncLayer() {
+    const name = ui.activeLayer ?? null;
+    put(layer, name === null ? '' : `Layer: ${name}`);
+    layer.hidden = name === null;
+  }
+
   function syncSnap() {
     const on = !!ui.snap.on;
     snap.classList.toggle('active', on);
@@ -220,6 +228,7 @@ export default function mount(el, ctx) {
   status.addEventListener('pointerenter', () => clearTimeout(noteTimer));
   status.addEventListener('pointerleave', () => { if (ui.note) noteTimer = setTimeout(dropNote, NOTE_MS / 3); });
   ui.on('snap', syncSnap);
+  ui.on('activeLayer', syncLayer);
   ui.on('issues', syncIssues);
   ui.on('readOnly', syncSave);
 
@@ -228,6 +237,7 @@ export default function mount(el, ctx) {
   syncCursor();
   syncSelection();
   syncTotals();
+  syncLayer();
   syncSnap();
   syncPerf();
   syncText();

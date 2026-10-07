@@ -111,15 +111,15 @@ test('make: the defaults of the format, in the key order of the runtime form', (
     npc: cmd.make('npc', { x: 0, z: 0 }),
     region: cmd.make('region'),
   };
-  assert.deepEqual(made.object, { m: 'medieval/barrel', x: 1, y: 0, z: 2, rx: 0, ry: 0, rz: 0, s: 1, sy: 1, col: null, g: null });
-  assert.deepEqual(made.spawn, { types: { chaser: 1 }, lvl: [1, 1], x: 0, z: 0, r: 8, count: 3, respawn: 14, g: null });
-  assert.deepEqual(made.chest, { x: 0, z: 0, ry: 0, gold: 12, big: false, respawn: 150, g: null });
-  assert.deepEqual(made.npc, { kind: 'guard', x: 0, z: 0, ry: 0, g: null });
+  assert.deepEqual(made.object, { m: 'medieval/barrel', x: 1, y: 0, z: 2, rx: 0, ry: 0, rz: 0, s: 1, sy: 1, col: null, g: null, l: null });
+  assert.deepEqual(made.spawn, { types: { chaser: 1 }, lvl: [1, 1], x: 0, z: 0, r: 8, count: 3, respawn: 14, g: null, l: null });
+  assert.deepEqual(made.chest, { x: 0, z: 0, ry: 0, gold: 12, big: false, respawn: 150, g: null, l: null });
+  assert.deepEqual(made.npc, { kind: 'guard', x: 0, z: 0, ry: 0, g: null, l: null });
   assert.deepEqual(made.region, { name: 'New region', levels: null, mood: null, safe: false, color: null, shape: { type: 'circle', x: 0, z: 0, r: 20 } });
-  assert.deepEqual(Object.keys(made.object), ['m', 'x', 'y', 'z', 'rx', 'ry', 'rz', 's', 'sy', 'col', 'g']);
-  assert.deepEqual(Object.keys(made.spawn), ['types', 'lvl', 'x', 'z', 'r', 'count', 'respawn', 'g']);
-  assert.deepEqual(Object.keys(made.chest), ['x', 'z', 'ry', 'gold', 'big', 'respawn', 'g']);
-  assert.deepEqual(Object.keys(made.npc), ['kind', 'x', 'z', 'ry', 'g']);
+  assert.deepEqual(Object.keys(made.object), ['m', 'x', 'y', 'z', 'rx', 'ry', 'rz', 's', 'sy', 'col', 'g', 'l']);
+  assert.deepEqual(Object.keys(made.spawn), ['types', 'lvl', 'x', 'z', 'r', 'count', 'respawn', 'g', 'l']);
+  assert.deepEqual(Object.keys(made.chest), ['x', 'z', 'ry', 'gold', 'big', 'respawn', 'g', 'l']);
+  assert.deepEqual(Object.keys(made.npc), ['kind', 'x', 'z', 'ry', 'g', 'l']);
   assert.deepEqual(Object.keys(made.region), ['name', 'levels', 'mood', 'safe', 'color', 'shape']);
 
   // exactly what the file decoder builds for the same item, and valid in a map
@@ -303,10 +303,10 @@ test('set skips the keys a kind does not have, so one patch serves a mixed selec
   const { map, store, o, s, c, n, r } = world();
   const all = [o[0], s[0], c[0], n[0], r[0], map.start];
   const change = store.exec(cmd.set(all, { g: 'mix', ry: 1, r: 4, kind: 'sage', name: 'Named', gold: 77 }));
-  assert.deepEqual(Object.keys(o[0]), ['m', 'x', 'y', 'z', 'rx', 'ry', 'rz', 's', 'sy', 'col', 'g'], 'no stray key on any item');
-  assert.deepEqual(Object.keys(s[0]), ['types', 'lvl', 'x', 'z', 'r', 'count', 'respawn', 'g']);
-  assert.deepEqual(Object.keys(c[0]), ['x', 'z', 'ry', 'gold', 'big', 'respawn', 'g']);
-  assert.deepEqual(Object.keys(n[0]), ['kind', 'x', 'z', 'ry', 'g']);
+  assert.deepEqual(Object.keys(o[0]), ['m', 'x', 'y', 'z', 'rx', 'ry', 'rz', 's', 'sy', 'col', 'g', 'l'], 'no stray key on any item');
+  assert.deepEqual(Object.keys(s[0]), ['types', 'lvl', 'x', 'z', 'r', 'count', 'respawn', 'g', 'l']);
+  assert.deepEqual(Object.keys(c[0]), ['x', 'z', 'ry', 'gold', 'big', 'respawn', 'g', 'l']);
+  assert.deepEqual(Object.keys(n[0]), ['kind', 'x', 'z', 'ry', 'g', 'l']);
   assert.deepEqual(Object.keys(r[0]), ['name', 'levels', 'mood', 'safe', 'color', 'shape']);
   assert.deepEqual(Object.keys(map.start), ['x', 'z', 'r']);
   assert.deepEqual([o[0].g, o[0].ry, s[0].g, s[0].r, c[0].gold, c[0].ry, n[0].kind, r[0].name, map.start.r], ['mix', qAngle(1), 'mix', 4, 77, qAngle(1), 'sage', 'Named', 4]);
@@ -1324,20 +1324,134 @@ test('commands do not range-check: what breaks a limit shows up in validate, and
   assert.deepEqual(errors(map), []);
 });
 
+// ---------------------------------------------------------------- the map's own layers
+
+test('layers: add, rename, delete and reorder are exact steps, and a rename or a delete takes the items along', () => {
+  const { map, store, o, s, c, n } = world();
+  const before = text(map);
+  assert.deepEqual(map.layers, []);
+
+  roundTrip(store, map, () => store.exec(cmd.addLayer('Town')));
+  let change = store.exec(cmd.addLayer('Town'));
+  assert.deepEqual(change.props, ['layers']);
+  assert.equal(store.undoLabel, 'Add the layer Town');
+  assert.ok(isEmptyChange(store.exec(cmd.addLayer('Town'))), 'a layer the map has already is not added twice');
+  store.exec(cmd.addLayer('Forest'));
+  store.exec(cmd.addLayer('Camp', 0));
+  assert.deepEqual(map.layers, ['Camp', 'Town', 'Forest']);
+  assert.deepEqual(errors(map), []);
+
+  // items go on a layer with set: one step for a mixed selection, and only onto a layer the map has
+  const mixed = [o[0], o[1], s[0], c[0], n[0], map.regions[0], map.start];
+  roundTrip(store, map, () => store.exec(cmd.set(mixed, { l: 'Town' })));
+  change = store.exec(cmd.set(mixed, { l: 'Town' }));
+  assert.deepEqual([change.updated.objects, change.updated.spawns, change.updated.chests, change.updated.npcs], [[o[0], o[1]], [s[0]], [c[0]], [n[0]]]);
+  assert.deepEqual([change.updated.regions, change.updated.start], [[], []], 'a region and the start are on no layer');
+  assert.equal(store.undoLabel, 'Put 5 items on the layer Town');
+  assert.equal('l' in map.regions[0] || 'l' in map.start, false);
+  assert.throws(() => store.exec(cmd.set([o[2]], { l: 'Nowhere' })), /no layer "Nowhere"/);
+  assert.equal(o[2].l, null, 'nothing was written');
+  assert.throws(() => cmd.set([o[2]], { l: 5 }), TypeError);
+  assert.equal(cmd.set([o[0]], { l: undefined }).label, 'Take 1 object off its layer');
+  assert.equal(cmd.setEach([o[0], s[0]], [{ l: 'Town' }, { l: null }]).label, 'Change the layer of 2 items');
+  assert.deepEqual(errors(map), []);
+
+  // rename: the list and every item, as one step
+  roundTrip(store, map, () => store.exec(cmd.renameLayer('Town', 'Old town')));
+  change = store.exec(cmd.renameLayer('Town', 'Old town'));
+  assert.deepEqual(map.layers, ['Camp', 'Old town', 'Forest']);
+  assert.deepEqual(mixed.slice(0, 5).map((item) => item.l), Array(5).fill('Old town'));
+  assert.deepEqual([change.props, change.updated.objects.length, change.updated.spawns.length, change.updated.chests.length, change.updated.npcs.length], [['layers'], 2, 1, 1, 1]);
+  assert.equal(store.undoLabel, 'Rename the layer Town to Old town');
+  assert.throws(() => store.exec(cmd.renameLayer('Old town', 'Forest')), /already has a layer/);
+  assert.ok(isEmptyChange(store.exec(cmd.renameLayer('Nowhere', 'Somewhere'))));
+  assert.ok(isEmptyChange(store.exec(cmd.renameLayer('Forest', 'Forest'))));
+  assert.deepEqual(errors(map), []);
+
+  // reorder
+  roundTrip(store, map, () => store.exec(cmd.reorderLayer('Camp', 2)));
+  store.exec(cmd.reorderLayer('Camp', 99));
+  assert.deepEqual(map.layers, ['Old town', 'Forest', 'Camp']);
+  assert.ok(isEmptyChange(store.exec(cmd.reorderLayer('Camp', 2))));
+  assert.ok(isEmptyChange(store.exec(cmd.reorderLayer('Nowhere', 0))));
+
+  // delete: the items stay, on no layer; undo puts every one of them back
+  roundTrip(store, map, () => store.exec(cmd.removeLayer('Old town')));
+  change = store.exec(cmd.removeLayer('Old town'));
+  assert.deepEqual(map.layers, ['Forest', 'Camp']);
+  assert.deepEqual(mixed.slice(0, 5).map((item) => item.l), Array(5).fill(null));
+  assert.equal(map.objects.length, 6, 'nothing was removed');
+  assert.equal(change.updated.objects.length, 2);
+  store.undo();
+  assert.deepEqual(mixed.slice(0, 5).map((item) => item.l), Array(5).fill('Old town'));
+
+  // "delete the layer and its items" is a batch: one step, and undo brings back the items on their layer
+  const members = [o[0], o[1], s[0], c[0], n[0]];
+  roundTrip(store, map, () => store.exec(cmd.batch('Delete the layer Old town and 5 items', [cmd.remove(members), cmd.removeLayer('Old town')])));
+
+  for (const bad of [null, 5, undefined]) {
+    assert.throws(() => cmd.addLayer(bad), TypeError);
+    assert.throws(() => cmd.removeLayer(bad), TypeError);
+    assert.throws(() => cmd.renameLayer('Forest', bad), TypeError);
+  }
+  assert.throws(() => cmd.reorderLayer('Forest', 0.5), TypeError);
+  while (store.undo() !== null);
+  assert.equal(text(map), before);
+});
+
+test('layers: what is made goes onto the default layer, copies keep theirs, and nothing arrives on a layer the map lacks', () => {
+  const { map, store } = world();
+  store.exec(cmd.addLayer('Town'));
+  try {
+    cmd.setDefaultLayer('Town');
+    const made = [cmd.make('object', { m: 'medieval/barrel', x: 1, z: 1 }), cmd.make('spawn', {}), cmd.make('chest', {}), cmd.make('npc', {})];
+    assert.deepEqual(made.map((item) => item.l), ['Town', 'Town', 'Town', 'Town']);
+    assert.equal('l' in cmd.make('region', {}), false, 'a region is on no layer');
+    assert.equal(cmd.make('object', { m: 'medieval/barrel', l: null }).l, null, 'l: null asks for no layer');
+    assert.throws(() => cmd.make('object', { m: 'medieval/barrel', l: 7 }), TypeError);
+    store.exec(cmd.add('object', [made[0]]));
+    assert.equal(made[0].l, 'Town');
+    assert.equal(cmd.clone(made[0]).l, 'Town', 'a copy keeps the layer of its source');
+    cmd.setDefaultLayer(null);
+    assert.equal(cmd.clone(made[0]).l, 'Town');
+    assert.equal(cmd.make('chest', {}).l, null);
+
+    // a clip from another map, a stamp saved before a rename, a stale default: such an item comes in on no layer
+    const stray = cmd.make('object', { m: 'medieval/barrel', x: 3, z: 3, l: 'Elsewhere' });
+    const before = raw(map);
+    store.exec(cmd.add('object', [stray]));
+    assert.equal(stray.l, null);
+    assert.deepEqual(errors(map), []);
+    store.undo();
+    assert.equal(raw(map), before);
+    store.redo();
+    assert.equal(stray.l, null);
+
+    // an item made before layers existed has no `l` at all: add and clone read that as no layer
+    const old = { kind: 'guard', x: 9, z: 9, ry: 0, g: null };
+    assert.equal(cmd.clone(old).l, null);
+    store.exec(cmd.add('npc', [old]));
+    assert.deepEqual(errors(map), []);
+    assert.throws(() => cmd.setDefaultLayer(3), TypeError);
+  } finally {
+    cmd.setDefaultLayer(null);
+  }
+});
+
 // ---------------------------------------------------------------- the field schema
 
 test('FIELDS: the kinds, keys, types and limits of the inspector', () => {
   const shape = (kind) => FIELDS[kind].map((f) => `${f.key ?? '-'}:${f.type}`).join(' ');
   assert.deepEqual(Object.keys(FIELDS), ['object', 'spawn', 'chest', 'npc', 'region', 'start', 'map']);
-  assert.equal(shape('object'), 'm:model x:number y:number z:number ry:angle rx:angle rz:angle s:number sy:number col:collider g:group');
-  assert.equal(shape('spawn'), 'types:weights lvl:intRange x:number z:number r:number count:int respawn:int -:computed g:group');
-  assert.equal(shape('chest'), 'x:number z:number ry:angle gold:int big:bool respawn:int g:group');
-  assert.equal(shape('npc'), 'kind:select x:number z:number ry:angle g:group');
+  assert.equal(shape('object'), 'm:model x:number y:number z:number ry:angle rx:angle rz:angle s:number sy:number col:collider g:group l:layer');
+  assert.equal(shape('spawn'), 'types:weights lvl:intRange x:number z:number r:number count:int respawn:int -:computed g:group l:layer');
+  assert.equal(shape('chest'), 'x:number z:number ry:angle gold:int big:bool respawn:int g:group l:layer');
+  assert.equal(shape('npc'), 'kind:select x:number z:number ry:angle g:group l:layer');
   assert.equal(shape('region'), 'name:text levels:intRangeOrNull -:action mood:select safe:bool color:color');
   assert.equal(shape('start'), 'x:number z:number r:number');
   assert.equal(shape('map'), 'name:text radius:int foliage:bool');
 
-  const TYPES = ['number', 'int', 'angle', 'text', 'bool', 'select', 'color', 'model', 'collider', 'group', 'weights', 'intRange', 'intRangeOrNull', 'computed', 'action'];
+  const TYPES = ['number', 'int', 'angle', 'text', 'bool', 'select', 'color', 'model', 'collider', 'group', 'layer', 'weights', 'intRange', 'intRangeOrNull', 'computed', 'action'];
   const field = (kind, key) => FIELDS[kind].find((f) => f.key === key);
   for (const kind of Object.keys(FIELDS)) {
     for (const f of FIELDS[kind]) {
@@ -1405,8 +1519,10 @@ test('every field of the schema is a field the commands can write', () => {
   const before = text(map);
   const sample = {
     model: 'medieval/crate', number: 1.5, int: 20, angle: 0.5, text: 'Name', bool: true, color: '#aabbcc', collider: 'box', group: 'grp',
-    weights: { tank: 2 }, intRange: [2, 4], intRangeOrNull: [2, 4],
+    weights: { tank: 2 }, intRange: [2, 4], intRangeOrNull: [2, 4], layer: 'Town',
   };
+  store.exec(cmd.addLayer('Town'));       // a layer is one of the map's: the field can only name what is there
+  const withLayer = text(map);
   for (const kind of ['object', 'spawn', 'chest', 'npc', 'region', 'start']) {
     const item = store.items(kind)[0];
     for (const f of FIELDS[kind]) {
@@ -1426,6 +1542,8 @@ test('every field of the schema is a field the commands can write', () => {
     assert.deepEqual(store.exec(cmd.setProps({ [f.key]: value })).props, [f.key]);
     store.undo();
   }
+  assert.equal(text(map), withLayer);
+  store.undo();
   assert.equal(text(map), before);
 });
 
@@ -1687,6 +1805,13 @@ test('a random editing session: every undo and every redo lands on the exact byt
     () => cmd.paint(Array.from({ length: 1 + int(60) }, () => int(map.ground.cells.length + 20) - 10), int(GROUND_TYPES.length)),
     () => cmd.setProps(pick([{ name: `Map ${int(99)}` }, { foliage: rnd() < 0.5 }, { radius: 220 + int(60) }, { fallback: { mood: pick(Object.keys(MOODS)), levels: rnd() < 0.5 ? null : [1, 1 + int(9)] } }])),
     () => cmd.batch('Batch', [cmd.set(anyItems(), { x: num(-9, 9) }), cmd.remove(anyItems()), cmd.paint([int(1000)], int(GROUND_TYPES.length))]),
+    // the map's own layers: added, renamed (to a free name), deleted, moved, and items put on them and taken off
+    () => cmd.addLayer(pick(['Town', 'Forest', 'Camp', 'Docks']), rnd() < 0.5 ? null : int(4)),
+    () => (map.layers.length ? cmd.renameLayer(pick(map.layers), pick(['Old town', 'Woods', 'Ruins', 'Pier'].filter((name) => !map.layers.includes(name)))) : cmd.addLayer('Town')),
+    () => (map.layers.length ? cmd.removeLayer(pick(map.layers)) : cmd.addLayer('Forest')),
+    () => (map.layers.length ? cmd.reorderLayer(pick(map.layers), int(map.layers.length)) : cmd.addLayer('Camp')),
+    () => cmd.set(anyItems(), { l: pick([...map.layers, null, undefined]) }),
+    () => cmd.add('object', [cmd.make('object', { m: 'medieval/crate', x: num(-99, 99), z: num(-99, 99), l: pick([...map.layers, 'Nowhere', null]) })]),
   ];
   const states = [raw(map)];      // states[k]: the bytes with k steps in the undo stack
   let depth = 0;

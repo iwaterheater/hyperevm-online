@@ -150,10 +150,16 @@ export function pasteOpen(ctx, kind) {
 // Items that may not be pasted right now (pasteOpen: a hidden or locked layer, markers in the Game preview) are left
 // out and counted in `skipped`.
 // Every distinct group of the clip becomes a new group: ONE call of ctx.store.newGroupIds per instantiate.
+// An item keeps its layer when the map has it and it is open; otherwise it takes the active layer.
 // -> { objects, spawns, chests, npcs, skipped }: items that are not in the map yet (add them with cmd.add)
 export function instantiate(ctx, clip, { x = clip.pivot.x, z = clip.pivot.z, rot = 0 } = {}) {
   const out = { objects: [], spawns: [], chests: [], npcs: [], skipped: 0 };
   const cos = Math.cos(rot), sin = Math.sin(rot), px = clip.pivot.x, pz = clip.pivot.z, groups = new Map();
+  // A copy keeps the layer of its source (the map's own layers, `l`) - while the map has that layer and it is open.
+  // A stamp made on another map, a layer that was hidden or locked since the copy: such an item goes where everything
+  // new goes, onto the active layer, or it would vanish or freeze the moment it is dropped.
+  const layers = ctx.store.map?.layers ?? [];
+  const usable = (name) => { const state = ctx.ui.layerState?.(name); return layers.includes(name) && (!state || (state.visible && !state.locked)); };
   for (const kind of CLIP_KINDS) {
     const list = COLLECTION[kind];
     if (!pasteOpen(ctx, kind)) {
@@ -166,6 +172,7 @@ export function instantiate(ctx, clip, { x = clip.pivot.x, z = clip.pivot.z, rot
       item.x = x + dx * cos + dz * sin;
       item.z = z - dx * sin + dz * cos;
       if (kind !== 'spawn') item.ry += rot;
+      if (item.l != null && !usable(item.l)) item.l = ctx.ui.activeLayer ?? null;
       quantizeItem(kind, item);
       if (typeof item.g === 'string') {
         if (!groups.has(item.g)) groups.set(item.g, []);

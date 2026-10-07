@@ -275,6 +275,7 @@ export default function mount(el, ctx) {
   ui.on('layers', later);              // a lock or an eye changes what may be edited
   ui.on('hiddenModels', later);
   ui.on('itemflags', later);
+  ui.on('customLayers', later);
   refresh();
   return { update() { later.flush(); } };      // with the frame, as the other panels
 }

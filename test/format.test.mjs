@@ -14,6 +14,7 @@ const {
   inShape, shapeBounds, shapeCentre, regionAt, moodAt, regionLabel, regionColor, isSafe, regionIndex, pushOutOfSafe,
   npcsOf, nearNpc, startPoint, spawnHome, pickType, pickLevel, spawnCount, hasBoss, groupItems,
   groundHalf, groundIx, groundX, cellIndex, cellXZ, groundAt, isBlocked, maxRadius, resizeGround, encodeRows, decodeRows, cellHash,
+  layerProblem,
 } = format;
 
 // ---------------------------------------------------------------- fixtures
@@ -96,7 +97,7 @@ test('the export list is exactly the one of the spec', () => {
     'LIMITS', 'MAX_SLOPE', 'MOODS', 'MapError', 'NPC_KINDS', 'NPC_RADIUS', 'WATER_LEVEL',
     'cellHash', 'cellIndex', 'cellXZ', 'clampHeight', 'decodeHeights', 'decodeItem', 'decodeRows', 'emptyMap', 'encodeHeights', 'encodeItem',
     'encodeRows', 'groundAt', 'groundHalf',
-    'groundIx', 'groundX', 'groupItems', 'hasBoss', 'heightAt', 'inShape', 'isBlocked', 'isSafe', 'maxRadius', 'migrate', 'moodAt', 'nearNpc',
+    'groundIx', 'groundX', 'groupItems', 'hasBoss', 'heightAt', 'inShape', 'isBlocked', 'isSafe', 'layerProblem', 'maxRadius', 'migrate', 'moodAt', 'nearNpc',
     'normalize', 'npcsOf', 'pickLevel', 'pickType', 'pushOutOfSafe', 'qAngle', 'qHeight', 'qPos', 'qScale', 'quantizeItem', 'rayGround', 'regionAt',
     'regionColor', 'regionIndex', 'regionLabel', 'resizeGround', 'serialize', 'shapeBounds', 'shapeCentre', 'slopeAt', 'spawnCount', 'spawnHome',
     'startPoint', 'stringifyMap', 'toDeg', 'toRad', 'validate',
@@ -287,13 +288,14 @@ test('normalize fills defaults, converts degrees and builds the cells', () => {
   assert.deepEqual(map.fallback, { name: 'Open Sea', levels: null, mood: 'meadow' });
   assert.deepEqual(map.regions[0], { name: 'Wilds', levels: [1, 9], mood: 'graveyard', safe: false, color: null, shape: { type: 'circle', x: 0, z: 0, r: 100 } });
   assert.deepEqual(map.regions[2], { name: 'Lake', levels: null, mood: null, safe: false, color: '#3a8fb0', shape: { type: 'poly', points: [[40, 40], [60, 44], [52, 60]] } });
-  assert.deepEqual(map.spawns[0], { types: { chaser: 3, runner: 2 }, lvl: [1, 2], x: 50, z: 10, r: 12.5, count: 4, respawn: 14, g: null });
-  assert.deepEqual(map.chests[0], { x: 46, z: -4.6, ry: 0, gold: 12, big: false, respawn: 150, g: null });
-  assert.deepEqual(map.chests[1], { x: 0, z: -90, ry: Math.PI / 2, gold: 400, big: true, respawn: 300, g: 'fortress' });
-  assert.deepEqual(map.npcs[1], { kind: 'sage', x: 4.2, z: -4.6, ry: 0, g: null });
+  assert.deepEqual(map.spawns[0], { types: { chaser: 3, runner: 2 }, lvl: [1, 2], x: 50, z: 10, r: 12.5, count: 4, respawn: 14, g: null, l: null });
+  assert.deepEqual(map.chests[0], { x: 46, z: -4.6, ry: 0, gold: 12, big: false, respawn: 150, g: null, l: null });
+  assert.deepEqual(map.chests[1], { x: 0, z: -90, ry: Math.PI / 2, gold: 400, big: true, respawn: 300, g: 'fortress', l: null });
+  assert.deepEqual(map.npcs[1], { kind: 'sage', x: 4.2, z: -4.6, ry: 0, g: null, l: null });
+  assert.deepEqual(map.layers, [], 'a file without layers of its own has an empty list');
   assert.equal(map.npcs[0].ry, toRad(157.34));
-  assert.deepEqual(map.objects[5], { m: 'medieval/tree_single_A', x: 31.2, y: 0, z: -4.5, rx: 0, ry: toRad(74.48), rz: 0, s: 1.1, sy: 1, col: null, g: null });
-  assert.deepEqual(map.objects[0], { m: 'dungeon/torch_mounted', x: 3, y: 3.3, z: -85, rx: 0, ry: 0, rz: 0, s: 1.7, sy: 1, col: null, g: 'fortress' });
+  assert.deepEqual(map.objects[5], { m: 'medieval/tree_single_A', x: 31.2, y: 0, z: -4.5, rx: 0, ry: toRad(74.48), rz: 0, s: 1.1, sy: 1, col: null, g: null, l: null });
+  assert.deepEqual(map.objects[0], { m: 'dungeon/torch_mounted', x: 3, y: 3.3, z: -85, rx: 0, ry: 0, rz: 0, s: 1.7, sy: 1, col: null, g: 'fortress', l: null });
   assert.equal(map.objects[1].col, 0);
   assert.deepEqual(map.objects[2].col, [{ x: 0, z: 0, r: 0.73 }]);
   assert.equal(map.objects[3].col, 'box');
@@ -605,7 +607,7 @@ test('encodeItem / decodeItem round-trip every kind of item', () => {
 });
 
 test('decodeItem throws on DECODE errors only', () => {
-  assert.deepEqual(decodeItem('npc', { kind: 'guard', x: 1.234, z: 2, ry: 450 }), { kind: 'guard', x: 1.23, z: 2, ry: Math.PI / 2, g: null });
+  assert.deepEqual(decodeItem('npc', { kind: 'guard', x: 1.234, z: 2, ry: 450 }), { kind: 'guard', x: 1.23, z: 2, ry: Math.PI / 2, g: null, l: null });
   assert.equal(decodeItem('spawn', { types: { chaser: 1 }, lvl: [1, 1], x: 0, z: 0, r: 500, count: 99, respawn: 1 }).count, 99, 'a RANGE error is not a decode error');
   const e = thrown(() => decodeItem('object', { m: 'medieval/barrel', x: 1, sx: 2 }));
   assert.deepEqual(e.issues.map((i) => [i.code, i.path]), [['unknown-key', 'object.sx'], ['type', 'object.z']]);
@@ -628,6 +630,99 @@ test('model and ground aliases are applied on load', () => {
     delete GROUND_ALIASES.meadow;
   }
   assert.deepEqual(codes(decodeError((f) => { f.ground.types[0] = 'meadow'; }).issues), ['ground-types']);
+});
+
+// ---------------------------------------------------------------- the map's own layers
+
+test('layers: the list and the items on them survive the file, byte for byte, and are absent from a map without any', () => {
+  assert.deepEqual([LIMITS.layers, LIMITS.layerName], [64, [1, 32]]);
+  const plain = stringifyMap(serialize(sampleMap()));
+  assert.equal(plain.includes('"layers"') || /"l":/.test(plain), false, 'no key at all without layers');
+  assert.deepEqual(emptyMap().layers, []);
+  assert.equal(Object.hasOwn(serialize(emptyMap()), 'layers'), false);
+
+  const file = patched((f) => {
+    f.layers = ['Town', 'Bandit camp', 'constructor'];
+    f.objects[0].l = 'Bandit camp';
+    f.objects[5].l = 'Town';
+    f.spawns[1].l = 'Bandit camp';
+    f.chests[1].l = 'Bandit camp';
+    f.npcs[0].l = 'Town';
+  });
+  const map = normalize(file);
+  assert.deepEqual(map.layers, ['Town', 'Bandit camp', 'constructor']);
+  assert.deepEqual([map.objects[0].l, map.objects[1].l, map.spawns[1].l, map.chests[1].l, map.npcs[0].l, map.npcs[1].l], ['Bandit camp', null, 'Bandit camp', 'Bandit camp', 'Town', null]);
+  assert.equal('l' in map.regions[0] || 'l' in map.start, false, 'regions and the start are on no layer');
+  assert.deepEqual(validate(map).filter((i) => i.level === 'error'), []);
+
+  const out = serialize(map), text = stringifyMap(out);
+  assert.deepEqual(out, file);
+  assert.deepEqual(Object.keys(out), ['version', 'name', 'radius', 'start', 'foliage', 'fallback', 'layers', 'regions', 'spawns', 'chests', 'npcs', 'ground', 'objects']);
+  assert.deepEqual(Object.keys(out.objects[0]), ['m', 'x', 'y', 'z', 's', 'g', 'l']);
+  assert.deepEqual(Object.keys(out.spawns[1]), ['types', 'lvl', 'x', 'z', 'r', 'count', 'respawn', 'g', 'l']);
+  assert.deepEqual(Object.keys(out.chests[1]), ['x', 'z', 'ry', 'gold', 'big', 'respawn', 'g', 'l']);
+  assert.deepEqual(Object.keys(out.npcs[0]), ['kind', 'x', 'z', 'ry', 'g', 'l']);
+  assert.ok(text.includes('\n  "layers": ["Town", "Bandit camp", "constructor"],\n  "regions": ['), 'the list is one line of the file');
+  assert.ok(text.includes('{ "kind": "blacksmith", "x": -4.8, "z": 11.5, "ry": 157.34, "g": "town", "l": "Town" }'));
+  assert.equal(stringifyMap(serialize(normalize(JSON.parse(text)))), text, 'canonical: the text comes back unchanged');
+  // keys in any order in a hand-edited file: the writer puts them back
+  const shuffled = JSON.parse(text);
+  shuffled.npcs[0] = { l: 'Town', g: 'town', ry: 157.34, z: 11.5, x: -4.8, kind: 'blacksmith' };
+  assert.equal(stringifyMap(serialize(normalize(shuffled))), text);
+  // "layers": [] and "l": null in a file mean the same as leaving them out
+  assert.equal(stringifyMap(serialize(normalize(patched((f) => { f.layers = []; f.objects[0].l = null; })))), plain);
+
+  // the clipboard and stamps carry the layer with the item
+  assert.deepEqual(encodeItem('chest', map.chests[1]), file.chests[1]);
+  assert.equal(decodeItem('chest', file.chests[1]).l, 'Bandit camp');
+  assert.equal(decodeItem('npc', { kind: 'guard', x: 0, z: 0 }).l, null);
+  assert.throws(() => decodeItem('region', { name: 'A', l: 'Town', shape: { type: 'circle', x: 0, z: 0, r: 5 } }), MapError);
+});
+
+test('layers: decode errors, the rules of a name, and one issue per layer that is missing', () => {
+  assert.deepEqual(decodeError((f) => { f.layers = 'Town'; }).issues.map((i) => [i.code, i.path]), [['type', 'layers']]);
+  assert.deepEqual(decodeError((f) => { f.layers = ['Town', 5, null]; }).issues.map((i) => [i.code, i.path]), [['type', 'layers[1]'], ['type', 'layers[2]']]);
+  assert.deepEqual(decodeError((f) => { f.objects[0].l = 5; }).issues.map((i) => [i.code, i.path]), [['type', 'objects[0].l']]);
+  assert.deepEqual(decodeError((f) => { f.regions[0].l = 'Town'; }).issues.map((i) => [i.code, i.path]), [['unknown-key', 'regions[0].l']]);
+
+  const issuesOf = (edit) => { const m = sampleMap(); edit(m); return validate(m).filter((i) => i.level === 'error').map((i) => [i.code, i.path]); };
+  assert.deepEqual(issuesOf((m) => { m.layers = ['', 'x'.repeat(33), ' a', 'b\u0007', 'ok', 5]; }),
+    [['layer-name', 'layers[0]'], ['layer-name', 'layers[1]'], ['layer-name', 'layers[2]'], ['layer-name', 'layers[3]'], ['layer-name', 'layers[5]']]);
+  assert.deepEqual(issuesOf((m) => { m.layers = ['Town', 'TOWN', 'x'.repeat(32)]; }), [['layer-duplicate', 'layers[1]']]);
+  assert.deepEqual(issuesOf((m) => { m.layers = Array.from({ length: 65 }, (_, i) => `L${i}`); }), [['too-many', 'layers']]);
+  assert.deepEqual(issuesOf((m) => { m.layers = Array.from({ length: 64 }, (_, i) => `L${i}`); }), []);
+  // every item of a layer the map does not list: ONE issue per name, at the first of them
+  const m = sampleMap();
+  m.layers = ['Town'];
+  for (const o of m.objects) o.l = 'Gone';
+  m.spawns[0].l = 'Gone';
+  m.npcs[2].l = 'Lost';
+  m.chests[0].l = 7;
+  m.objects[5].l = 'Town';
+  const found = validate(m).filter((i) => i.level === 'error');
+  assert.deepEqual(found.map((i) => [i.code, i.path, i.kind, i.index]), [['type', 'chests[0].l', 'chest', 0], ['layer-unknown', 'spawns[0].l', 'spawn', 0], ['layer-unknown', 'npcs[2].l', 'npc', 2]]);
+  assert.match(found[1].message, /"Gone".*\(6 items are on it\)/);
+  assert.match(found[2].message, /^The layer "Lost" is not among the map's layers\.$/);
+  assert.deepEqual([found[1].x, found[1].z], [50, 10]);
+  // a map built before layers existed has no list and no `l`: valid, and written without either
+  const old = sampleMap();
+  delete old.layers;
+  for (const list of ['objects', 'spawns', 'chests', 'npcs']) for (const item of old[list]) delete item.l;
+  assert.deepEqual(validate(old).filter((i) => i.level === 'error'), []);
+  assert.deepEqual(serialize(old), sample());
+  assert.equal(validate({ ...sampleMap(), layers: 'Town' })[0].code, 'type');
+
+  assert.equal(layerProblem(['Town'], 'Forest'), null);
+  assert.equal(layerProblem([], 'x'.repeat(32)), null);
+  assert.equal(layerProblem(undefined, 'Forest'), null);
+  assert.match(layerProblem(['Town'], 'town'), /taken/);
+  assert.equal(layerProblem(['Town'], 'TOWN', 'Town'), null, 'the layer that is being renamed may keep its name in another case');
+  assert.match(layerProblem(['Town', 'Forest'], 'forest', 'Town'), /taken/);
+  assert.match(layerProblem([], ''), /empty/);
+  assert.match(layerProblem([], ' a'), /white space/);
+  assert.match(layerProblem([], 'x'.repeat(33)), /at most 32/);
+  assert.match(layerProblem([], 'a\nb'), /control/);
+  assert.match(layerProblem([], 5), /empty/);
 });
 
 // ---------------------------------------------------------------- DECODE errors
@@ -800,7 +895,10 @@ const RANGE_CASES = {
   'region-poly': [(m) => { m.regions[2].shape.points.length = 2; }, ['region-poly']],
   'region-pos': [(m) => { m.regions[2].shape.points[0][0] = 500; }, ['region-pos']],
   'region-levels': [(m) => { m.regions[0].levels = [5, 100]; }, ['region-levels']],
-  'too-many': [(m) => { while (m.npcs.length < 41) m.npcs.push({ kind: 'guard', x: 10, z: m.npcs.length, ry: 0, g: null }); }, ['too-many']],
+  'too-many': [(m) => { while (m.npcs.length < 41) m.npcs.push({ kind: 'guard', x: 10, z: m.npcs.length, ry: 0, g: null, l: null }); }, ['too-many']],
+  'layer-name': [(m) => { m.layers = ['Town', ' Forest']; }, ['layer-name']],
+  'layer-duplicate': [(m) => { m.layers = ['Town', 'Forest', 'town']; }, ['layer-duplicate']],
+  'layer-unknown': [(m) => { m.layers = ['Town']; m.objects[0].l = 'Town'; m.chests[0].l = 'Forest'; }, ['layer-unknown']],
   string: [(m) => { m.regions[2].name = ''; }, ['string']],
   enum: [(m) => { m.objects[0].g = 'a b'; }, ['enum']],
   'model-missing': [(m) => { m.objects[0].m = 'dungeon/no_such_file'; }, ['model-missing'],
@@ -809,7 +907,8 @@ const RANGE_CASES = {
 
 test('every RANGE code is reported by validate after an edit of a valid map', () => {
   assert.deepEqual(Object.keys(RANGE_CASES).sort(), [
-    'chest-gold', 'chest-pos', 'chest-respawn', 'col', 'enum', 'ground-cover', 'ground-size', 'model-missing', 'npc-pos', 'object-pos',
+    'chest-gold', 'chest-pos', 'chest-respawn', 'col', 'enum', 'ground-cover', 'ground-size', 'layer-duplicate', 'layer-name', 'layer-unknown',
+    'model-missing', 'npc-pos', 'object-pos',
     'object-scale', 'radius', 'region-circle', 'region-levels', 'region-poly', 'region-pos', 'spawn-count', 'spawn-in-safe', 'spawn-lvl',
     'spawn-pos', 'spawn-r', 'spawn-respawn', 'spawn-total', 'spawn-types', 'start', 'start-blocked', 'string', 'too-many',
   ]);

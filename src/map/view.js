@@ -268,6 +268,7 @@ export class MapView {
     this.selected = new Set();
     this.hover = null;
     this.hidden = new Set();       // model ids switched off with setModelVisible
+    this.hiddenObjs = new Set();   // single objects switched off with setObjectHidden (the editor's own layers)
 
     this.halo = null;              // one InstancedMesh for every halo
     this.haloObjs = [];            // haloObjs[i] <-> halo instance i
@@ -411,15 +412,15 @@ export class MapView {
     const slot = this.slots.get(obj);
     if (!slot) return;
     if (slot.batch.id !== obj.m) {
+      const off = this.hiddenObjs.has(obj);
       this.removeObject(obj);
+      if (off) this.hiddenObjs.add(obj);   // another model, the same object: it stays hidden
       this._request(this._add(obj));
       return;
     }
     this._file(obj, slot);
     if (slot.i < 0) return;
-    const mesh = slot.batch.mesh;
-    compose(obj, this._gy(obj), 0, M).toArray(mesh.instanceMatrix.array, slot.i * 16);
-    touch(mesh);
+    this._seat(obj, slot);
     this._collider(obj, slot);
     this._halo(obj, slot);
   }
@@ -427,6 +428,7 @@ export class MapView {
   removeObject(obj) {
     const slot = this.slots.get(obj);
     if (!slot) return;
+    this.hiddenObjs.delete(obj);   // (an object that comes back is shown until somebody hides it again)
     this._forget(obj, slot);
     const batch = slot.batch;
     if (slot.i < 0) { batch.pending.delete(obj); return; }
@@ -538,7 +540,7 @@ export class MapView {
   }
 
   // The object under a ray -> { obj, point: Vector3, distance } | null. Only the view's own batches are tested, never
-  // the terrain or the foliage; a hidden layer or model is skipped; filter(obj) = false discards a hit.
+  // the terrain or the foliage; a hidden layer, model or object is skipped; filter(obj) = false discards a hit.
   // slopPx > 0 (with viewportHeight in pixels and raycaster.camera set): when the ray hits nothing, the object whose
   // centre is nearest on screen is taken if it lies within slopPx + min(slopPx, its radius on screen) pixels - small
   // props keep a forgiving target, while bare ground inside the bounding circle of a tree stays empty ground.
@@ -604,6 +606,28 @@ export class MapView {
     if (!batch?.mesh) return;
     batch.mesh.visible = this.layers.objects && !!on;
     for (const obj of batch.objs) this._halo(obj, this.slots.get(obj));
+  }
+
+  // Hides ONE object of the map, or shows it again: it is not drawn, has no halo and is never picked. It still blocks:
+  // what blocks is the map, and the game hides nothing. The editor's own layers use this; a model hidden as a whole
+  // (setModelVisible) costs nothing per object and stays the better tool for that. Shown again after load(), and an
+  // object that is removed is forgotten here. Works for an object that still waits for its model.
+  setObjectHidden(obj, hidden) {
+    if (!!hidden === this.hiddenObjs.has(obj)) return;
+    const slot = this.slots.get(obj);
+    if (!hidden) this.hiddenObjs.delete(obj);
+    else if (slot) this.hiddenObjs.add(obj);
+    if (!slot || slot.i < 0) return;
+    this._seat(obj, slot);
+    this._halo(obj, slot);
+  }
+
+  // The same for many: exactly the objects of `objs` (an Iterable, or null for none) are hidden afterwards.
+  // Only what changed since the last call is touched.
+  setObjectsHidden(objs) {
+    const next = new Set(objs ?? []);
+    for (const obj of [...this.hiddenObjs]) if (!next.has(obj)) this.setObjectHidden(obj, false);
+    for (const obj of next) this.setObjectHidden(obj, true);
   }
 
   // objs: Iterable<Obj>. Only what changed since the last call is touched. The tint needs the editor's colour channel.
@@ -835,11 +859,21 @@ export class MapView {
     }
     const mesh = batch.mesh, i = slot.i = mesh.count++;
     batch.objs[i] = obj;
-    compose(obj, this._gy(obj), 0, M).toArray(mesh.instanceMatrix.array, i * 16);
     mesh.instanceColor?.array.set(TINT[slot.state], i * 3);
-    touch(mesh);
+    this._seat(obj, slot);
     this._collider(obj, slot);
     this._halo(obj, slot);
+  }
+
+  // Writes the instance matrix of an object that is in its batch. A hidden object keeps its instance - the batch stays
+  // dense, objs[i] <-> instance i - but the instance is collapsed to a point where the object stands: it draws nothing,
+  // casts no shadow, and the bounds of the batch stay those of the map.
+  _seat(obj, slot) {
+    const mesh = slot.batch.mesh;
+    if (this.hiddenObjs.has(obj)) M.makeScale(0, 0, 0).setPosition(obj.x, obj.y + this._gy(obj), obj.z);
+    else compose(obj, this._gy(obj), 0, M);
+    M.toArray(mesh.instanceMatrix.array, slot.i * 16);
+    touch(mesh);
   }
 
   // The object leaves the view's books (not yet its batch).
@@ -882,6 +916,7 @@ export class MapView {
     this.selected = new Set();
     this.hover = null;
     this.hidden.clear();
+    this.hiddenObjs.clear();
     this.setGhost(null);
     this.npcs = [];
     this._collidersChanged();
@@ -897,10 +932,11 @@ export class MapView {
   // map, and the stock version builds two matrices for each one. Nothing here depends on bounds the mesh has cached.
   _cast(raycaster, batch, hit) {
     const { mesh, model, objs } = batch, a = mesh.instanceMatrix.array, { center: c, radius } = model.geometry.boundingSphere;
-    const { origin: o, direction: d } = raycaster.ray;
+    const { origin: o, direction: d } = raycaster.ray, off = this.hiddenObjs.size ? this.hiddenObjs : null;
     PROBE.geometry = model.geometry;
     PROBE.material = model.material;
     for (let i = 0, k = 0; i < mesh.count; i++, k += 16) {
+      if (off && off.has(objs[i])) continue;                                           // hidden by itself: nothing to hit
       const x = a[k] * c.x + a[k + 4] * c.y + a[k + 8] * c.z + a[k + 12] - o.x;       // ray origin -> centre of the sphere
       const y = a[k + 1] * c.x + a[k + 5] * c.y + a[k + 9] * c.z + a[k + 13] - o.y;
       const z = a[k + 2] * c.x + a[k + 6] * c.y + a[k + 10] * c.z + a[k + 14] - o.z;
@@ -927,6 +963,7 @@ export class MapView {
       if (!this._pickable(batch)) continue;
       const { model, mesh, objs } = batch, a = mesh.instanceMatrix.array, { x: bx, y: by, z: bz } = model.bounds.getCenter(V), r = model.size.length() / 2;
       for (let i = 0, k = 0; i < mesh.count; i++, k += 16) {
+        if (this.hiddenObjs.size && this.hiddenObjs.has(objs[i])) continue;
         // the centre of the instance's bounds: in the world, then on screen
         const x = a[k] * bx + a[k + 4] * by + a[k + 8] * bz + a[k + 12];
         const y = a[k + 1] * bx + a[k + 5] * by + a[k + 9] * bz + a[k + 13];
@@ -975,7 +1012,7 @@ export class MapView {
   // Lantern and torch models do not shine by themselves: a soft additive halo around each one sells the light.
   // Adds, moves or removes the halo of one object.
   _halo(obj, slot, gone = false) {
-    const g = gone || this.hidden.has(slot.batch.id) ? null : glowOf(obj, slot.batch.model.info);
+    const g = gone || this.hidden.has(slot.batch.id) || this.hiddenObjs.has(obj) ? null : glowOf(obj, slot.batch.model.info);
     if (!g) {
       if (slot.halo < 0) return;
       const moved = swapRemove(this.halo, slot.halo);
@@ -1252,9 +1289,7 @@ export class MapView {
   _lift(obj) {
     const slot = this.slots.get(obj);
     if (!slot || slot.i < 0) return;
-    const mesh = slot.batch.mesh;
-    compose(obj, this._gy(obj), 0, M).toArray(mesh.instanceMatrix.array, slot.i * 16);
-    touch(mesh);
+    this._seat(obj, slot);
     this._halo(obj, slot);
   }
 

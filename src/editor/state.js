@@ -1,5 +1,6 @@
 // `ui`: the editor's own state - everything that is neither part of the map nor undoable. The active tool, layer
-// visibility and locks, overlay toggles, snapping, what the palette has armed, the cursor, the status text.
+// visibility and locks (of the eight fixed layers and of the map's own), the active layer, overlay toggles, snapping,
+// what the palette has armed, the cursor, the status text.
 // Pure: no DOM, no three. What needs a page - toasts, dialogs, picking a ground point, the canvas cursor - is injected
 // by the boot code with ui.attach({ toast, confirm, ... }), so the store and the commands are testable in plain Node.
 //
@@ -10,11 +11,14 @@ import { GROUND_INDEX, LAYERS, LAYER_OF } from '../map/format.js';
 export const STORAGE_KEY = 'hypercat-editor-ui';
 export const SNAP_STEPS = [0.25, 0.5, 1, 2];        // world units; 2 is one ground cell of today's map
 
-const PERSISTED = ['layers', 'overlays', 'snap', 'collapsed'];
+const PERSISTED = ['layers', 'overlays', 'snap', 'collapsed', 'customLayers', 'activeLayer'];
 const RENDERERS = ['toast', 'confirm', 'choose', 'prompt', 'pickPoint', 'setCursor'];
 const FLAGS = ['hidden', 'locked'];
 const PENDING_TOASTS = 20;     // toasts raised before a renderer is attached are kept, so a boot message is not lost
 const MAX_SECTIONS = 64;       // collapsed section ids read back from storage: more than this is not ours
+const MAX_CUSTOM = 64;         // ... and so are more custom layers than a map may have (LIMITS.layers), or longer names
+const MAX_LAYER_NAME = 32;
+const OPEN = Object.freeze({ visible: true, locked: false });   // the state of a custom layer nobody has hidden or locked
 
 // A list of listeners per event. Both `ui` and the store are built on it.
 // One listener that throws must not keep the others from hearing the event: six owners subscribe side by side, and the
@@ -89,16 +93,28 @@ function restore(stored) {
   if (isObj(stored.collapsed)) {
     for (const id of Object.keys(stored.collapsed).slice(0, MAX_SECTIONS)) if (stored.collapsed[id] === true && id.length <= 64) collapsed[id] = true;
   }
-  return { layers, overlays, snap, collapsed };
+  // custom layers: [[name, visible, locked], ...] - only those that are hidden or locked
+  const customLayers = new Map();
+  if (Array.isArray(stored.customLayers)) {
+    for (const entry of stored.customLayers.slice(0, MAX_CUSTOM)) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string' || entry[0].length > MAX_LAYER_NAME) continue;
+      const visible = entry[1] !== false, locked = entry[2] === true;
+      if (!visible || locked) customLayers.set(entry[0], { visible, locked });
+    }
+  }
+  const activeLayer = typeof stored.activeLayer === 'string' && stored.activeLayer.length <= MAX_LAYER_NAME ? stored.activeLayer : null;
+  return { layers, overlays, snap, collapsed, customLayers, activeLayer };
 }
 
-// storage: where layers, overlays, snap and the collapsed sections persist - anything with getItem / setItem.
+// storage: where layers, overlays, snap, the collapsed sections, the eyes and locks of the map's own layers and the
+// active one persist - anything with getItem / setItem.
 // Default: the browser's localStorage when there is one. Pass null to keep nothing (tests).
 export function createUi({ storage = browserStorage() } = {}) {
   const events = createEmitter();
   const flags = { hidden: new WeakSet(), locked: new WeakSet() };
   const renderers = {}, pendingToasts = [];
   const kept = restore(readStored(storage));
+  let known = null;                // the names followLayers() was called with last
 
   // Our keys are merged into what is stored, so a key some other module keeps under the same name survives.
   const persist = () => {
@@ -106,6 +122,7 @@ export function createUi({ storage = browserStorage() } = {}) {
     try {
       const next = { ...readStored(storage), v: 1 };
       for (const key of PERSISTED) next[key] = ui[key];
+      next.customLayers = [...ui.customLayers].map(([name, state]) => [name, state.visible, state.locked]);   // a Map has no JSON
       storage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch { /* full or disabled: the editor works without remembering */ }
   };
@@ -133,6 +150,11 @@ export function createUi({ storage = browserStorage() } = {}) {
     status: '',                      // the standing line of the status bar: the instruction of a tool, a progress
     note: '',                        // what has just happened ("Deleted 3 objects"); see setNote
     collapsed: kept.collapsed,       // { [section id]: true } for every collapsed section of the right column
+    // The map's own layers (map.layers, "Town", "Forest" ...): the names are part of the map, what is shown and what
+    // may be touched is the editor's. A Map - a layer may be called "constructor" - that holds only the layers that
+    // are hidden or locked; read it with layerState(). Kept in step with the map by followLayers().
+    customLayers: kept.customLayers, // Map<name, { visible, locked }>
+    activeLayer: kept.activeLayer,   // the custom layer new items are put on, or null for none
 
     // Assigns and emits `key`: listeners get (value, previous). Always emits, also for an equal value: setting the active
     // tool again re-arms it.
@@ -169,7 +191,63 @@ export function createUi({ storage = browserStorage() } = {}) {
       const layer = ui.layers[LAYER_OF[kind]];
       if (!layer || !layer.visible || layer.locked) return false;
       if (flags.hidden.has(item) || flags.locked.has(item)) return false;
+      if (item.l != null && ui.customLayers.size) {         // its own layer is hidden or locked
+        const own = ui.customLayers.get(item.l);
+        if (own && (!own.visible || own.locked)) return false;
+      }
       return kind !== 'object' || !ui.hiddenModels.has(item.m);
+    },
+
+    // -> { visible, locked } of a custom layer (do not change it: setLayerState). A layer nobody touched is open.
+    layerState(name) {
+      return ui.customLayers.get(name) ?? OPEN;
+    },
+
+    // Hides, shows, locks or unlocks a custom layer: patch = { visible?, locked? }. Emits 'customLayers'.
+    setLayerState(name, patch) {
+      if (typeof name !== 'string') throw new TypeError('ui.setLayerState: expected a layer name');
+      const now = ui.layerState(name);
+      const state = { visible: patch?.visible === undefined ? now.visible : !!patch.visible, locked: patch?.locked === undefined ? now.locked : !!patch.locked };
+      if (state.visible === now.visible && state.locked === now.locked) return;
+      const next = new Map(ui.customLayers);
+      if (state.visible && !state.locked) next.delete(name); else next.set(name, state);
+      ui.set('customLayers', next);
+      // nothing is made on a layer that would hide it at once, or that may not be touched
+      if (ui.activeLayer === name && (!state.visible || state.locked)) ui.set('activeLayer', null);
+    },
+
+    // true for an item that is not drawn because its own layer is hidden (regions and the start are on none).
+    layerHidden(item) {
+      return item.l != null && ui.customLayers.size > 0 && ui.customLayers.get(item.l)?.visible === false;
+    },
+
+    // The map's layers are `names` now (map.layers after a load or a change of the list): what is kept about layers
+    // that are gone is forgotten, and the active layer is one of the list - open, or none: nothing is ever made on a
+    // layer that hides it at once. A layer that was RENAMED keeps its eye, its lock and the active mark: that is one
+    // name of the list replaced in place, also when an undo puts the old name back.
+    // fresh: another map was loaded - the same name is the same layer, nothing was renamed.
+    followLayers(names, { fresh = false } = {}) {
+      const list = Array.isArray(names) ? names : [], before = fresh ? null : known;
+      known = list.slice();
+      let states = ui.customLayers, active = ui.activeLayer;
+      if (before && before.length === list.length) {
+        const at = [];
+        for (let i = 0; i < list.length && at.length < 2; i++) if (before[i] !== list[i]) at.push(i);
+        if (at.length === 1 && !list.includes(before[at[0]])) {
+          const from = before[at[0]], to = list[at[0]];
+          if (states.has(from)) {
+            states = new Map(states);
+            states.set(to, states.get(from));
+            states.delete(from);
+          }
+          if (active === from) active = to;
+        }
+      }
+      if ([...states.keys()].some((name) => !list.includes(name))) states = new Map([...states].filter(([name]) => list.includes(name)));
+      const own = active === null ? null : states.get(active);
+      if (active !== null && (!list.includes(active) || (own && (!own.visible || own.locked)))) active = null;
+      if (states !== ui.customLayers) ui.set('customLayers', states);
+      if (active !== ui.activeLayer) ui.set('activeLayer', active);
     },
 
     // The renderers of everything that needs a page. May be called several times, each with some of them (the boot code

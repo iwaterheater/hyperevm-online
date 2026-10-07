@@ -1113,7 +1113,94 @@ test('ui.isPickable: the layer, the item flags and the hidden models - one test 
   assert.equal(ui.isPickable('nonsense', o[0]), false);
 });
 
-test('ui persists layers, overlays, snap and the collapsed sections - and nothing else', () => {
+test('ui: the map\'s own layers - eye, lock, the active one - and what they do to isPickable', () => {
+  const { o, s, c, n, r, map } = world();
+  const storage = fakeStorage(), ui = createUi({ storage });
+  for (const item of [o[0], o[1], s[0], c[0], n[0]]) item.l = 'Town';      // (test set-up)
+  o[2].l = 'constructor';
+  const log = [];
+  ui.on('customLayers', (next, previous) => log.push(['layers', next.size, previous.size]));
+  ui.on('activeLayer', (next, previous) => log.push(['active', next, previous]));
+
+  assert.deepEqual(ui.layerState('Town'), { visible: true, locked: false });
+  assert.deepEqual(ui.layerState('constructor'), { visible: true, locked: false }, 'a layer may have any name');
+  assert.equal(ui.activeLayer, null);
+  assert.equal(ui.isPickable('object', o[0]), true);
+
+  ui.setLayerState('Town', { visible: false });
+  assert.deepEqual(ui.layerState('Town'), { visible: false, locked: false });
+  for (const [kind, item] of [['object', o[0]], ['spawn', s[0]], ['chest', c[0]], ['npc', n[0]]]) {
+    assert.equal(ui.isPickable(kind, item), false, `${kind} on a hidden layer`);
+    assert.equal(ui.layerHidden(item), true);
+  }
+  assert.equal(ui.isPickable('object', o[2]), true, 'another layer');
+  assert.equal(ui.isPickable('object', o[3]), true, 'no layer');
+  assert.equal(ui.isPickable('region', r[0]), true);
+  assert.equal(ui.isPickable('start', map.start), true);
+  assert.equal(ui.layerHidden(o[3]) || ui.layerHidden(r[0]) || ui.layerHidden(map.start), false);
+
+  ui.setLayerState('Town', { visible: true, locked: true });
+  assert.equal(ui.isPickable('object', o[0]), false, 'a locked layer is drawn but not picked');
+  assert.equal(ui.layerHidden(o[0]), false);
+  ui.setLayerState('Town', { locked: true });
+  assert.equal(log.length, 2, 'emitted when the state changes');
+  ui.setLayerState('Town', { locked: false });
+  assert.equal(ui.isPickable('object', o[0]), true);
+  assert.equal(ui.customLayers.size, 0, 'an open layer leaves no entry');
+  assert.throws(() => ui.setLayerState(5, { visible: false }), TypeError);
+
+  // the active layer: hiding or locking it ends that - nothing is made on a layer that hides it at once
+  ui.followLayers(['Town', 'constructor', 'Forest'], { fresh: true });
+  ui.set('activeLayer', 'Town');
+  ui.setLayerState('Forest', { visible: false });
+  assert.equal(ui.activeLayer, 'Town');
+  ui.setLayerState('Town', { locked: true });
+  assert.equal(ui.activeLayer, null);
+  assert.deepEqual(log.at(-1), ['active', null, 'Town']);
+
+  // a rename is one name replaced in place: eye, lock and the active mark stay with the layer - and come back on undo
+  ui.setLayerState('Town', { locked: false });
+  ui.set('activeLayer', 'Town');
+  ui.setLayerState('constructor', { visible: false });
+  ui.followLayers(['Town', 'toString', 'Forest']);
+  assert.deepEqual([ui.layerState('toString').visible, ui.layerState('constructor').visible, ui.activeLayer], [false, true, 'Town']);
+  ui.followLayers(['Old town', 'toString', 'Forest']);
+  assert.equal(ui.activeLayer, 'Old town');
+  ui.followLayers(['Town', 'toString', 'Forest']);
+  assert.equal(ui.activeLayer, 'Town');
+  // a reorder renames nothing
+  ui.followLayers(['Forest', 'toString', 'Town']);
+  assert.deepEqual([ui.activeLayer, ui.layerState('Forest').visible, ui.layerState('toString').visible], ['Town', false, false]);
+  // a layer that is gone takes its state and the active mark with it; back again (an undo) it is open
+  ui.followLayers(['Forest', 'toString']);
+  assert.equal(ui.activeLayer, null);
+  ui.followLayers(['Forest']);
+  ui.followLayers(['Forest', 'toString']);
+  assert.deepEqual(ui.layerState('toString'), { visible: true, locked: false });
+  assert.deepEqual([...ui.customLayers.keys()], ['Forest']);
+
+  // persisted by name; another map (fresh) keeps what its layers share and forgets the rest
+  ui.set('activeLayer', 'toString');
+  const stored = JSON.parse(storage.data.get(STORAGE_KEY));
+  assert.deepEqual([stored.customLayers, stored.activeLayer], [[['Forest', false, false]], 'toString']);
+  const again = createUi({ storage });
+  assert.deepEqual([again.layerState('Forest'), again.activeLayer], [{ visible: false, locked: false }, 'toString']);
+  again.followLayers(['Forest', 'Camp'], { fresh: true });
+  assert.deepEqual([again.layerState('Forest').visible, again.activeLayer], [false, null]);
+  again.followLayers([], { fresh: true });
+  assert.equal(again.customLayers.size, 0);
+  // an active layer that is stored as hidden is not active after the load
+  const odd = createUi({ storage: fakeStorage({ [STORAGE_KEY]: JSON.stringify({ customLayers: [['Town', false, true], ['x'.repeat(40), false, false], 'junk', [5, false]], activeLayer: 'Town' }) }) });
+  assert.deepEqual([...odd.customLayers], [['Town', { visible: false, locked: true }]]);
+  odd.followLayers(['Town'], { fresh: true });
+  assert.equal(odd.activeLayer, null);
+  for (const junk of [{ customLayers: 'Town', activeLayer: 5 }, { customLayers: {}, activeLayer: 'y'.repeat(33) }]) {
+    const u = createUi({ storage: fakeStorage({ [STORAGE_KEY]: JSON.stringify(junk) }) });
+    assert.deepEqual([u.customLayers.size, u.activeLayer], [0, null]);
+  }
+});
+
+test('ui persists layers, overlays, snap, the collapsed sections and the state of the map\'s own layers - and nothing else', () => {
   const storage = fakeStorage();
   const ui = createUi({ storage });
   assert.equal(storage.data.size, 0, 'nothing is written before something changes');
@@ -1127,7 +1214,8 @@ test('ui persists layers, overlays, snap and the collapsed sections - and nothin
   ui.set('overlays', { ...ui.overlays, regiontint: true, grid: false });
   ui.set('collapsed', { ...ui.collapsed, layers: true });
   const stored = JSON.parse(storage.data.get(STORAGE_KEY));
-  assert.deepEqual(Object.keys(stored).sort(), ['collapsed', 'layers', 'overlays', 'snap', 'v']);
+  assert.deepEqual(Object.keys(stored).sort(), ['activeLayer', 'collapsed', 'customLayers', 'layers', 'overlays', 'snap', 'v']);
+  assert.deepEqual([stored.activeLayer, stored.customLayers], [null, []], 'a map without layers of its own leaves nothing behind');
 
   const again = createUi({ storage });
   assert.deepEqual(again.snap, ui.snap);

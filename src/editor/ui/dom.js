@@ -18,6 +18,10 @@ import { toDeg, toRad } from '../../map/format.js';
 
 export const STEP_EVENT = 'ui-step';       // CustomEvent on a focused number input: detail { dir: 1 | -1, shift, alt }
 export const COMMIT_EVENT = 'ui-commit';   // CustomEvent on a field: commit what was typed, now (see leaveField)
+// CustomEvent on a field, sent before COMMIT_EVENT when it is Escape that ends the edit. The fields of this file take
+// no notice - Escape commits, like Enter - but a field that was opened to name a NEW thing (a layer) drops what was
+// typed instead: there, Escape has to mean "I did not want this".
+export const CANCEL_EVENT = 'ui-cancel';
 
 const FIELD = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
@@ -30,9 +34,11 @@ const fields = new WeakMap();   // el -> its field object, so row() can wire a l
 // Takes the focus out of the field that has it, committing what was typed. -> true when a field had the focus.
 // The commit is asked for explicitly before the blur: a document that is not focused itself (a background tab, a page
 // driven from the console or by a script) moves document.activeElement on blur() but fires no blur event.
-export function leaveField() {
+// cancel: it is Escape that takes the focus away (CANCEL_EVENT goes first).
+export function leaveField({ cancel = false } = {}) {
   const a = document.activeElement;
   if (!a || a === document.body || !a.matches?.(FIELD)) return false;
+  if (cancel) a.dispatchEvent(new CustomEvent(CANCEL_EVENT));
   a.dispatchEvent(new CustomEvent(COMMIT_EVENT));
   a.blur();
   return true;
