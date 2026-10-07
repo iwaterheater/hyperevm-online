@@ -184,7 +184,8 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
 
   let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0;
 
-  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, sitting = false, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
+  // hurt: 1 at the moment the cat is hit, falling to 0 over the next half second.
+  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, sitting = false, hurt = 0, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
     t += dt;
     const k = Math.min(1, dt * 12);
     move += (Math.min(1, speed / 9) - move) * k;
@@ -254,6 +255,20 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     blink -= dt;
     if (blink < -0.12) blink = 1.5 + Math.random() * 3;
     eyes[0].scale.y = eyes[1].scale.y = blink < 0 ? 0.12 : 1;
+
+    // A hit: the cat flinches - knocked back on its heels and squashed, paws thrown out, head jerked back, eyes
+    // screwed shut - and springs back. It stays in sight the whole time.
+    const h = Math.min(1, Math.max(0, hurt)), jolt = h * h * (3 - 2 * h);
+    inner.scale.set(1 + 0.1 * jolt, 1 - 0.14 * jolt, 1 + 0.1 * jolt);
+    inner.position.z = -0.22 * jolt;
+    if (h > 0) {
+      inner.rotation.x -= 0.42 * jolt;
+      head.rotation.x -= 0.3 * jolt;
+      head.rotation.z += Math.sin(t * 55) * 0.07 * h;            // a shiver that dies away
+      arms[0].rotation.z -= 0.75 * jolt;
+      arms[1].rotation.z += 0.75 * jolt;
+      if (h > 0.3) eyes[0].scale.y = eyes[1].scale.y = 0.14;
+    }
   }
 
   return { group, update, setLook };

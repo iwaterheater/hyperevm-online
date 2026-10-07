@@ -1217,7 +1217,7 @@ function updateAvatar(a, dt, isMe) {
   a.orb.visible = a.castT >= 0;
   a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, swing: a.swingT, swingKind: a.swingKind });
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, swing: a.swingT, swingKind: a.swingKind });
 }
 
 function updateViews(dt) {
@@ -1895,7 +1895,7 @@ function tick(dt) {
   updateParticles(dt);
   updateAvatar(me, dt, true);
   me.bar.set(0, false);
-  me.root.visible = !stats.dead && !(local.invuln > 0 && Math.sin(time * 40) > 0.3);
+  me.root.visible = !stats.dead;   // a hit shows as a flinch of the cat (cat.js), not as blinking in and out
   updateCamera(dt);
 
   composer.render();
