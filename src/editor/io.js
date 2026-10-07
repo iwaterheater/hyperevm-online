@@ -1,7 +1,7 @@
 import { LIMITS, MapError, emptyMap, maxRadius, normalize, serialize, stringifyMap, validate } from '../map/format.js';
 import { h, button, leaveField } from './ui/dom.js';
 
-// The file side of the editor that is not Save (#menu-io): New, Import, Export, Revert - and what guards unsaved work:
+// The file side of the editor that is not Save (#menu-io): New, Import, Export, Revert, Maps - and what guards unsaved work:
 // the autosave draft, its restore offer when the editor starts, the dot in the tab title and the "leave this page?"
 // question of the browser.
 //
@@ -13,6 +13,11 @@ import { h, button, leaveField } from './ui/dom.js';
 //   file.export   downloads stringifyMap(serialize(map, { check: false })) as '<map name>.json' - byte for byte what
 //                 Save would write, also for work in progress
 //   file.revert   loads the server's map again (asks first when there are unsaved changes)
+//   file.library  opens the Maps menu: the map library of the server (map/library/) - named copies of a map to go
+//                 back to or to compare with. A click on one loads it as unsaved work, exactly like an import: the game
+//                 keeps running its own map until Save makes this one the live map. The entry that IS the live map
+//                 loads like Revert. "Keep a copy" stores the map in the editor under a name (a map with errors is
+//                 refused, as on Save). actions.run('file.library', id) opens that map directly (scripts).
 //
 // The draft: 3 s after the last change the map is written to localStorage['hypercat-editor-draft'] as
 // { rev, at, map } - never while an edit is open, and never while nothing is unsaved (Save removes the draft itself,
@@ -398,6 +403,146 @@ export default function mount(el, ctx) {
     return true;
   }
 
+  // ---------------------------------------------------------------- the map library
+
+  const why = (err) => String(err?.message ?? err).slice(0, 240);
+  // A name as the library files it: lower case, digits and single dashes.
+  const libraryId = (name) => String(name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
+  let libraryMaps = [];         // what the server listed last
+  let opening = false;
+
+  // Loads the library map `entry` ({ id, rev }) into the editor.
+  async function openLibraryMap(entry) {
+    if (opening || !settled()) return false;
+    opening = true;
+    try {
+      const live = !!entry.rev && entry.rev === net.info.rev;
+      let map;
+      try {
+        map = live ? null : await net.libraryMap(entry.id);
+      } catch (err) {
+        if (err instanceof MapError) await showIssues(`"${entry.id}" is not a map this editor can load. Nothing was opened.`, err.issues);
+        else ui.toast(`"${entry.id}" was not opened: ${why(err)}`, 'error');
+        return false;
+      }
+      if (!settled()) return false;       // an edit was opened while the map was on its way
+      if (store.dirty && !(await ui.confirm(
+        `Replace the map in the editor with "${entry.id}"?\n\nYour unsaved changes will be lost, and so will the undo history.`,
+        { ok: 'Open', cancel: 'Cancel', danger: true },       // Cancel has the focus: Enter loses nothing
+      ))) return false;
+      if (!settled()) return false;
+      if (live) {                         // the map the game runs: nothing about it is unsaved
+        try {
+          store.load(await net.loadMap());
+        } catch (err) {
+          ui.toast(`"${entry.id}" was not opened: ${why(err)}`, 'error');
+          return false;
+        }
+        if (!kept) clearDraft();
+        ui.toast(`Opened "${entry.id}": it is the map the game runs`);
+        return true;
+      }
+      loadUnsaved(map);
+      ui.toast(`Opened "${entry.id}" \u00b7 ${sizeOf(map)}. The game keeps its own map until you save`);
+      reportErrors(map, 'The opened map');
+      return true;
+    } finally {
+      opening = false;
+    }
+  }
+
+  async function keepCopy() {
+    if (!settled()) return false;
+    const typed = await ui.prompt(
+      'Keep a copy of the map in the editor in the library.\nIt is stored on the server beside the map file, under this name '
+      + '(letters, digits and dashes).\n\nName',
+      libraryId(store.map.name),
+    );
+    if (typed === null) return false;
+    const id = libraryId(typed);
+    if (!id) { ui.toast('No copy kept: the name needs a letter or a digit', 'warn'); return false; }
+    if (!settled()) return false;
+    try {
+      let answer = await net.keep(id, store.map);
+      if (answer.exists) {
+        if (!(await ui.confirm(`The library already has a map named "${id}". Replace it?`, { ok: 'Replace', cancel: 'Cancel', danger: true }))) return false;
+        if (!settled()) return false;
+        answer = await net.keep(id, store.map, true);
+      }
+      ui.toast(`${answer.replaced ? 'Replaced' : 'Kept as'} "${id}" in the library \u00b7 ${sizeOf(store.map)}`);
+      return true;
+    } catch (err) {
+      const errors = errorsOf(store.map).length;
+      ui.toast(errors
+        ? { text: `No copy kept: the map has ${count(errors, 'error')}. Fix them, or use Export`, action: { label: 'Show issues', run: openIssues } }
+        : `No copy kept: ${why(err)}`, 'error');
+      return false;
+    }
+  }
+
+  const libraryButton = button('Maps \u25be', null, { title: 'The map library: open a map that was kept on the server, or keep a copy of this one' });
+  libraryButton.setAttribute('aria-haspopup', 'true');
+  const libraryList = h('div', { class: 'ui-list' });
+  const keepButton = button('Keep a copy\u2026', () => { closeLibrary(); keepCopy().catch(report('keeping a copy')); },
+    { title: 'Store the map in the editor in the library, under a name' });
+  const libraryBox = h('div', { class: 'ui-popover maps' },
+    h('div', { class: 'ui-hint' }, 'Maps kept on the server. Opening one loads it as unsaved work: the game keeps its own map until you save.'),
+    libraryList, keepButton);
+
+  // One row per map: its name, what it holds and when it was kept; the map the game runs is marked.
+  function showLibrary(maps, note = '') {
+    libraryMaps = maps;
+    if (!maps.length) {
+      libraryList.replaceChildren(h('div', { class: 'ui-empty' }, note || 'The library is empty. "Keep a copy" puts the map in the editor into it.'));
+      return;
+    }
+    libraryList.replaceChildren(...maps.map((m) => {
+      const live = !!m.rev && m.rev === net.info.rev;
+      const item = h('button', { type: 'button', class: ['ui-item', live && 'selected'], title: live ? 'The map the game runs' : `Open "${m.id}" in the editor` },
+        h('span', { class: 'id' }, m.id, live && h('span', { class: 'ui-badge ok' }, 'live')),
+        h('span', { class: 'ui-dim' }, `${count(Number(m.objects) || 0, 'object')} \u00b7 ${count(Number(m.spawns) || 0, 'spawn')} \u00b7 ${clock(Number(m.at))}`));
+      item.addEventListener('click', () => { closeLibrary(); openLibraryMap(m).catch(report('opening a library map')); });
+      return item;
+    }));
+  }
+  function refreshLibrary() {
+    if (!libraryMaps.length) showLibrary([], 'Loading\u2026');
+    net.library().then((maps) => showLibrary(maps), (err) => showLibrary([], `The library cannot be read: ${why(err)}.`));
+  }
+
+  // The box opens like the options of Play (play.js): through the popover API, which lifts it above the menu bar and
+  // closes it on a click elsewhere and on Escape; without that API it is toggled by hand.
+  const nativeBox = typeof libraryBox.showPopover === 'function';
+  const placeLibrary = () => {
+    const r = libraryButton.getBoundingClientRect();
+    libraryBox.style.inset = 'auto';
+    libraryBox.style.top = `${Math.round(r.bottom + 4)}px`;
+    libraryBox.style.left = `${Math.max(8, Math.round(r.left))}px`;
+  };
+  const libraryOpened = () => { placeLibrary(); refreshLibrary(); };
+  if (nativeBox) {
+    libraryBox.popover = 'auto';
+    libraryButton.popoverTargetElement = libraryBox;
+    libraryBox.addEventListener('beforetoggle', (ev) => { if (ev.newState === 'open') libraryOpened(); });
+    libraryBox.addEventListener('toggle', (ev) => libraryButton.classList.toggle('active', ev.newState === 'open'));
+  } else {
+    libraryBox.hidden = true;
+    libraryBox.style.position = 'fixed';
+    libraryButton.addEventListener('click', () => {
+      libraryBox.hidden = !libraryBox.hidden;
+      if (!libraryBox.hidden) libraryOpened();
+      libraryButton.classList.toggle('active', !libraryBox.hidden);
+    });
+  }
+  function closeLibrary() {
+    if (!nativeBox) { libraryBox.hidden = true; libraryButton.classList.remove('active'); return; }
+    try { if (libraryBox.matches(':popover-open')) libraryBox.hidePopover(); } catch { /* not open */ }
+  }
+  function openLibrary() {
+    if (!nativeBox) { if (libraryBox.hidden) libraryButton.click(); return; }
+    try { if (!libraryBox.matches(':popover-open')) libraryBox.showPopover(); } catch { /* cannot open now */ }
+  }
+
   // ---------------------------------------------------------------- the menu
 
   const report = (what) => (err) => console.error(`[editor] ${what} failed`, err);
@@ -408,7 +553,7 @@ export default function mount(el, ctx) {
   newButton.title = 'Start an empty island (the map on the server changes only when you save)';
   importButton.title = 'Load a map file (.json) into the editor as unsaved work. You can also drop the file on the window';
   exportButton.title = 'Download the map as a .json file, exactly as Save would write it';
-  el.replaceChildren(newButton, importButton, exportButton, revertButton, draftNote, keptButton, picker);
+  el.replaceChildren(newButton, importButton, exportButton, revertButton, libraryButton, draftNote, keptButton, picker, libraryBox);
 
   // An id somebody registered already is left alone (registering twice throws).
   const offer = (id, fn) => { if (!actions.has(id)) actions.register(id, fn); };
@@ -416,6 +561,15 @@ export default function mount(el, ctx) {
   offer('file.import', (file) => { Promise.resolve(importMap(file)).catch(report('import')); });
   offer('file.export', exportMap);
   offer('file.revert', () => { revert().catch(report('revert')); });
+  offer('file.library', (id) => {
+    if (typeof id !== 'string') { openLibrary(); return; }
+    net.library().then((maps) => {
+      const entry = maps.find((m) => m.id === id);
+      if (entry) return openLibraryMap(entry);
+      ui.toast(`The library has no map named "${id}"`, 'warn');
+      return false;
+    }).catch((err) => ui.toast(`The library cannot be read: ${why(err)}`, 'error'));
+  });
 
   // ---------------------------------------------------------------- unsaved changes: the title, the buttons, the tab
 
@@ -423,6 +577,9 @@ export default function mount(el, ctx) {
     const map = store.map, dirty = !!map && store.dirty;
     document.title = `${dirty ? '\u2022 ' : ''}${map?.name ? `${map.name} \u2014 ` : ''}${baseTitle}`;
     for (const node of [newButton, importButton, exportButton, revertButton]) node.disabled = !map;
+    // the library is the server's: one that is not in editor mode keeps none
+    libraryButton.disabled = !map || !!ui.readOnly;
+    keepButton.disabled = !map;
     revertButton.title = dirty
       ? 'Give up every unsaved change and load the map from the server again'
       : 'Load the map from the server again (there are no unsaved changes)';
@@ -443,6 +600,7 @@ export default function mount(el, ctx) {
     if (change?.props?.includes('name')) sync();
   });
   store.on('history', sync);
+  ui.on('readOnly', sync);
   window.addEventListener('beforeunload', (ev) => {
     if (!store.map || !store.dirty) return;
     ev.preventDefault();
