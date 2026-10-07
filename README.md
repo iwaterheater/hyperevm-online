@@ -27,6 +27,8 @@ Set a different port with the `PORT` environment variable:
 PORT=3000 npm start
 ```
 
+The page opens on a loading screen and keeps it until the world can be drawn without anything popping in. Its bar counts real things — the map, every model file the map uses, the cat, the monsters, the townsfolk, the effects — then the foliage is grown, the shaders are compiled and a few frames are drawn behind it, and only then does it fade into the menu. If nothing arrives for 20 seconds, or the map does not load, it says so and offers **Retry**. The picture, `assets/ui/loading.jpg`, is rendered from the game's own models with `blender --background art/hypercat.blend --python tools/build-keyart.py`; `/?loading=hold` keeps the screen up for a look at it (`/?loading=hold:40` freezes it at 40 %).
+
 ## Controls
 
 | Input | Action |
@@ -66,7 +68,7 @@ Drag a learned skill from the skill book (`K`) or an item from the inventory (`I
 
 ## The world
 
-One continuous map with no loading screens. The world is a data file, `map/world.json`: the terrain, every tree and wall, the zones, the monster camps, the chests, the townsfolk and the point where new cats appear. It is built and changed in the [map editor](#map-editor); nothing of it is generated when the game starts.
+One continuous map with no loading screens between its zones. The world is a data file, `map/world.json`: the terrain, every tree and wall, the zones, the monster camps, the chests, the townsfolk and the point where new cats appear. It is built and changed in the [map editor](#map-editor); nothing of it is generated when the game starts.
 
 In the map that ships with the game, zones get harder the further you go from the town:
 

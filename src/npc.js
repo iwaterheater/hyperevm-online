@@ -19,13 +19,17 @@ const KINDS = {
 };
 const GEAR = /^(1H_|2H_|Knife|Throwable|Mug|Spellbook|.*_Shield)/;
 
+// The model files these townsfolk need, each once.
+export const npcModels = (npcs) => [...new Set(npcs.map((n) => KINDS[n.kind].model))];
+
 // `label(text, color, height)` builds a text sprite; `npcs` is the list of the map: { kind, x, z, ry }.
 // The map view registers them as obstacles. `heightAt(x, z)` is the height of the ground they stand on.
-export async function createNpcs(scene, label, npcs, heightAt = () => 0) {
+// `onFile(ok)` is called per model file that has settled, loaded or not.
+export async function createNpcs(scene, label, npcs, heightAt = () => 0, onFile = null) {
   const loader = new GLTFLoader();
   const models = {};
-  await Promise.all([...new Set(npcs.map((n) => KINDS[n.kind].model))].map(async (name) => {
-    models[name] = await loader.loadAsync(`${DIR}${name}.glb`);
+  await Promise.all(npcModels(npcs).map(async (name) => {
+    try { models[name] = await loader.loadAsync(`${DIR}${name}.glb`); } finally { onFile?.(name in models); }
   }));
 
   const folk = npcs.map(({ kind, x, z, ry }) => {

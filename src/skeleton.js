@@ -22,17 +22,21 @@ const VARIANTS = {
   boss:    { model: 'Skeleton_Warrior', scale: 3.4,  right: 'Skeleton_Blade', left: 'Skeleton_Shield_Large_A', walk: 'Walking_C', stride: 1.4, attack: '1H_Melee_Attack_Slice_Horizontal', hitAt: 0.5 },
 };
 
+export const SKELETON_FILES = MODELS.length + GEAR.length;   // how many files loadSkeletons() asks for
+
 const assets = {};
 let ready = null;
 
 // Loads every model once; resolves when skeletons can be created.
-export function loadSkeletons() {
+// `onFile(ok)` is called per file that has settled, loaded or not; only the call that starts the loading is heard.
+export function loadSkeletons(onFile = null) {
   if (!ready) {
     const loader = new GLTFLoader();
     const load = (name, ext) => loader.loadAsync(`${DIR}${name}.${ext}`).then((gltf) => {
       gltf.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
       assets[name] = gltf;
-    });
+      onFile?.(true);
+    }, (err) => { onFile?.(false); throw err; });
     ready = Promise.all([...MODELS.map((n) => load(n, 'glb')), ...GEAR.map((n) => load(n, 'gltf'))]);
   }
   return ready;

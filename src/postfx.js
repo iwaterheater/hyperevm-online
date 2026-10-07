@@ -13,6 +13,16 @@ export function createComposer(renderer, scene, camera) {
   composer.addPass(new OutputPass());
   return {
     render() { composer.render(); },
+    // Compiles the shaders of everything in the scene, drawn or hidden, ahead of the frame that would need them.
+    // -> a promise. The scene is rendered into the composer's buffer, not onto the canvas, and a program is built for
+    // where it draws (no tone mapping, linear colours): compiled without that target they would all be built twice.
+    compile() {
+      const target = renderer.getRenderTarget();
+      renderer.setRenderTarget(composer.readBuffer);
+      const done = renderer.compileAsync(scene, camera);
+      renderer.setRenderTarget(target);
+      return done;
+    },
     setSize(w, h) { composer.setSize(w, h); },
   };
 }

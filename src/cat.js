@@ -103,6 +103,11 @@ function getShared() {
   return shared;
 }
 
+// -> a promise of the model file, for whoever wants to wait for it (the loading screen); it rejects when it is missing
+export function loadCat() {
+  return getShared().ready;
+}
+
 // -> { group, update(dt, state), setLook({ hoodie, weapon, armor, weaponTint, shield }) }. The group is there at once,
 // standing on its origin and facing +Z; the model appears in it when the file has arrived.
 export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, weaponTint = null, shield = null } = {}) {
