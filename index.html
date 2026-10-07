@@ -98,6 +98,14 @@
   .act .icon, .sk .icon { display: block; width: 20px; height: 20px; margin: 0 auto 2px; border-radius: 50%; flex: none;
     background: radial-gradient(#fff, var(--tint, var(--teal))); box-shadow: 0 0 10px var(--tint, var(--teal)); }
   .act svg { position: absolute; left: 15px; top: 17px; width: 30px; height: 30px; fill: currentColor; }
+  /* a picture of the icon set fills its slot; whatever is written on the slot (key, cost, count, cooldown) lies over it */
+  .icon.pic { background-size: cover; background-position: center; box-shadow: none; }
+  .act .icon.pic { position: absolute; inset: 0; width: auto; height: auto; margin: 0; border-radius: 9px; }
+  .act kbd, .act .mp, .act .n { z-index: 1; text-shadow: 0 1px 2px #000; }
+  .act kbd { background: rgba(4, 16, 14, .78); }
+  .act .cd, .act .time { z-index: 1; }
+  .slot .icon.pic { position: absolute; inset: 1px; width: auto; height: auto; margin: 0; border-radius: 4px; }
+  .slot .n, .slot .cd { z-index: 1; }
   .act .mp { position: absolute; top: 3px; right: 5px; font-size: 10px; color: #a9c8ff; }
   .act .n { position: absolute; right: 5px; bottom: 2px; font-size: 12px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
   .act kbd { position: absolute; top: 3px; left: 4px; margin: 0; padding: 0 5px; font-size: 11px; line-height: 1.2; }
@@ -118,6 +126,7 @@
   #help #online { margin: 10px 0 0; font-size: 12px; opacity: .55; }   /* a quiet last line: how many cats are in the world */
   #bookList, #helpList { overflow-y: auto; padding-right: 6px; }
   .sk .icon { width: 22px; height: 22px; margin: 0; }
+  .sk .icon.pic { width: 40px; height: 40px; border-radius: 8px; box-shadow: 0 0 0 1px rgba(127, 232, 214, .35); }
   .sk .grab { cursor: grab; }   /* a learned skill can be dragged onto the action bar */
   .sk { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid rgba(127, 232, 214, .15); }
   .sk .info { flex: 1; min-width: 0; }

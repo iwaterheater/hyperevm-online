@@ -6,6 +6,7 @@ import { createWorld } from './world.js';
 import { createNpcs } from './npc.js';
 import { createComposer } from './postfx.js';
 import { createFx } from './fx.js';
+import { skillIcon, itemIcon, ATTACK_ICON } from './icons.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
@@ -1307,18 +1308,25 @@ const TINT = { strike: '#ffb3b3', shot: '#ffe9a6', bolt: '#7fe8d6', ground: '#ff
 const FX_TINT = { frost: '#a9d8ff', fire: '#ffa040', arrow: '#ffe9a6' };
 const skillTint = (id) => FX_TINT[SKILLS[id].fx] || TINT[SKILLS[id].kind];
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-// the glowing orb that stands for a skill, on the bar and in the skill book
+// A picture from the icon set (assets/icons), as an element that fills whatever holds it.
+function picture(url) {
+  const icon = el('i', 'icon pic');
+  icon.style.backgroundImage = `url("${url}")`;
+  return icon;
+}
+// what stands for a skill, on the bar and in the skill book: its icon - or, for a skill without one, a glowing orb
 function skillOrb(id) {
+  if (skillIcon(id)) return picture(skillIcon(id));
   const icon = el('i', 'icon');
   icon.style.setProperty('--tint', skillTint(id));
   return icon;
 }
 
-// What a slot of the bar looks like with this in it - a skill: its orb and its name; an item: its glyph, as in the
-// bag; nothing: an empty slot. The ghost of a drag is drawn by the same function.
+// What a slot of the bar looks like with this in it - a skill or an item: its icon, edged in the tier's colour for
+// an item (the name is in the tooltip); nothing: an empty slot. The ghost of a drag is drawn by the same function.
 function barFace(id) {
   const face = el('div', 'act');
-  if (SKILLS[id]) face.append(skillOrb(id), SKILLS[id].name);
+  if (SKILLS[id]) face.append(skillOrb(id), ...(skillIcon(id) ? [] : [SKILLS[id].name]));
   else if (ITEMS[id]) {
     face.classList.add('item');
     face.style.setProperty('--tint', itemTint(id));
@@ -1332,8 +1340,7 @@ let barKey = null, barSlots = [];
 const attackSlot = barFace(null);
 attackSlot.id = 'attackBtn';
 attackSlot.classList.remove('empty');
-attackSlot.append(el('kbd', '', 'F'), el('i', 'icon'), 'Attack');
-attackSlot.querySelector('.icon').style.setProperty('--tint', '#cfd8e0');
+attackSlot.append(picture(ATTACK_ICON), el('kbd', '', 'F'));
 attackSlot.addEventListener('click', attackKey);
 // The experience bar lies under the ten slots. It is a child of the action bar, which is as wide as the row of its
 // slots and nothing else, so the bar follows that width whatever the layout does. No text on it: hovering tells.
@@ -1570,7 +1577,8 @@ function glyph(paths) {
   svg.innerHTML = paths;
   return svg;
 }
-const itemGlyph = (id) => glyph(ICONS[ITEMS[id].kind === 'potion' ? 'potion' : ITEMS[id].family || ITEMS[id].slot]);
+// an item's icon; the flat glyph only for an item the icon set does not know
+const itemGlyph = (id) => (itemIcon(id) ? picture(itemIcon(id)) : glyph(ICONS[ITEMS[id].kind === 'potion' ? 'potion' : ITEMS[id].family || ITEMS[id].slot]));
 
 // A square tile: an empty slot (with the faint outline of a `shape`, when one is named), or an item with its icon
 // and, for a stack, its count.
