@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { createCat } from './cat.js';
-import { createSkeleton, loadSkeletons, SKELETON_HEIGHT, BONE } from './skeleton.js';
+import { createCat, loadCat } from './cat.js';
+import { createSkeleton, loadSkeletons, SKELETON_FILES, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
-import { createNpcs } from './npc.js';
+import { createNpcs, npcModels } from './npc.js';
+import { loading } from './loading.js';
 import { createComposer } from './postfx.js';
 import { createFx } from './fx.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
@@ -71,6 +72,11 @@ const joinAt = rejoin ? [rejoin.x, rejoin.z] : play ? play.at : null;
 const autoJoin = playMode || !!rejoin;
 if (autoJoin) $('menu').classList.add('hidden');
 
+// The loading screen (index.html, src/loading.js) has covered the page since its first paint. It counts real things,
+// each announced before it is asked for: what does not depend on the map here, the map's own models once it has arrived.
+loading.step('engine');   // three.js and the game's modules are in: this line runs
+loading.expect({ map: 1, cat: 1, effects: 1, monsters: SKELETON_FILES, treasure: 3 });
+
 // The world is a data file: everything below is built from it.
 let map, mapRev, editorInfo = { enabled: false, canSave: false, tokenRequired: false };
 try {
@@ -79,7 +85,17 @@ try {
   mapRev = res.headers.get('X-Map-Rev') || (res.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   map = normalize(await res.json());
   editorInfo = await fetch('/api/editor', { cache: 'no-store' }).then((r) => r.json()).catch(() => editorInfo);
-} catch (err) { showLoadFailure(); throw err; }   // the throw stops the module: there is no game without a map
+} catch (err) {   // the throw stops the module: there is no game without a map
+  loading.fail('The map failed to load. Check that the server is running, then try again.');
+  showLoadFailure();
+  throw err;
+}
+loading.step('map');
+loading.expect({ scenery: new Set(map.objects.map((o) => o.m)).size, townsfolk: npcModels(map.npcs).length });
+loading.seal();   // the list is complete: the screen shows "N / M" from here on
+// asked for after the map, not beside it: a browser opens six connections to a host, and the map must not wait in line
+loading.track('cat', loadCat());
+loadSkeletons((ok) => loading.step('monsters', ok)).catch(() => {});   // connect() waits for them again and reports
 
 // A map that did not load must not leave a menu that looks alive.
 function showLoadFailure() {
@@ -112,7 +128,7 @@ addEventListener('resize', () => {
   composer.setSize(innerWidth, innerHeight);
 });
 
-const world = createWorld(scene, map);
+const world = createWorld(scene, map, { onProgress: loading.counter('scenery') });
 world.ready.catch(console.error);
 
 // The world has hills, the server does not: positions on the wire are x and z. Whatever stands, flies or is aimed here
@@ -156,7 +172,7 @@ function textSprite(text, color = '#d5f5ee', height = 0.5) {
 }
 
 let npcs = null;
-createNpcs(scene, textSprite, map.npcs, groundY).then((n) => { npcs = n; }, (err) => console.error('Townsfolk failed to load', err));
+createNpcs(scene, textSprite, map.npcs, groundY, (ok) => loading.step('townsfolk', ok)).then((n) => { npcs = n; }, (err) => console.error('Townsfolk failed to load', err));
 
 function disposeSprite(s) {
   s.removeFromParent();
@@ -243,7 +259,7 @@ const gemPool = makePool(() => {
 const chestViews = [];   // index-aligned with map.chests; filled when the models arrive
 {
   const loader = new GLTFLoader();
-  Promise.all(['chest', 'chest_gold', 'coin'].map((n) => loader.loadAsync(`./assets/dungeon/${n}.glb`))).then(([chest, gold, coin]) => {
+  Promise.all(['chest', 'chest_gold', 'coin'].map((n) => loading.track('treasure', loader.loadAsync(`./assets/dungeon/${n}.glb`)))).then(([chest, gold, coin]) => {
     map.chests.forEach((c, i) => {
       const model = (c.big ? gold : chest).scene.clone(true);
       model.traverse((o) => { if (o.isMesh) o.castShadow = true; });
@@ -308,6 +324,7 @@ function updateParticles(dt) {
 
 // what skills look like: the Blender-made shapes and their animation
 const fx = createFx(scene, { groundY, layOnGround, burst });
+loading.track('effects', fx.ready);
 
 // ---------------------------------------------------------------- avatars (cats)
 
@@ -2146,6 +2163,18 @@ function frame() {
 }
 frame();
 
+// The loading screen goes when everything it was told about is in, the foliage has grown, the shaders of all that is
+// in the scene - and of one monster of each kind, which only the server puts there - are compiled, and a few frames
+// have been drawn behind it. It steps the game itself: a tab in the background gets no animation frames.
+loading.finish({
+  scene,
+  grow: () => world.update(time, 1 / 60, me.x, me.z),
+  compile: () => composer.compile(),
+  frame: () => tick(1 / 60),
+  extras: () => MOB_KEYS.map((type) => createSkeleton(type, MOB_TYPES[type]).group),
+  programs: () => renderer.info.programs.length,
+});
+
 // debugging hook
 window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, toggleBook, toggleSheet, toggleHelp, setBar, get doll() { return doll; }, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
 
@@ -2157,5 +2186,5 @@ if (autoJoin) {
   }
   // no click and no key came before this join, and until one does the browser keeps the sound off
   for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => actx?.resume(), { once: true });
-  connect();
+  loading.ready.then(connect);   // not into a world that is still behind the loading screen
 }

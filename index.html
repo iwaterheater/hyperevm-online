@@ -262,6 +262,50 @@
     color: #04211c; background: var(--teal); border: 0; border-radius: 999px;
     box-shadow: 0 0 30px rgba(127, 232, 214, .5); transition: transform .12s; }
   button:hover { transform: scale(1.06); }
+  /* ---------------------------------------------------------------- loading screen (src/loading.js)
+     Static, so it is in the first paint: it covers the page until the world is loaded and warmed up, then fades.
+     Its background, from the top layer down: dark edges, a darker head and foot for the logo and the text, the key art
+     (tools/build-keyart.py), and what is left when the art is missing - two glows on a night-blue ground. */
+  #loading { --art-x: 50%; position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center;
+    justify-content: space-between; padding: clamp(14px, 4.5vh, 52px) 16px clamp(16px, 5vh, 56px); text-align: center; cursor: default;
+    background:
+      radial-gradient(ellipse at 50% 46%, transparent 44%, rgba(2, 8, 10, .76) 100%),
+      linear-gradient(rgba(2, 8, 10, .5), transparent 28%, transparent 60%, rgba(2, 8, 10, .82)),
+      url(./assets/ui/loading.jpg) var(--art-x) 50% / cover no-repeat,
+      radial-gradient(circle at 74% 62%, rgba(63, 217, 176, .3), transparent 32%),
+      radial-gradient(circle at 15% 46%, rgba(150, 100, 255, .24), transparent 28%),
+      #06131a;
+    transition: opacity .5s ease, visibility 0s linear .5s; }   /* .5s: FADE in src/loading.js */
+  #loading.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+  #loading[hidden], #loading [hidden] { display: none; }
+  @media (max-aspect-ratio: 1/1) { #loading { --art-x: 23%; } }   /* a tall window keeps the cat, not the empty middle */
+  .logo { margin: 0; line-height: 0; text-shadow: none;
+    filter: drop-shadow(0 0 18px rgba(127, 232, 214, .42)) drop-shadow(0 3px 5px rgba(0, 0, 0, .75)); }
+  .logo svg { display: block; width: min(84vw, 72vh, 560px); height: auto; overflow: visible; }
+  #menu .logo svg { width: min(70vw, 34vh, 330px); margin-bottom: 4px; }
+  #loadFoot { display: flex; flex-direction: column; align-items: center; width: 100%; }
+  #loadBar { width: clamp(220px, 30vw, 600px); max-width: 86vw; height: 12px; padding: 2px; border-radius: 999px;
+    background: rgba(3, 9, 11, .82); border: 1px solid rgba(255, 215, 106, .4);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .65), 0 2px 10px rgba(0, 0, 0, .6); }
+  #loadFill { display: block; width: 0; min-width: 6px; height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #9a6a1c, var(--gold) 65%, #fff4cf);
+    box-shadow: 0 0 10px rgba(255, 215, 106, .65), 0 0 2px rgba(255, 244, 207, .9); transition: width .35s ease-out; }
+  #loadText { margin-top: 12px; font-size: 15px; font-weight: 700; letter-spacing: .04em; color: #f1fbf7;
+    font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px #000, 0 0 12px rgba(0, 0, 0, .9); }
+  /* two lines high whatever the tip: a long one must not push the bar up */
+  #loadTip { margin-top: 6px; min-height: 2.7em; max-width: min(88vw, 780px); font-size: 13px; line-height: 1.35; color: #cfe6df;
+    opacity: .74; text-shadow: 0 1px 3px #000, 0 0 10px rgba(0, 0, 0, .9); transition: opacity .3s; }
+  #loadTip.out { opacity: 0; }
+  #loadTrouble { max-width: min(88vw, 520px); margin-bottom: 18px; padding: 14px 20px 16px; font-size: 15px; color: #ffe9a6;
+    background: rgba(4, 14, 16, .88); border: 1px solid rgba(255, 215, 106, .45); border-radius: 12px; }
+  #loadRetry { margin-top: 12px; padding: 9px 34px; font-size: 16px; }
+  /* hidden, not gone: the message keeps its place above them */
+  #loading.failed #loadBar, #loading.failed #loadText, #loading.failed #loadTip { visibility: hidden; }
+  @media (prefers-reduced-motion: reduce) {
+    #loading { transition: none; }
+    #loadFill, #loadTip { transition: none; }
+    #loadRetry:hover { transform: none; }
+  }
 </style>
 <script type="importmap">
 {
@@ -271,8 +315,41 @@
   }
 }
 </script>
+<link rel="preload" as="image" href="./assets/ui/loading.jpg">
 </head>
 <body>
+<!-- The logo, drawn once and used by the loading screen and the menu. The emblem is the two-lobed mark on the cat's
+     hoodie: the outline of the object "Logo" in art/hypercat.blend. Not display:none - its gradients would stop working. -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="logoGold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6d0"/><stop offset=".42" stop-color="#ffd76a"/><stop offset="1" stop-color="#7fe8d6"/>
+    </linearGradient>
+    <linearGradient id="logoMint" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d9fff7"/><stop offset=".55" stop-color="#7fe8d6"/><stop offset="1" stop-color="#2b8f80"/>
+    </linearGradient>
+  </defs>
+  <symbol id="logo" viewBox="0 0 640 250">
+    <g stroke="#04110f" stroke-linejoin="round" paint-order="stroke" font-family='ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif' text-anchor="middle">
+      <path transform="translate(320 70) scale(.98)" fill="url(#logoMint)" stroke-width="9" d="M46 -64C51 -64 56 -64 61 -61C66 -58 71 -53 75 -46C78 -39 82 -30 83 -20C85 -11 86 1 85 11C84 21 82 31 78 39C75 47 70 53 65 57C61 61 55 63 50 64C45 65 40 63 36 61C31 59 27 54 24 49C20 45 17 38 14 32C11 27 8 22 5 19C2 16 -1 14 -5 14C-8 13 -12 13 -15 14C-19 14 -22 14 -25 16C-28 18 -31 22 -34 25C-37 29 -39 35 -43 39C-46 43 -50 46 -55 48C-59 49 -64 49 -68 47C-72 45 -77 40 -79 35C-82 30 -84 24 -85 17C-86 10 -86 2 -85 -5C-84 -13 -82 -22 -78 -28C-75 -33 -69 -37 -64 -38C-59 -39 -54 -38 -49 -36C-45 -33 -41 -28 -37 -25C-34 -21 -30 -16 -27 -14C-24 -11 -20 -10 -17 -10C-14 -9 -12 -9 -9 -9C-6 -10 -2 -11 1 -13C4 -16 7 -21 10 -26C12 -31 15 -39 18 -44C22 -50 26 -55 30 -58C35 -62 41 -64 46 -64Z"/>
+      <text x="320" y="186" font-size="104" font-weight="900" textLength="520" lengthAdjust="spacingAndGlyphs" fill="url(#logoGold)" stroke-width="14">HyperCat</text>
+      <text x="326" y="236" font-size="30" font-weight="800" letter-spacing="13" fill="#ffe9a6" stroke-width="7">ONLINE</text>
+      <path fill="#ffd76a" stroke-width="3" d="M96 226h118l8-4-8-4H96l-10 4zM544 226H426l-8-4 8-4h118l10 4z"/>
+    </g>
+  </symbol>
+</svg>
+<div id="loading" aria-busy="true">
+  <h1 class="logo"><svg viewBox="0 0 640 250" role="img" aria-label="HyperCat Online"><use href="#logo"/></svg></h1>
+  <div id="loadFoot">
+    <div id="loadTrouble" role="alert" hidden>
+      <div id="loadTroubleText"></div>
+      <button id="loadRetry" type="button">Retry</button>
+    </div>
+    <div id="loadBar" role="progressbar" aria-label="Loading the world" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="loadFill"></i></div>
+    <div id="loadText">Loading the world…</div>
+    <div id="loadTip">Tip: press H in the game for the list of all controls.</div>
+  </div>
+</div>
 <div id="hud">
   <div class="panel" id="stats">
     <div class="title" id="who">Cat · Lv 1</div>
@@ -374,7 +451,7 @@
 <div id="flash"></div>
 
 <div class="overlay" id="menu">
-  <h1>HYPER<span>CAT</span> ONLINE</h1>
+  <h1 class="logo"><svg viewBox="0 0 640 250" role="img" aria-label="HyperCat Online"><use href="#logo"/></svg></h1>
   <p>An open online world of cats: level up and hunt skeletons together with other players</p>
   <div class="keys">
     <div><kbd>WASD</kbd>move</div>
@@ -406,6 +483,8 @@
   <button id="reloadBtn">Reconnect</button>
 </div>
 
+<!-- the loading screen first: it has no imports, so it runs while three.js is still on its way -->
+<script type="module" src="./src/loading.js"></script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

@@ -411,6 +411,7 @@ export function createFx(scene, { groundY, layOnGround, burst }) {
   }
 
   return {
+    ready: loaded,   // resolves to false when the models did not load; never rejects
     update, status, aim, hideAim,
     // the server accepted a skill: everything it shows but its projectile, which the game flies itself
     cast(id, k, a, tv, ev) { (SHOWS[id] || KINDS[k.kind])?.(k, a, tv, ev); },
