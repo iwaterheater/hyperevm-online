@@ -297,6 +297,7 @@ To try things without touching the real map or the real players: `MAP_FILE=/tmp/
 index.html        Page, HUD and styles
 editor.html       The map editor page
 server.js         HTTP static server + WebSocket game server; loads the map and, in editor mode, saves it
+bots/             The bots: run.mjs (the roster, the runner), bot.mjs (what a bot does), nav.mjs (where it can walk)
 map/world.json    The world: terrain, scenery, regions, monster camps, chests, townsfolk, start point
 map/backups/      The map before each save (created by the server, git-ignored)
 map/library/      The map library: named copies of the map, listed in the editor's Maps menu
@@ -351,10 +352,41 @@ data/             Saved player progress (created at runtime, git-ignored)
 
 The server is a single Node.js process, so any host that can run Node and accept WebSocket connections works (a VPS, Railway, Render, Fly.io, …). Start it with `npm start` and point players at its address. Behind HTTPS the client automatically switches to `wss://`.
 
+## Bots
+
+Ten cats that play on their own, so that the world is never empty:
+
+```bash
+npm run bots                                  # ten bots on http://localhost:8765
+npm run bots -- --url http://localhost:3000 --count 4 --verbose
+```
+
+A bot is a player like any other: it joins through the game's WebSocket and plays by the same rules, and the server
+saves it with its level and gear, so it comes back as it left and grows from day to day. It hunts the camp that fits
+its level, rests, drinks potions, and goes back to town to sell its loot, buy gear and potions, learn skills from the
+Sage and have its weapon upgraded. It walks around water, cliffs and scenery, takes a moment to react, says a line in
+the chat now and then, and takes a break of a few minutes every half hour or so (`--no-breaks` keeps them all in).
+
+The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at, and a role - how it treats other cats:
+
+| Role | Towards other cats |
+| --- | --- |
+| `farmer` | Peaceful; runs for the town when attacked |
+| `veteran` | Peaceful, but fights back |
+| `guard` | Hunts outlaws, and nobody else |
+| `duelist` | Challenges cats of about its level, and lets go of one that will not fight; hunts outlaws |
+| `pk` | Attacks cats up to two levels above its own and kills them: a murderer with a red name, until it has worked its karma off |
+
+A cat a bot has brought down is left alone by that bot for some minutes. Among themselves the bots fight seldom.
+
+The bots have to run on the machine the server runs on: the first time one joins, the server makes it the character of
+its roster line - the level, the skills and gear of that level - which only a program on the same machine may ask for.
+The bots say nothing about being bots, and nothing about being people.
+
 ## Limitations
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
-- No accounts, no PvP, no parties. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
+- No accounts and no parties. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
 - Every piece of armour is one model in four tints, and all tiers of a weapon share one model; a greatsword is the sword drawn larger, and the shield is one shape built in code. Only shields go into the off hand: there is no second weapon for it, and a two-handed weapon attacks as fast as any other.
 - The HUD is laid out for a window at least 1280 pixels wide and 720 high; in a smaller one the windows reach over the chat and the radar.
 - Clerics can only heal and bless players standing near them; there is no targeting of other players yet.

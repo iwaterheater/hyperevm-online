@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js --editor",
+    "bots": "node bots/run.mjs",
     "test": "node --test test/*.test.mjs",
     "bake": "node tools/bake-map.mjs",
     "check": "node tools/check-imports.mjs"

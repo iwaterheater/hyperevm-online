@@ -10,6 +10,7 @@ import {
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
   PVP_FLAG, PVP_DAMAGE, KARMA_DEATH, CAT_R, karmaGain, karmaBurn, PVP_PEACE, PVP_FLAGGED, PVP_OUTLAW,
+  TIERS, WEAPON_FAMILIES, weaponFamily, tierForLevel,
   ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, KNIGHT_SHIELD, stackMax, sellPrice, heldFamily, fightStyle, equipError, wearItem, roomFor, addItem, takeItem,
   cleanBag, cleanEquip, lookCode, rollLoot, chestLoot, cleanBar, defaultBar, barAdd,
 } from './src/shared.js';
@@ -1457,6 +1458,29 @@ function testCharacter(test) {
   return { cls, level, xp: 0, skills, weapon: Math.min(10, 1 + Math.floor(level / 4)) };
 }
 
+// A character a bot starts as (bots/run.mjs): a cat of some level that has what a cat of that level would have - the
+// skills of its class, gear of its tier, a few potions and some gold. A profession needs its level; below that the bot
+// starts in the base class. Asked for with the join, by a process on this machine only, and only for a token that has
+// no character yet: from then on it is a character like any other, saved with whatever it makes of itself.
+function botCharacter(start) {
+  const level = Math.max(1, Math.min(40, Math.round(num(start.lvl)) || 1));
+  let cls = typeof start.cls === 'string' && Object.hasOwn(CLASSES, start.cls) ? start.cls : START_CLASSES[0];
+  if (CLASSES[cls].base && level < PROFESSION_LEVEL) cls = CLASSES[cls].base;
+  const skills = {};
+  for (const id of skillsFor(cls)) {
+    const s = SKILLS[id];
+    if (s.lvl <= level) skills[id] = Math.min(s.sp.length, 1 + Math.floor((level - s.lvl) / 8));   // a rank for every eight levels it has had the skill
+  }
+  const t = tierForLevel(level), tier = TIERS[t], below = TIERS[t - 1];
+  const family = WEAPON_FAMILIES.includes(start.family) ? start.family : weaponFamily(cls);
+  const equip = { weapon: `${tier.arms}_${family}`, head: `${tier.id}_head`, body: `${tier.id}_body` };
+  if (below) Object.assign(equip, { hands: `${below.id}_hands`, feet: `${below.id}_feet` });
+  return {
+    cls, level, xp: 0, sp: 0, skills, gold: 40 * level, weapon: 1 + Math.floor(level / 5), equip,
+    inv: [[level >= 10 ? 'hp_large' : 'hp_small', 5], ['mp_small', 3]],
+  };
+}
+
 // Where a joining player appears: the point a trusted client names, else somewhere in the start disc.
 function joinPoint(at) {
   if (Array.isArray(at)) {
@@ -1483,7 +1507,7 @@ function dropSession(old) {
 }
 
 // The first message of a socket. Returns the new player, or null when the client has to load the map again first.
-// `conn` is what the upgrade request said about the socket: { address, trusted }.
+// `conn` is what the upgrade request said about the socket: { address, local, trusted }.
 function join(ws, msg, conn) {
   if (msg.rev !== rev) { send(ws, { t: 'map', rev }); return null; }
 
@@ -1515,6 +1539,8 @@ function join(ws, msg, conn) {
     // a second tab with the same token plays as an unsaved guest
     keeps = ![...players.values()].some((q) => q.token === token);
     if (keeps) data = own(saved, token) || null;
+    // a bot's first join brings the character it starts as (see botCharacter)
+    if (keeps && !data && conn.local && msg.bot && typeof msg.bot === 'object' && !Array.isArray(msg.bot)) data = botCharacter(msg.bot);
   }
   // A character from before the game had items loads with an empty bag; only a new one gets the starter kit.
   const fresh = !data || !!test;
@@ -1555,7 +1581,9 @@ function join(ws, msg, conn) {
 wss.on('connection', (ws, req) => {
   let p = null;
   // WebSockets ignore the same-origin policy, so here the Origin rule is what keeps a foreign page out.
-  const conn = { address: req.socket.remoteAddress, trusted: EDITOR && !TOKEN_MODE && localRequest(req) && originOk(req) };
+  // local: the socket was opened by a program on this machine - not through a proxy, and not by a page, which always
+  // names its Origin. That is what a bot's first join is asked.
+  const conn = { address: req.socket.remoteAddress, local: localRequest(req) && req.headers.origin === undefined, trusted: EDITOR && !TOKEN_MODE && localRequest(req) && originOk(req) };
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
