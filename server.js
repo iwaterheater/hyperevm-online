@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R,
+  TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R, RESPAWN_MULT, MOB_RISE,
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
   PVP_FLAG, PVP_DAMAGE, KARMA_DEATH, CAT_R, karmaGain, karmaBurn, PVP_PEACE, PVP_FLAGGED, PVP_OUTLAW,
@@ -556,7 +556,7 @@ function makeMob(type, lvl, sx, sz, respawn) {
     id: nextId++, type, ti: MOB_KEYS.indexOf(type), lvl, def, r: def.r, sx, sz, x: sx, z: sz, respawn,
     hp: st.maxHp, ...st, xp: def.xp * lvl,
     fireT: rand(1, 3), hitAt: 0, wx: sx, wz: sz, wanderAt: 0,
-    dead: false, respawnAt: 0, dmgBy: new Set(), dashHit: '', strafe: Math.random() < 0.5 ? 1 : -1, ...CLEAN,
+    dead: false, respawnAt: 0, riseUntil: 0, dmgBy: new Set(), dashHit: '', strafe: Math.random() < 0.5 ? 1 : -1, ...CLEAN,
   };
 }
 
@@ -744,11 +744,13 @@ function magical(p, power, m) {
 }
 
 function addXp(p, xp) {
-  p.xp += xp;
   p.sp += spFor(xp);
+  if (p.cap && p.level >= p.cap) return;   // a bot that is to stay as it is: it learns, but does not grow
+  p.xp += xp;
   while (p.xp >= xpNext(p.level)) {
     p.xp -= xpNext(p.level);
     p.level++;
+    if (p.cap && p.level >= p.cap) p.xp = 0;   // as far as this one goes
     grantFree(p);
     refresh(p);
     p.hp = p.maxHp;
@@ -772,7 +774,7 @@ function damageMob(m, hit, dx, dz, knock, p) {
   if (m.hp > 0) { emit({ k: 'hit', ...ev }, m.x, m.z); return; }
 
   m.dead = true;
-  m.respawnAt = now + m.respawn;
+  m.respawnAt = now + m.respawn * (m.type === 'boss' ? 1 : RESPAWN_MULT);
   emit({ k: 'kill', ti: m.ti, ...ev }, m.x, m.z);
   const drops = m.def.drops ?? 1;
   for (let i = 0; i < drops; i++) {
@@ -922,9 +924,14 @@ function throwOrbs(m, t) {
 
 function updateMob(m, dt) {
   if (m.dead) {
-    if (now >= m.respawnAt) Object.assign(m, { dead: false, x: m.sx, z: m.sz, hp: m.maxHp }, CLEAN);
+    if (now >= m.respawnAt) {
+      // back at its home: it rises from the ground there, where everyone near sees it come
+      Object.assign(m, { dead: false, x: m.sx, z: m.sz, hp: m.maxHp, riseUntil: now + MOB_RISE }, CLEAN);
+      emit({ k: 'rise', id: m.id, x: r2(m.x), z: r2(m.z) }, m.x, m.z);
+    }
     return;
   }
+  if (now < m.riseUntil) return;   // still coming out of the ground
 
   if (m.dot && now >= m.dot.next) {   // bleeding ticks once a second
     const owner = players.get(m.dot.owner);
@@ -1569,6 +1576,8 @@ function join(ws, msg, conn) {
     // PvP: fights won, murders, the karma they left - and, never saved, how long the cat stays flagged
     pvp: data.pvp | 0, pk: data.pk | 0, karma: Math.max(0, data.karma | 0), flagUntil: 0,
     stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null,   // what another cat's skills can do to it
+    // a bot may name the level it stops growing at, with every join: some cats of the world stay small for good
+    cap: conn.local && msg.bot && typeof msg.bot === 'object' ? Math.max(0, Math.min(40, Math.round(num(msg.bot.cap)))) : 0,
     lastMoveAt: now, graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
   };
   grantFree(p);

@@ -254,6 +254,8 @@
   #bagSide { display: flex; flex-direction: column; }
   #bagTop { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
   #bagTabs { display: flex; gap: 3px; }
+  /* the frame rate at the top edge, when the settings ask for it */
+  #fps { display: none; position: absolute; top: 1px; left: 50%; transform: translateX(-50%); font-size: 10.5px; font-weight: 700; color: #d5f5ee; text-shadow: 0 1px 2px #000; opacity: .8; }
   #bagTabs button { padding: 3px 9px; font-size: 11px; font-weight: 700; color: #e8fffa; background: rgba(255, 255, 255, .1); border-radius: 5px;
     box-shadow: none; }
   #bagTabs button:hover { transform: none; filter: brightness(1.3); }
@@ -536,6 +538,7 @@
     <div class="label"><span id="tgState"></span><span id="tgHp"></span></div>
     <button id="tgAttack" title="Attack this cat (Ctrl + click on it does the same)">Attack</button>
   </div>
+  <div id="fps"></div>
   <div id="banner"></div>
   <div id="notice"></div>
   <div class="panel" id="chat">
@@ -609,7 +612,10 @@
       <label for="setShadows">Shadows</label><input type="checkbox" class="switch" id="setShadows" data-set="shadows">
       <label for="setGlow">Glow<small>The shine of lamps, crystals and spells</small></label><input type="checkbox" class="switch" id="setGlow" data-set="glow">
       <label for="setGrass">Grass and flowers</label><input type="checkbox" class="switch" id="setGrass" data-set="grass">
+      <label for="setAuto">Auto<small>Lowers the graphics while the game runs slow, and gives them back when it has room</small></label><input type="checkbox" class="switch" id="setAuto" data-set="auto">
+      <label for="setFps">Show the frame rate</label><input type="checkbox" class="switch" id="setFps" data-set="fps">
     </div>
+    <div class="sub" id="setAutoNow"></div>
     <button id="setReset" type="button">Reset to defaults</button>
   </div>
   <div class="panel" id="help">

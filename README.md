@@ -41,12 +41,12 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `Tab` | Select the next nearest monster |
 | `Esc` | Clear the target |
 | `1`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack). The attack is the first slot of the [action bar](#action-bar) |
-| `2` – `9`, `0` | The other slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and most have a cast time or a cooldown; the cat stands still while casting. A click on a slot does the same |
+| `2` – `9`, `0` | The other slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and every one takes a moment - a spell is cast, a blow is wound up - and most have a cooldown; the cat stands still for that moment. A click on a slot does the same |
 | `I` | Inventory: the character's numbers, the cat with its six equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
 | `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
 | `M` | World map: the whole island with its relief, the zones and their level ranges, the boss lair, the monster camps tinted by how dangerous they are for this character, and the cats in sight. Hover a camp for its monsters. A click on the minimap opens it too |
-| `O` | Settings: sound on or off and its volume; the resolution the world is rendered at (low, medium, high), shadows, the glow of lamps and spells, grass and flowers. A change is at work at once and is remembered in the browser |
+| `O` | Settings: sound on or off and its volume; the resolution the world is rendered at (low, medium, high), shadows, the glow of lamps and spells, grass and flowers; Auto, which lowers those while the game runs slow; and the frame rate at the top edge. A change is at work at once and is remembered in the browser |
 | `H` / `F1` | Help: every control |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
@@ -141,7 +141,8 @@ Press `C` for the character status window. Every class has six fixed base attrib
 - **P. Atk / M. Atk** against the target's **P. Def / M. Def**: damage is `attack × 100 / (100 + defence)`. Monsters have both defences too — warriors resist blades, mages resist spells.
 - **Accuracy** against **Evasion** decides whether a physical attack lands; spells always land.
 - **Critical** and **M. Critical** (per 1000) are the chances of a double-damage hit.
-- **Atk. Spd** sets the auto-attack interval, **Casting Spd** shortens the cast time of spells, **Speed** is how fast the cat runs.
+- **Atk. Spd** sets the auto-attack interval. It grows with the cat: a beginner attacks at three fifths of the speed its class has at level 40, and a weapon of a better tier adds a twentieth per tier. What speeds the attacks also shortens the wind-up of physical skills.
+- **Casting Spd** shortens the cast time of spells, **Speed** is how fast the cat runs.
 
 ### Skills
 
@@ -352,7 +353,8 @@ data/             Saved player progress (created at runtime, git-ignored)
 
 ## How it works
 
-- The server simulates the world at 15 ticks per second and sends each player a snapshot of everything nearby.
+- The server simulates the world at 20 ticks per second and sends each player a snapshot of everything nearby. The client draws other cats and monsters walking in a straight line from one snapshot to the next, a twentieth of a second behind the server.
+- With Auto on in the settings, the game watches its own frame rate: when it cannot hold 40 frames a second it takes the graphics down a step - a lower resolution, then no shadows, no glow, the lowest resolution, no grass - and gives a step back when it has run at the screen's rate for a while. It never raises anything above what the player has set.
 - Monsters, projectile hits, damage, XP, gold, loot, chests, items and upgrades are decided by the server.
 - Items are one table, `ITEMS` in `src/shared.js`, used by the server, the client and the tests alike; `statsOf()` in the same file turns class, level, skills, buffs and equipment into combat stats, so the server's damage and the client's status window always agree.
 - Every item request — wear, take off, drink, buy, sell, destroy — names the stack by its place in the bag and by its item, and the server checks all of it: the stack is there, the level fits, the paws are free or what holds them fits into the bag (`wearItem()` in `src/shared.js` is the whole rule of one- and two-handed gear), the Trader is in reach, the gold and the room in the bag suffice, the cat is alive. A request that cannot be done is answered with a line the player sees; nothing changes on the client until the server says so.
@@ -383,12 +385,14 @@ npm run bots -- --url http://localhost:3000 --count 4 --verbose
 ```
 
 A bot is a player like any other: it joins through the game's WebSocket and plays by the same rules, and the server
-saves it with its level and gear, so it comes back as it left and grows from day to day. It hunts the camp that fits
+saves it with its level and gear, so it comes back as it left. It hunts the camp that fits
 its level, rests, drinks potions, and goes back to town to sell its loot, buy gear and potions, learn skills from the
 Sage and have its weapon upgraded. It walks around water, cliffs and scenery, takes a moment to react, says a line in
 the chat now and then, and takes a break of a few minutes every half hour or so (`--no-breaks` keeps them all in).
 
-The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at, and a role - how it treats other cats:
+The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at and the one it stops growing at - three of
+the ten stay beginners for good, and none outgrows its start by more than a few levels - and a role, how it treats
+other cats:
 
 | Role | Towards other cats |
 | --- | --- |
