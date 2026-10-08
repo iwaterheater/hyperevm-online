@@ -48,5 +48,5 @@ export function createWorld(scene, map, { onProgress = null } = {}) {
   // The height of the ground under a world point: everything that walks adds it to its own height.
   const heightAt = (x, z) => view.heightAt(x, z);
 
-  return { view, ready, update, collide, snapMood, heightAt };
+  return { view, lighting, ready, update, collide, snapMood, heightAt };
 }

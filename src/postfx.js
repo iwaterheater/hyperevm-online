@@ -9,7 +9,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 export function createComposer(renderer, scene, camera) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  composer.addPass(new UnrealBloomPass(renderer.getSize(new THREE.Vector2()), 0.4, 0.4, 1.0));
+  const bloom = new UnrealBloomPass(renderer.getSize(new THREE.Vector2()), 0.4, 0.4, 1.0);
+  composer.addPass(bloom);
   composer.addPass(new OutputPass());
   return {
     render() { composer.render(); },
@@ -24,5 +25,9 @@ export function createComposer(renderer, scene, camera) {
       return done;
     },
     setSize(w, h) { composer.setSize(w, h); },
+    // after renderer.setPixelRatio(): the buffers of the passes follow
+    setPixelRatio(ratio) { composer.setPixelRatio(ratio); },
+    // the bloom on or off; without it the frame is the scene and the tone mapping alone
+    setGlow(on) { bloom.enabled = !!on; },
   };
 }

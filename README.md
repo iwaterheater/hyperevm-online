@@ -46,17 +46,19 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
 | `M` | World map: the whole island with its relief, the zones and their level ranges, the boss lair, the monster camps tinted by how dangerous they are for this character, and the cats in sight. Hover a camp for its monsters. A click on the minimap opens it too |
+| `O` | Settings: sound on or off and its volume; the resolution the world is rendered at (low, medium, high), shadows, the glow of lamps and spells, grass and flowers. A change is at work at once and is remembered in the browser |
 | `H` / `F1` | Help: every control |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
 | `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
 | `T` | Trade (stand next to the Trader in town): buy potions and gear, sell anything from the bag |
 | `Enter` | Open chat / send message |
-| `N` | Mute sound |
 
-The screen itself shows little: the cat's name, class, level, health and mana in the top-left corner, the minimap - and nothing but the minimap - in the top-right one, and the action bar at the lower edge. **Experience** is the thin line under the ten slots of the action bar, with a mark at every tenth; it lights up when experience comes in, and hovering it tells the level and the numbers. Everything else lives in the window it belongs to: gold in the inventory, the Trader's window and the status window; skill points in the skill book; the weapon's upgrade level in the status window and in the Blacksmith's line; how many cats are online at the foot of the Help window.
+The screen: in the top-left corner the cat's frame - its portrait in a laurel ring with the level on a badge, and beside it the name, the level and class, health and mana. In the top-right one the row of window buttons, under it the minimap in its gold ring - north is up, the arrow is the cat and points where it looks, a skull marks the boss lair, a house the town, and its `+` and `−` show less or more of the surroundings - and under that the name of the place the cat is in and where it stands. The chat is in the lower-left corner: the last lines, a line to write on (`Enter`, or a click on it) and two tabs - General shows everything, System only what the game itself said. The action bar lies at the lower edge, and in the lower-right corner is a pad for the mouse: the attack, the jump, the next target, and the dash once the cat knows one. **Experience** is the gold line under the ten slots of the action bar, with its numbers below it; it lights up when experience comes in. Everything else lives in the window it belongs to: gold in the inventory, the Trader's window and the status window; skill points in the skill book; the weapon's upgrade level in the status window and in the Blacksmith's line; how many cats are online at the foot of the Help window.
 
-The windows also open from the strip of buttons under the minimap: Character, Inventory, Skills, World map, Help - and Trader while he is in reach. A button is lit while its window is open, and the Skills button wears a number while there are that many skills the unspent skill points can pay for. On a screen narrower than 1820 pixels one window is open at a time, in the middle between the chat and the minimap; a wider one shows the inventory beside the status window or the Trader's list.
+The windows also open from the buttons at the right edge: Character, Inventory, Skills and Map in the row over the minimap - and Shop while the Trader is in reach - Settings and Help under it. A button is lit while its window is open, and the Skills button wears a number while there are that many skills the unspent skill points can pay for. On a screen narrower than 1820 pixels one window is open at a time, in the middle between the chat and the minimap; a wider one shows the inventory beside the status window or the Trader's list.
+
+The pictures of the HUD - the frame, the portrait, the ring of the minimap, its buttons and landmarks - are cut out of two painted sheets, `art/hud-atlas.png` and `art/minimap-atlas.png`, by `python3 tools/build-hud.py` into `assets/ui/hud/`.
 
 ### Action bar
 

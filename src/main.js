@@ -10,6 +10,7 @@ import { createComposer } from './postfx.js';
 import { createFx } from './fx.js';
 import { skillIcon, itemIcon, ATTACK_ICON, ICON_FILES } from './icons.js';
 import { createWorldMap } from './worldmap.js';
+import { SETTINGS_KEY, DEFAULT_SETTINGS, cleanSettings, pixelRatio, loudness } from './settings.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   ATTACK_WINDUP, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
@@ -46,6 +47,9 @@ function writeStore(area, key, value) {
     return true;
   } catch { return false; }
 }
+
+// What this player has set in the settings window; the window itself is further down, with the other windows.
+const settings = cleanSettings(readJson('localStorage', SETTINGS_KEY));
 
 // Play mode (/?play=1) is how the map editor tries a map out: no menu, and a made-up character that the server grants
 // only to whoever may edit the map. The editor leaves its request in storage: { id, at: [x, z] | null, lvl, cls, god, speed }.
@@ -84,11 +88,14 @@ if (autoJoin) $('menu').classList.add('hidden');
 loading.step('engine');   // three.js and the game's modules are in: this line runs
 // the kinds of monster on a map that are drawn from a file of their own (src/monster.js)
 const monstersOf = (m) => [...new Set(m.spawns.flatMap((s) => Object.keys(s.types)))].filter((kind) => MONSTER_KINDS.includes(kind));
-loading.expect({ map: 1, cat: 1, effects: 1, monsters: SKELETON_FILES, treasure: 3, icons: ICON_FILES.length });
-// the pictures of the action bar and the bag: fetched now, so no slot is ever an empty square
-for (const file of ICON_FILES) {
-  loading.track('icons', new Promise((resolve, reject) => { const img = new Image(); img.onload = resolve; img.onerror = reject; img.src = `./${file}`; }));
-}
+// the pictures the HUD is made of (assets/ui/hud, cut from the painted sheets by tools/build-hud.py)
+const HUD_PICTURES = ['frame', 'portrait-ring', 'portrait', 'shield', 'radar-ring', 'zoom-in', 'zoom-out', 'zoom-in-lit', 'zoom-out-lit', 'skull', 'chest', 'house'];
+const hudPicture = {};   // name -> Image, for what is drawn on a canvas
+loading.expect({ map: 1, cat: 1, effects: 1, monsters: SKELETON_FILES, treasure: 3, icons: ICON_FILES.length + HUD_PICTURES.length });
+// the pictures of the action bar, the bag and the HUD: fetched now, so no slot is ever an empty square
+const fetchPicture = (url) => new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = url; });
+for (const file of ICON_FILES) loading.track('icons', fetchPicture(`./${file}`));
+for (const name of HUD_PICTURES) loading.track('icons', fetchPicture(`./assets/ui/hud/${name}.png`).then((img) => { hudPicture[name] = img; }));
 
 // The world is a data file: everything below is built from it.
 let map, mapRev, editorInfo = { enabled: false, canSave: false, tokenRequired: false };
@@ -122,7 +129,7 @@ function showLoadFailure() {
 // ---------------------------------------------------------------- renderer
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(pixelRatio(settings.resolution, devicePixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -144,6 +151,17 @@ addEventListener('resize', () => {
 
 const world = createWorld(scene, map, { onProgress: loading.counter('scenery') });
 world.ready.catch(console.error);
+
+// The graphics settings, put to work: at the start (before the loading screen compiles the shaders, so that it
+// compiles the ones this player will see) and whenever the settings window changes one.
+function applySettings() {
+  const ratio = pixelRatio(settings.resolution, devicePixelRatio);
+  if (renderer.getPixelRatio() !== ratio) { renderer.setPixelRatio(ratio); composer.setPixelRatio(ratio); }
+  composer.setGlow(settings.glow);
+  world.lighting.setShadows(settings.shadows);
+  world.view.setVisible('foliage', settings.grass);
+}
+applySettings();
 
 // The world has hills, the server does not: positions on the wire are x and z. Whatever stands, flies or is aimed here
 // keeps its own height ABOVE the ground and adds groundY() where it is drawn; on a flat map that is 0 everywhere.
@@ -216,9 +234,10 @@ function makeBar(parent, y, width, color) {
 
 // ---------------------------------------------------------------- audio
 
-let actx = null, muted = false;
+let actx = null;
 function sfx(freq, dur = 0.1, type = 'square', vol = 0.06, slide = 0) {
-  if (!actx || muted) return;
+  vol *= loudness(settings);
+  if (!actx || !vol) return;
   const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
   o.type = type;
   o.frequency.setValueAtTime(freq, t);
@@ -499,8 +518,25 @@ function chatLine(name, text, sys) {
   div.append(text);
   const log = $('chatLog');
   log.append(div);
-  while (log.children.length > 9) log.firstChild.remove();
+  while (log.children.length > 40) log.firstChild.remove();   // more than both tabs can show
 }
+
+// What is written on the chat's line goes out; either way the keyboard is the game's again.
+function sendChat() {
+  const input = $('chatInput');
+  if (input.value.trim()) send({ t: 'c', m: input.value });
+  input.value = '';
+  input.blur();
+}
+$('chatInput').addEventListener('focus', () => keys.clear());   // a key held while the line was clicked would stay down
+$('chatSend').addEventListener('click', () => { if (state === 'playing') sendChat(); });
+$('chatTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('button');
+  if (!tab) return;
+  for (const b of $('chatTabs').children) b.classList.toggle('on', b === tab);
+  $('chat').classList.toggle('sys', tab.dataset.tab === 'sys');
+  tab.blur();
+});
 
 // ---------------------------------------------------------------- network
 
@@ -947,6 +983,12 @@ function nearbyMobs(range) {
   return list.sort((a, b) => a[0] - b[0]).map((e) => e[1]);
 }
 
+// Tab: the next monster, nearest first.
+function nextTarget() {
+  const list = nearbyMobs(40);
+  if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
+}
+
 function attackKey() {
   if (!targetId) setTarget(nearbyMobs(26)[0] || 0, true);
   else if (attacking) attacking = false;
@@ -959,21 +1001,12 @@ addEventListener('keydown', (e) => {
   if (e.code === 'Enter') {
     if (state === 'menu') { connect(); return; }
     if (state !== 'playing') return;
-    const input = $('chatInput');
-    if (document.activeElement === input) {
-      if (input.value.trim()) send({ t: 'c', m: input.value });
-      input.value = '';
-      input.style.display = 'none';
-      input.blur();
-    } else {
-      input.style.display = 'block';
-      input.focus();
-      keys.clear();
-    }
+    if (document.activeElement === $('chatInput')) sendChat();
+    else $('chatInput').focus();
     return;
   }
   if (typing()) {
-    if (e.code === 'Escape') { $('chatInput').style.display = 'none'; $('chatInput').blur(); }
+    if (e.code === 'Escape') $('chatInput').blur();
     return;
   }
   if (state !== 'playing') return;
@@ -982,12 +1015,9 @@ addEventListener('keydown', (e) => {
   keys.add(e.code);
   fresh.add(e.code);
   if (e.code === 'Space') { e.preventDefault(); jump(); }
-  if (e.code === 'Tab') {   // next monster, nearest first
-    const list = nearbyMobs(40);
-    if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
-  }
+  if (e.code === 'Tab') nextTarget();
   if (e.code === 'Escape') {
-    if (mapOpen) toggleMap(false); else if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
+    if (settingsOpen) toggleSettings(false); else if (mapOpen) toggleMap(false); else if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
     else if (bookOpen) toggleBook(false); else if (sheetOpen) toggleSheet(false);
     else setTarget(0, false);
   }
@@ -999,7 +1029,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') tradeKey();
   if (e.code === 'KeyH' || e.code === 'F1') toggleHelp();
   if (e.code === 'KeyM') toggleMap();
-  if (e.code === 'KeyN') { muted = !muted; notice(muted ? 'Sound off' : 'Sound on'); }
+  if (e.code === 'KeyO') toggleSettings();
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => { keys.clear(); cam.drag = null; endDrag(); });
@@ -1458,7 +1488,9 @@ let barKey = null, barSlots = [];
 const xpBar = el('div'), xpFill = el('i');
 xpBar.id = 'xpbar';
 xpFill.id = 'xpFill';
-xpBar.append(el('div', 'track'));
+const xpText = el('div');
+xpText.id = 'xpText';
+xpBar.append(el('div', 'track'), xpText);
 xpBar.firstChild.append(xpFill);
 const xpShare = () => stats.xp / xpNext(stats.level) * 100;
 const xpLine = () => `Level ${stats.level} · ${stats.xp.toLocaleString('en-US')} / ${xpNext(stats.level).toLocaleString('en-US')} XP (${xpShare().toFixed(1)} %)`;
@@ -1598,14 +1630,14 @@ const PAIRS = matchMedia('(min-width: 1720px)');
 PAIRS.addEventListener('change', () => { if (!PAIRS.matches && (storeOpen || sheetOpen)) toggleBag(false); });
 let bookOpen = false, bookKey = null, helpOpen = false;
 function toggleBook(open = !bookOpen) {
-  if (open) { toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); }
+  if (open) { toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); toggleSettings(false); }
   bookOpen = open;
   bookKey = null;
   $('book').classList.toggle('on', open);
   if (!open && tipAnchor && $('book').contains(tipAnchor)) hideTip();
 }
 function toggleHelp(open = !helpOpen) {
-  if (open) { toggleBook(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); }
+  if (open) { toggleBook(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); toggleSettings(false); }
   helpOpen = open;
   $('help').classList.toggle('on', open);
 }
@@ -1617,7 +1649,7 @@ const THREAT = [[5, '#ff5a6a', 'deadly'], [3, '#ffa24d', 'hard'], [-2, '#fff3b0'
 const threat = (lvl) => THREAT.find(([above]) => lvl - stats.level >= above)[1];
 let mapOpen = false, worldMap = null, mapHover = null;
 function toggleMap(open = !mapOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleSettings(false); }
   mapOpen = open;
   $('worldmap').classList.toggle('on', open);
   if (open) {
@@ -1639,6 +1671,39 @@ $('mapLegend').append('Camps', ...[...THREAT].reverse().map(([, color, word]) =>
   item.style.setProperty('--tint', color);
   return item;
 }));
+// ---- settings: sound and graphics. A change is at work at once and is kept in the browser; the controls give the
+// keyboard back as soon as they have been used, or the arrows that walk the cat would also move the volume.
+let settingsOpen = false;
+function toggleSettings(open = !settingsOpen) {
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); }
+  settingsOpen = open;
+  $('settings').classList.toggle('on', open);
+  if (open) showSettings();
+}
+function showSettings() {
+  for (const box of $('settings').querySelectorAll('input[type=checkbox]')) box.checked = settings[box.dataset.set];
+  $('setVolume').value = settings.volume;
+  $('setVolume').disabled = !settings.sound;
+  $('setVolumeText').textContent = `${settings.volume}%`;
+  for (const b of $('setResolution').children) b.classList.toggle('on', b.dataset.v === settings.resolution);
+}
+function changeSettings(change) {
+  Object.assign(settings, cleanSettings({ ...settings, ...change }));
+  writeStore('localStorage', SETTINGS_KEY, JSON.stringify(settings));
+  applySettings();
+  showSettings();
+}
+for (const box of $('settings').querySelectorAll('input[type=checkbox]')) {
+  box.addEventListener('change', () => { changeSettings({ [box.dataset.set]: box.checked }); box.blur(); });
+}
+$('setVolume').addEventListener('input', () => changeSettings({ volume: Number($('setVolume').value) }));
+$('setVolume').addEventListener('change', () => { $('setVolume').blur(); sfx(660, 0.12, 'triangle', 0.06, 200); });   // how loud that is
+$('setResolution').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) { changeSettings({ resolution: b.dataset.v }); b.blur(); }
+});
+$('setReset').addEventListener('click', () => { changeSettings(DEFAULT_SETTINGS); $('setReset').blur(); });
+
 
 // The skill book lists everything the class can learn. Buying is only possible next to a Sage - and a map need not have one.
 const hasSage = npcsOf(map, 'sage').length > 0;
@@ -1803,7 +1868,7 @@ function itemTip(id, hint, worn = false) {
 
 let bagOpen = false, bagKey = null, bagCds = [], bagTab = 'all', statsKey = null;
 function toggleBag(open = !bagOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); toggleMap(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleMap(false); toggleSettings(false); }
   if (open && !PAIRS.matches) { toggleSheet(false); toggleStore(false); }
   bagOpen = open;
   bagKey = statsKey = null;
@@ -2022,7 +2087,7 @@ function drawDoll(dt) {
 let storeOpen = false, storeTab = 'buy', storeKey = null;
 const hasTrader = npcsOf(map, 'trader').length > 0;
 function toggleStore(open = !storeOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleMap(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleMap(false); toggleSettings(false); }
   storeOpen = open;
   storeKey = null;
   $('store').classList.toggle('on', open);
@@ -2091,27 +2156,30 @@ function renderStore() {
 
 let sheetOpen = false, sheetKey = null;
 function toggleSheet(open = !sheetOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); toggleStore(false); toggleMap(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleStore(false); toggleMap(false); toggleSettings(false); }
   if (open && !PAIRS.matches) toggleBag(false);
   sheetOpen = open;
   sheetKey = null;
   $('sheet').classList.toggle('on', open);
 }
 
-// ---- the strip of window buttons under the radar: a click does what the key does, and a button is lit while its
-// window is open. The Trader's button is there only while he is in reach, like his key.
+// ---- the window buttons: a row over the radar, each with its name under its sign, and a column of plain ones (`side`)
+// under it. A click does what the key does, and a button is lit while its window is open. The Trader's button is
+// there only while he is in reach, like his key.
 const MENU = [
+  { name: 'Shop', key: 'T', toggle: () => tradeKey(), isOpen: () => storeOpen, near: 'trader',
+    icon: '<path d="M8 7v-1a4 4 0 018 0v1h3.200l1.300 13.500h-17l1.300-13.500zm2 0h4v-1a2 2 0 00-4 0zm-1.500 3.500a1.200 1.200 0 100 2.400 1.200 1.200 0 000-2.400zm7 0a1.200 1.200 0 100 2.400 1.200 1.200 0 000-2.400z" fill-rule="evenodd"/>' },
   { name: 'Character', key: 'C', toggle: () => toggleSheet(), isOpen: () => sheetOpen,
     icon: '<circle cx="12" cy="7.500" r="4.500"/><path d="M3.500 21.500a8.500 8.500 0 0117 0z"/>' },
   { name: 'Inventory', key: 'I', toggle: () => toggleBag(), isOpen: () => bagOpen,
     icon: '<path d="M9 2h6a2 2 0 012 2v2h-2v-2h-6v2h-2v-2a2 2 0 012-2z"/><path d="M5 7h14a2 2 0 012 2v10.500a2 2 0 01-2 2h-14a2 2 0 01-2-2v-10.500a2 2 0 012-2zM9.500 11v3.500h5v-3.500z" fill-rule="evenodd"/>' },
   { name: 'Skills', key: 'K', toggle: () => toggleBook(), isOpen: () => bookOpen,
     icon: '<path d="M2.500 4.500c3-1.200 6-1.200 8.500.500v15c-2.500-1.700-5.500-1.700-8.500-.500zM21.500 4.500c-3-1.200-6-1.200-8.500.500v15c2.500-1.700 5.500-1.700 8.500-.500z"/>' },
-  { name: 'Trader', key: 'T', toggle: () => tradeKey(), isOpen: () => storeOpen, near: 'trader',
-    icon: '<path d="M12 2.500a9.500 9.500 0 100 19 9.500 9.500 0 000-19zM11 6h2v1.300c1.600.300 2.700 1.300 2.800 2.900h-2c-.100-.700-.700-1.200-1.800-1.200-1 0-1.700.400-1.700 1.100 0 .600.500.900 2 1.300 2.300.500 3.700 1.300 3.700 3.200 0 1.600-1.200 2.700-3 3v1.400h-2v-1.400c-1.900-.300-3.100-1.500-3.200-3.300h2c.100.900.900 1.500 2.100 1.500 1.200 0 1.900-.500 1.900-1.200s-.500-1-2.200-1.400c-2.200-.500-3.500-1.300-3.500-3.100 0-1.500 1.100-2.600 2.900-2.900z" fill-rule="evenodd"/>' },
-  { name: 'World map', key: 'M', toggle: () => toggleMap(), isOpen: () => mapOpen,
+  { name: 'Map', key: 'M', toggle: () => toggleMap(), isOpen: () => mapOpen,
     icon: '<path d="M2.500 6l6-2.500v14.500l-6 2.500zM9.500 3.500l5 2.500v14.500l-5-2.500zM15.500 6l6-2.500v14.500l-6 2.500z"/>' },
-  { name: 'Help', key: 'H', toggle: () => toggleHelp(), isOpen: () => helpOpen,
+  { name: 'Settings', key: 'O', side: true, toggle: () => toggleSettings(), isOpen: () => settingsOpen,
+    icon: '<path d="M10.300 2h3.400l.500 2.600 1.700.700 2.200-1.500 2.400 2.400-1.500 2.200.700 1.700 2.600.500v3.400l-2.600.500-.700 1.700 1.500 2.200-2.400 2.400-2.200-1.500-1.700.700-.500 2.600h-3.400l-.500-2.600-1.700-.700-2.200 1.500-2.400-2.400 1.500-2.200-.700-1.700-2.600-.500v-3.400l2.600-.500.700-1.700-1.500-2.200 2.400-2.400 2.200 1.500 1.700-.700zM12 8.500a3.500 3.500 0 100 7 3.500 3.500 0 000-7z" fill-rule="evenodd"/>' },
+  { name: 'Help', key: 'H', side: true, toggle: () => toggleHelp(), isOpen: () => helpOpen,
     icon: '<path d="M12 2.500a9.500 9.500 0 100 19 9.500 9.500 0 000-19zM12 6c2.300 0 4 1.500 4 3.500 0 1.500-.800 2.300-1.900 3-.900.600-1.100.900-1.100 1.800h-2.200c0-1.700.500-2.500 1.700-3.300.900-.600 1.200-.900 1.200-1.500 0-.800-.700-1.400-1.700-1.400s-1.700.600-1.800 1.600h-2.200c.100-2.200 1.700-3.700 4-3.700zM10.700 15.500h2.600v2.500h-2.600z" fill-rule="evenodd"/>' },
 ];
 // How many skills the character could buy the next rank of right now, were it standing before the Sage: the Skills
@@ -2123,10 +2191,10 @@ const affordable = () => skillsFor(stats.cls).filter((id) => {
 for (const m of MENU) {
   m.node = el('div', 'mbtn');
   m.badge = el('span', 'badge');
-  m.node.append(glyph(m.icon), el('kbd', '', m.key), m.badge);
+  m.node.append(glyph(m.icon), ...(m.side ? [] : [el('span', '', m.name)]), m.badge);
   m.node.addEventListener('click', () => { if (state === 'playing') m.toggle(); });
   tipOn(m.node, () => [el('b', 'name', m.name), ...(m.badge.textContent ? [el('div', '', m.note)] : []), el('div', 'hint', m.key === 'H' ? 'Key H or F1' : `Key ${m.key}`)]);
-  $('menubar').append(m.node);
+  $(m.side ? 'sidebar' : 'menubar').append(m.node);
 }
 let badgeKey = null;
 
@@ -2164,14 +2232,23 @@ function renderSheet() {
 
 let xpSeen = null;   // the level and the experience the bar showed last, to tell when more has come in
 function updateHud() {
-  $('who').textContent = `${names.get(myId) || 'Cat'} · ${CLASSES[stats.cls].name} ${stats.level}`;
+  const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
+  say($('who'), names.get(myId) || 'Cat');
   $('who').style.color = stats.st ? PVP_COLORS[stats.st] : '';   // the colour the others see over this cat
+  say($('whoLevel'), `Lv. ${stats.level}`);
+  say($('whoClass'), CLASSES[stats.cls].name);
+  say($('levelBadge'), String(stats.level));
   $('hpFill').style.width = `${stats.hp / stats.maxHp * 100}%`;
-  $('hpText').textContent = `${stats.hp} / ${stats.maxHp}`;
+  say($('hpText'), `${stats.hp} / ${stats.maxHp}`);
   $('mpFill').style.width = `${stats.mp / stats.maxMp * 100}%`;
-  $('mpText').textContent = `${stats.mp} / ${stats.maxMp}`;
+  say($('mpText'), `${stats.mp} / ${stats.maxMp}`);
+  say($('placeName'), regionAt(map, me.x, me.z).name);
+  say($('placeAt'), `${me.x.toFixed(1)}, ${me.z.toFixed(1)}`);
+  $('padAttack').classList.toggle('on', attacking);
+  $('padDash').style.display = stats.skills.shadow_step > 0 ? '' : 'none';
   if (!xpSeen || xpSeen.level !== stats.level || xpSeen.xp !== stats.xp) {
     xpFill.style.width = `${xpShare()}%`;
+    xpText.textContent = `EXP ${stats.xp.toLocaleString('en-US')} / ${xpNext(stats.level).toLocaleString('en-US')} (${Math.floor(xpShare())}%)`;
     if (xpSeen && (stats.level > xpSeen.level || (stats.level === xpSeen.level && stats.xp > xpSeen.xp))) {
       xpBar.classList.remove('gain');
       void xpBar.offsetWidth;   // lets the animation start over when the next kill follows at once
@@ -2193,7 +2270,6 @@ function updateHud() {
   renderBar();
   const learned = activeSkills(stats.cls, stats.skills);
   const potionWait = local.potionAt - time, potionCd = `${Math.max(0, Math.min(1, potionWait / POTION_CD)) * 100}%`;
-  const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
   for (const { id, k, it, node, note, cd, left } of barSlots) {
     if (k) {
       const wait = (local.cds[id] || 0) - time, known = learned.includes(id);
@@ -2264,17 +2340,30 @@ function updateHud() {
   if ($('devbar').classList.contains('on')) $('devPos').textContent = `${me.x.toFixed(1)}, ${me.z.toFixed(1)} · ${regionAt(map, me.x, me.z).name}`;
 }
 
-// Radar: the surroundings of the player; far landmarks stick to the rim.
+// Radar: the surroundings of the player; far landmarks stick to the rim. The gold ring around it is a picture that
+// lies over the canvas (index.html), so the canvas is drawn to its very edge. North is up, like the world map.
 const mapCtx = $('minimap').getContext('2d');
-const RADAR_R = 75;
+const RADAR_RANGES = [45, 75, 120];   // how far the radar sees, in world units: its "+" and "−" step through these
+let radarZoom = 1;
 const SHORE = '#d9cb9a';   // the edge of the island: the sand of its beach
+function zoomRadar(step) {
+  radarZoom = Math.max(0, Math.min(RADAR_RANGES.length - 1, radarZoom + step));
+  $('zoomIn').disabled = radarZoom === 0;
+  $('zoomOut').disabled = radarZoom === RADAR_RANGES.length - 1;
+  drawMinimap();
+}
+$('zoomIn').addEventListener('click', () => { zoomRadar(-1); $('zoomIn').blur(); });
+$('zoomOut').addEventListener('click', () => { zoomRadar(1); $('zoomOut').blur(); });
 function drawMinimap() {
-  const g = mapCtx, C = 144, RIM = 136, S = RIM / RADAR_R;
-  g.clearRect(0, 0, 288, 288);
+  const g = mapCtx, SIZE = 420, C = SIZE / 2, RIM = C - 12, S = RIM / RADAR_RANGES[radarZoom];
+  g.clearRect(0, 0, SIZE, SIZE);
   g.save();
-  g.beginPath(); g.arc(C, C, C, 0, 7); g.clip();   // to the very edge: the ring around it is the canvas's border
-  g.fillStyle = 'rgba(4, 20, 17, .85)';
-  g.fillRect(0, 0, 288, 288);
+  g.beginPath(); g.arc(C, C, C, 0, 7); g.clip();
+  const ground = g.createRadialGradient(C, C, 0, C, C, C);
+  ground.addColorStop(0, 'rgba(14, 44, 34, .94)');
+  ground.addColorStop(1, 'rgba(5, 22, 17, .94)');
+  g.fillStyle = ground;
+  g.fillRect(0, 0, SIZE, SIZE);
 
   const ox = C - me.x * S, oz = C - me.z * S;   // world origin on the canvas
   // the outline of a region: a circle, or a polygon that closes itself
@@ -2286,10 +2375,10 @@ function drawMinimap() {
       g.closePath();
     }
   };
-  g.fillStyle = 'rgba(127, 232, 214, .35)';   // safe ground
+  g.fillStyle = 'rgba(96, 214, 232, .32)';   // safe ground
   for (const region of map.regions) if (region.safe) { trace(region.shape); g.fill('evenodd'); }
-  g.lineWidth = 3;
-  g.globalAlpha = 0.5;
+  g.lineWidth = 4;
+  g.globalAlpha = 0.55;
   for (const region of map.regions) {
     g.strokeStyle = regionColor(map, region);
     trace(region.shape);
@@ -2299,31 +2388,61 @@ function drawMinimap() {
   g.beginPath(); g.arc(ox, oz, map.radius * S, 0, 7); g.stroke();
   g.globalAlpha = 1;
 
-  const dot = (x, z, r, color, pin) => {
+  // where a world point is on the canvas; null beyond the rim, unless it is pinned to it
+  const place = (x, z, pin) => {
     let px = (x - me.x) * S, pz = (z - me.z) * S;
     const d = Math.hypot(px, pz);
-    if (d > RIM - 6) {
-      if (!pin) return;
-      px *= (RIM - 6) / d; pz *= (RIM - 6) / d;
+    if (d > RIM - 8) {
+      if (!pin) return null;
+      px *= (RIM - 8) / d; pz *= (RIM - 8) / d;
     }
-    g.fillStyle = color;
-    g.beginPath(); g.arc(C + px, C + pz, r, 0, 7); g.fill();
+    return [C + px, C + pz];
   };
-  for (const v of mobViews.values()) dot(v.x, v.z, v.def.r * 4 + 2, css(v.def.color));
-  for (const gem of gemViews.values()) dot(gem.mesh.position.x, gem.mesh.position.z, 3, '#ffd76a');
+  const dot = (x, z, r, color, pin) => {
+    const at = place(x, z, pin);
+    if (!at) return;
+    g.fillStyle = color;
+    g.beginPath(); g.arc(at[0], at[1], r, 0, 7); g.fill();
+  };
+  // a landmark: its picture, `h` canvas pixels high
+  const mark = (name, x, z, h, pin) => {
+    const at = place(x, z, pin), img = hudPicture[name];
+    if (!at || !img) return;
+    const w = h * img.width / img.height;
+    g.drawImage(img, at[0] - w / 2, at[1] - h / 2, w, h);
+  };
+  for (const v of mobViews.values()) dot(v.x, v.z, v.def.r * 4 + 3.5, css(v.def.color));
+  for (const gem of gemViews.values()) dot(gem.mesh.position.x, gem.mesh.position.z, 4.5, '#ffd76a');
   chestViews.forEach((v, i) => {
     const c = map.chests[i];
-    if (c && !v.open) dot(c.x, c.z, c.big ? 8 : 5, '#ffb020');
+    if (c && !v.open) mark('chest', c.x, c.z, c.big ? 30 : 22);
   });
-  for (const spawn of map.spawns) if (hasBoss(spawn)) dot(spawn.x, spawn.z, 8, '#ff2244', true);
-  dot(map.start.x, map.start.z, 8, '#7fe8d6', true);          // town
-  for (const a of others.values()) dot(a.x, a.z, 6, a.st ? PVP_COLORS[a.st] : '#ffffff');
-  g.fillStyle = '#ffffff';
-  g.beginPath(); g.arc(C, C, 7, 0, 7); g.fill();
-  g.fillStyle = '#35523f';
-  g.beginPath(); g.arc(C, C, 4, 0, 7); g.fill();
+  for (const spawn of map.spawns) if (hasBoss(spawn)) mark('skull', spawn.x, spawn.z, 34, true);
+  mark('house', map.start.x, map.start.z, 34, true);          // town
+  g.lineWidth = 2;
+  g.strokeStyle = 'rgba(4, 16, 14, .85)';
+  for (const a of others.values()) {
+    const at = place(a.x, a.z);
+    if (!at) continue;
+    g.fillStyle = a.st ? PVP_COLORS[a.st] : '#ffffff';
+    g.beginPath(); g.arc(at[0], at[1], 7, 0, 7); g.fill(); g.stroke();
+  }
+  // the player: an arrow that points where the cat looks
+  g.translate(C, C);
+  g.rotate(Math.atan2(Math.sin(me.yaw), -Math.cos(me.yaw)));   // 0 = north, clockwise
+  g.beginPath(); g.moveTo(0, -23); g.lineTo(17, 18); g.lineTo(0, 10); g.lineTo(-17, 18); g.closePath();
+  g.fillStyle = '#ffffff'; g.fill();
+  g.lineJoin = 'round';
+  g.lineWidth = 3; g.strokeStyle = '#0a1412'; g.stroke();
   g.restore();
 }
+
+// ---- the pad in the corner: what the keys do, for the mouse
+$('padAttack').addEventListener('click', () => { if (state === 'playing') attackKey(); $('padAttack').blur(); });
+$('padJump').addEventListener('click', () => { if (state === 'playing') jump(); $('padJump').blur(); });
+$('padTarget').addEventListener('click', () => { if (state === 'playing') nextTarget(); $('padTarget').blur(); });
+// a dash is a skill cast by a held key: the click holds Shift for one frame, as a click on a slot holds its key
+$('padDash').addEventListener('click', () => { if (state === 'playing') for (const set of [keys, fresh, taps]) set.add('ShiftLeft'); $('padDash').blur(); });
 
 const CAM_CLEAR = 0.6;   // the camera stays at least this high above the ground under it
 function updateCamera(dt) {
@@ -2394,7 +2513,7 @@ loading.finish({
 });
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, toggleBook, toggleSheet, toggleHelp, toggleMap, setBar, get doll() { return doll; }, get sheet() { return sheet; }, get worldMap() { return worldMap; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, toggleBook, toggleSheet, toggleHelp, toggleMap, toggleSettings, settings, setBar, get doll() { return doll; }, get sheet() { return sheet; }, get worldMap() { return worldMap; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
 
 // A play-test, and a page that has reloaded itself for a saved map, go straight in.
 if (autoJoin) {
