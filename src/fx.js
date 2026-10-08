@@ -415,8 +415,8 @@ export function createFx(scene, { groundY, layOnGround, burst }) {
     update, status, aim, hideAim,
     // the server accepted a skill: everything it shows but its projectile, which the game flies itself
     cast(id, k, a, tv, ev) { (SHOWS[id] || KINDS[k.kind])?.(k, a, tv, ev); },
-    // the swing of a plain attack: 0 and 1 are the two horizontal sweeps, 2 the chop
-    swing(x, z, dx, dz, kind) { slash(x, z, dx, dz, kind === 2 ? chop : { mirror: kind === 1 }); },
+    // the swing of a plain attack: 0 and 1 are the two horizontal sweeps, 2 the chop; `delay` is the wind-up before it
+    swing(x, z, dx, dz, kind, delay = 0) { slash(x, z, dx, dz, kind === 2 ? { ...chop, delay } : { mirror: kind === 1, delay }); },
     // A projectile of the kind `fx`, put into the scene: move it, `point` it at where it flies and `drop` it at the end.
     bolt(fx, size = 1, tint = WHITE) {
       const m = matsOf(tint, { k: 1.15, kGlow: 2.2 }), root = new THREE.Group(), o = make((BOLTS[fx] || BOLTS.arcane)[0], m);

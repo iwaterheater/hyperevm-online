@@ -1,11 +1,11 @@
 # HyperCat Online
 
 A small open-world browser MMORPG starring a chibi cat in a hoodie, modelled on classic target-based MMORPGs.
-Players share one seamless world, pick a class, hunt skeletons together, level up, learn skills, choose a profession, and find, buy and wear weapons and armour.
+Players share one seamless world, pick a class, hunt slimes, wolves, orcs, demons and skeletons together, level up, learn skills, choose a profession, and find, buy and wear weapons and armour.
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
-- **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0)
-- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0); the King's fortress, ruins, chests and coins from [KayKit Dungeon Remastered](https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0) — all by Kay Lousberg (CC0)
+- **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0); slimes, orcs, demons, ghosts and the other creatures from [Ultimate Monsters](https://quaternius.com/packs/ultimatemonsters.html) and [Cute Animated Monsters](https://quaternius.com/packs/cutemonsters.html) by Quaternius (CC0); the wolf, fox, bull, stag, alpaca, spider and raptor are Quaternius's animals (CC0) as the open-source [World of ClaudeCraft](https://github.com/levy-street/world-of-claudecraft) ships them
+- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0); the King's fortress, ruins, chests and coins from [KayKit Dungeon Remastered](https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0); the meadow's trees, bushes, rocks and grass from the free part of the [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest) — all by Kay Lousberg (CC0)
 - **Townsfolk:** guards, blacksmith, sage and trader from the [KayKit Character Pack: Adventurers](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) by Kay Lousberg (CC0)
 - **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP, loot, items and gold
 
@@ -45,17 +45,20 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `I` | Inventory: the character's numbers, the cat with its six equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
 | `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
-| `H` / `F1` | Help: every control, and the graphics quality - Auto, Low, Medium or High - with the frame rate |
+| `M` | World map: the whole island with its relief, the zones and their level ranges, the boss lair, the monster camps tinted by how dangerous they are for this character, and the cats in sight. Hover a camp for its monsters. A click on the minimap opens it too |
+| `O` | Settings: sound on or off and its volume; the resolution the world is rendered at (low, medium, high), shadows, the glow of lamps and spells, grass and flowers; Auto, which lowers those while the game runs slow; and the frame rate at the top edge. A change is at work at once and is remembered in the browser |
+| `H` / `F1` | Help: every control |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
 | `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
 | `T` | Trade (stand next to the Trader in town): buy potions and gear, sell anything from the bag |
 | `Enter` | Open chat / send message |
-| `M` | Mute sound |
 
-The screen itself shows little: the cat's name, class, level, health and mana in the top-left corner, the minimap - and nothing but the minimap - in the top-right one, and the action bar at the lower edge. **Experience** is the thin line under the ten slots of the action bar, with a mark at every tenth; it lights up when experience comes in, and hovering it tells the level and the numbers. Everything else lives in the window it belongs to: gold in the inventory, the Trader's window and the status window; skill points in the skill book; the weapon's upgrade level in the status window and in the Blacksmith's line; how many cats are online at the foot of the Help window.
+The screen: in the top-left corner the cat's frame - its portrait in a laurel ring with the level on a badge, and beside it the name, the level and class, health and mana. In the top-right one the row of window buttons, under it the minimap in its gold ring - north is up, the arrow is the cat and points where it looks, a skull marks the boss lair, a house the town, and its `+` and `−` show less or more of the surroundings - and under that the name of the place the cat is in and where it stands. The chat is in the lower-left corner: the last lines, a line to write on (`Enter`, or a click on it) and two tabs - General shows everything, System only what the game itself said. The action bar lies at the lower edge, and in the lower-right corner is a pad for the mouse: the attack, the jump, the next target, and the dash once the cat knows one. **Experience** is the gold line under the ten slots of the action bar, with its numbers below it; it lights up when experience comes in. Everything else lives in the window it belongs to: gold in the inventory, the Trader's window and the status window; skill points in the skill book; the weapon's upgrade level in the status window and in the Blacksmith's line; how many cats are online at the foot of the Help window.
 
-The windows also open from the strip of buttons under the minimap: Character, Inventory, Skills, Help - and Trader while he is in reach. A button is lit while its window is open, and the Skills button wears a number while there are that many skills the unspent skill points can pay for. On a screen narrower than 1820 pixels one window is open at a time, in the middle between the chat and the minimap; a wider one shows the inventory beside the status window or the Trader's list.
+The windows also open from the buttons at the right edge: Character, Inventory, Skills and Map in the row over the minimap - and Shop while the Trader is in reach - Settings and Help under it. A button is lit while its window is open, and the Skills button wears a number while there are that many skills the unspent skill points can pay for. On a screen narrower than 1820 pixels one window is open at a time, in the middle between the chat and the minimap; a wider one shows the inventory beside the status window or the Trader's list.
+
+The pictures of the HUD - the frame, the portrait, the ring of the minimap, its buttons and landmarks - are cut out of two painted sheets, `art/hud-atlas.png` and `art/minimap-atlas.png`, by `python3 tools/build-hud.py` into `assets/ui/hud/`.
 
 ### Action bar
 
@@ -71,20 +74,27 @@ Drag a learned skill from the skill book (`K`) or an item from the inventory (`I
 
 One continuous map with no loading screens between its zones. The world is a data file, `map/world.json`: the terrain, every tree and wall, the zones, the monster camps, the chests, the townsfolk and the point where new cats appear. It is built and changed in the [map editor](#map-editor); nothing of it is generated when the game starts.
 
-In the map that ships with the game, zones get harder the further you go from the town:
+The map that ships with the game is a long island with the town in its middle. The zones are patches of it, not rings, and they get harder the further you go from the town:
 
-| Zone | Distance from centre | Monster levels |
-| --- | --- | --- |
-| Hypercat Town | 0 – 24 | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon upgrades, the Trader's shop |
-| Green Meadows | 24 – 95 | 1 – 4 |
-| Graveyard Wastes | 95 – 175 | 5 – 9 |
-| Cursed Lands | 175 – 260 | 10 – 15 |
+| Zone | Where | Monster levels | Who lives there |
+| --- | --- | --- | --- |
+| Hypercat Town | The middle of the island | – | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon upgrades, the Trader's shop |
+| Green Meadows | Around the town | 1 – 4 | Slimes, Mushnubs, bunnies, chickens, pigs, pups, tabbies, pigeons, deer and stags, wolves and foxes, pandas, Armabees, a Stumpling and, rarely, the Mushroom King |
+| Graveyard Wastes | Beyond the meadows, to the north and west | 5 – 9 | Skeletons, Ghosts, Skull Wraiths, Hopping Skulls, Cave Bats, Giant Spiders, ninjas, Hex Blobs and Glubs |
+| Red Badlands | East | 6 – 10 | Cactoros, Prickles, orcs with their shamans and brutes, Sand Cyclopes, Crimson Dinos, Raptors, wolves, Wild Bulls with Alpacas, Alpakings, Sand Wyrmlings, Tribal Spirits |
+| Drowned Marsh | West | 7 – 10 | Bog Frogs, Fishmen, Snappers, Red Crabs, Gremlins, Giant Spiders, Monkrooses, Golelings, Marsh Hornets, Spiky Slimes |
+| Frostfang Peaks | The mountains of the north-west | 11 – 14 | Yetis, wolves, Snowballs, Frostlings, Penguins, Horned and Frost Birbs |
+| Cursed Lands | The rim of the island | 10 – 15 | Elite skeletons, Imps, Red Fiends, Blue Demons, Void and Antenna Aliens, Cthulhu Spawn, Raptors, Hywirls, Squidles, Dragonlings and Fire Drakes |
 
 The **Skeleton King** (level 18 boss) waits inside his walled fortress in the far north of the Cursed Lands. The minimap in the top-right corner always points to the town and to the boss lair.
 
 A zone is a region of the map: a circle or a polygon with a name, a level range, a lighting mood (meadow, graveyard, cursed) and, for a town, the "safe" flag. Where regions overlap, the one listed last in the file wins. The banner, the radar rings, the light and the place where monsters refuse to follow all come from the regions, so a new map changes them without a line of code.
 
 ### Monsters
+
+A monster is one of three kinds of fighter: it runs up and hits, it keeps its distance and shoots, or it is big, slow and hits hard. What a camp holds is written in the map, so any monster can be put anywhere in the [map editor](#map-editor); its strength comes from the level of the camp. How hard monsters are as a whole is one number, `MOB_POWER` in `src/shared.js`: every monster's health and blows are multiplied by it (now 2).
+
+Not every monster is out for blood. A name written in **red** over a monster's head means it goes for any cat it notices; a name in **white** means it minds its own business until somebody hurts it, and then fights back. The calm ones are the slimes, the Mushnub and the Toadstool, the farm and forest animals (bunnies, chickens, pigs, pups, tabbies, pigeons, deer, stags, foxes, alpacas, bulls, pandas, penguins), the Red Crab, the Bog Frog, the Snowball, the Monkroose and the Stumpling.
 
 | Type | Behaviour |
 | --- | --- |
@@ -93,6 +103,13 @@ A zone is a region of the map: a circle or a polygon with a name, a level range,
 | Skeleton Mage | Keeps its distance, gathers a spell in a ring of fire and throws a fireball that follows its target - jump over it, dash through it or step aside at the last moment |
 | Skeleton Warrior | Slow, tough, hits hard with an axe, drops extra gold |
 | Skeleton King | Boss; fires rings of orbs, respawns after 90 seconds |
+| Imp, Armabee, Skull Wraith, Wild Bunny, Wild Tabby, Angry Chicken, Shadow Ninja, Ninja Blob, Monkroose, Goleling, Glub, Sky Pigeon, Squidle, Chubby Chick, Young Deer, Red Fiend, Hopping Skull, Cave Bat, Marsh Hornet, Grey Wolf, Red Fox, Raptor | Fast and fragile: on you before you have turned round |
+| Green Slime, Pink Slime, Mushnub, Bog Frog, Cactoro, Orc Raider, Orc Whelp, Cactus Bandit, Stray Pup, Plump Pigeon, Snapper, Fishman, Crimson Dino, Horned Birb, Frost Birb, Snowball, Alpaking, Hywirl, Three-Eyed Blob, Prickle, Red Crab, Sand Cyclops, Gremlin, Toadstool, Panda, Penguin, Pink Pig, Frostling, Forest Stag, Alpaca | Ordinary fighters that come up and hit |
+| Tribal Shaman, Void Alien, Ghost, Dragonling, Void Sprout, Hex Blob, Glub Totem, Tribal Spirit, Alpaking Lord, Antenna Alien, Sheet Ghost, Cthulhu Spawn, Sand Wyrmling, Giant Spider | Keep their distance and shoot, like the Skeleton Mage |
+| Orc Brute, Yeti, Blue Demon, Mushroom King, Fire Drake | Slow, tough, hit hard, drop extra gold; the Fire Drake shoots as well |
+| Spiky Slime, Elder Mushnub, Armabee Queen, Goleling King, Stumpling, Wild Bull | Stronger kin of the small ones, with a little more gold |
+
+Seventy-seven of them are Quaternius's models; the game loads only the ones the map uses.
 
 ### Classes
 
@@ -307,6 +324,9 @@ art/              The Blender sources: the cat, its weapons and its armour (hype
 src/fx.js         What skills look like: Blender-made shapes (assets/fx/fx.glb) - bolts, ground circles, glyphs, flames, light - animated in code
 src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations
 assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
+src/monster.js    The other monsters: loads the Quaternius models a map uses and drives their animations
+assets/monsters/  Quaternius monsters and animals, one file a monster, with their CC0 license
+assets/forest/    KayKit forest trees, bushes, rocks and grass, with their CC0 license
 assets/medieval/  KayKit buildings, walls, trees, rocks and props, with their CC0 license
 assets/halloween/ KayKit graveyard models, with their CC0 license
 assets/dungeon/   KayKit fortress walls, pillars, chests and coins, with their CC0 license
@@ -325,6 +345,7 @@ src/shared.js     Constants, tables (monsters, classes, skills, items) and formu
 tools/bake-map.mjs      Wrote the first map/world.json from the old world generator; refuses to overwrite an edited map without --force
 tools/check-imports.mjs Checks every import and page reference of this bundler-less project (npm run check)
 tools/build-fx.py       Builds the skill-effect shapes in art/fx.blend and exports assets/fx/fx.glb; run inside Blender
+tools/import-monsters.mjs  Brings the Quaternius monsters and animals into assets/monsters/, keeping the five animations the game plays
 test/             Tests of the map format, the items, the action bar, the server and the editor's logic (npm test)
 data/             Saved player progress (created at runtime, git-ignored)
 ```
@@ -332,7 +353,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 ## How it works
 
 - The server simulates the world at 20 ticks per second and sends each player a snapshot of everything nearby. The client draws other cats and monsters walking in a straight line from one snapshot to the next, a twentieth of a second behind the server.
-- The graphics quality decides how many pixels are drawn (on a dense screen the full resolution is the dearest thing of all), whether there is bloom, how sharp the shadows are and how far the grass reaches. "Auto" starts in the middle and follows the frame rate: down when the game cannot hold 40 frames a second, up when it has room.
+- With Auto on in the settings, the game watches its own frame rate: when it cannot hold 40 frames a second it takes the graphics down a step - a lower resolution, then no shadows, no glow, the lowest resolution, no grass - and gives a step back when it has run at the screen's rate for a while. It never raises anything above what the player has set.
 - Monsters, projectile hits, damage, XP, gold, loot, chests, items and upgrades are decided by the server.
 - Items are one table, `ITEMS` in `src/shared.js`, used by the server, the client and the tests alike; `statsOf()` in the same file turns class, level, skills, buffs and equipment into combat stats, so the server's damage and the client's status window always agree.
 - Every item request — wear, take off, drink, buy, sell, destroy — names the stack by its place in the bag and by its item, and the server checks all of it: the stack is there, the level fits, the paws are free or what holds them fits into the bag (`wearItem()` in `src/shared.js` is the whole rule of one- and two-handed gear), the Trader is in reach, the gold and the room in the bag suffice, the cat is alive. A request that cannot be done is answered with a line the player sees; nothing changes on the client until the server says so.

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HyperCat Online</title>
 <style>
-  :root { --teal: #7fe8d6; --teal-dim: #2b8f80; --bg: #06110f; --gold: #ffd76a; }
+  :root { --teal: #7fe8d6; --teal-dim: #2b8f80; --bg: #06110f; --gold: #ffd76a; --plate: rgba(9, 20, 18, .8); --line: rgba(255, 255, 255, .14); }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: #e8fffa;
     font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif; user-select: none; }
@@ -17,34 +17,77 @@
   #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .3s;
     --win-top: calc(50% + 3px); --win-h: calc(100vh - 214px); }
   #hud.on { opacity: 1; visibility: visible; }
-  .panel { position: absolute; padding: 10px 14px; background: rgba(6, 24, 21, .6);
-    border: 1px solid rgba(127, 232, 214, .25); border-radius: 12px; backdrop-filter: blur(6px); }
-  #stats { top: 16px; left: 16px; width: 250px; }
-  /* the right edge: the minimap - nothing but the map, in a thin ring - and under it the strip of window buttons */
-  #right { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
-  #right .panel { position: relative; }
-  #minimap { display: block; width: 176px; height: 176px; border-radius: 50%; border: 1px solid rgba(127, 232, 214, .4);
-    box-shadow: 0 0 0 3px rgba(6, 24, 21, .45), 0 3px 12px rgba(0, 0, 0, .45); }
-  #menubar { display: flex; flex-direction: column; gap: 6px; padding: 6px; pointer-events: auto; }
-  .mbtn { position: relative; width: 40px; height: 40px; cursor: pointer; color: var(--teal); background: rgba(6, 24, 21, .7);
-    border: 2px solid rgba(127, 232, 214, .3); border-radius: 10px; }
-  .mbtn:hover { filter: brightness(1.3); }
-  .mbtn.on { color: #fff; border-color: #fff; box-shadow: 0 0 14px rgba(127, 232, 214, .8); }   /* its window is open */
-  .mbtn svg { position: absolute; inset: 5px; width: 26px; height: 26px; fill: currentColor; }
-  .mbtn kbd { position: absolute; right: 2px; bottom: 1px; margin: 0; padding: 0; font-size: 9px; line-height: 1; border: 0; background: none;
-    color: #e8fffa; opacity: .75; }
+  /* a window, and every dark plate of the HUD: near-black green under a hairline */
+  .panel { position: absolute; padding: 10px 14px; background: var(--plate); border: 1px solid var(--line); border-radius: 14px;
+    backdrop-filter: blur(6px); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); }
+
+  /* The player's frame, from the pieces of assets/ui/hud (tools/build-hud.py): the long plate with its leaves, over
+     its left end the portrait in the laurel ring, and on the plate the name, the level and class, health and mana.
+     The numbers place the pieces on each other: the plate is shown at 0.415 of its picture and the ring at 0.565, so
+     that the disc inside the ring (centre 92, 69; radius 55) covers the round end of the plate. */
+  #stats { position: absolute; top: 10px; left: 14px; width: 388px; height: 158px; }
+  #statsPlate { position: absolute; left: 67px; top: 16px; width: 318px; height: 110px; background: url(./assets/ui/hud/frame.png) 0 0 / 100% 100% no-repeat; }
+  #statsText { position: absolute; left: 96px; top: 11px; width: 196px; }
+  #who { font-size: 17px; font-weight: 800; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; }
+  #whoSub { display: flex; align-items: center; gap: 5px; margin: 1px 0 4px; font-size: 12.5px; line-height: 16px; white-space: nowrap; }
+  #whoSub img { width: 13px; height: 15px; }
+  #whoSub i { width: 1px; height: 11px; margin: 0 2px; background: rgba(255, 255, 255, .45); }
+  /* a gauge: the filled part under the numbers */
+  .gauge { position: relative; height: 16px; margin-top: 4px; border-radius: 8px; background: rgba(2, 8, 7, .75); overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7); }
+  .gauge i { display: block; height: 100%; width: 0; border-radius: 8px; transition: width .12s; }
+  .gauge span { position: absolute; inset: 0 9px 0 0; text-align: right; font-size: 11.5px; font-weight: 700; line-height: 16px; text-shadow: 0 1px 2px rgba(0, 0, 0, .8); }
+  #hpFill { background: linear-gradient(90deg, #e8263f, #ff5a66 70%, #ff7a7a); }
+  #mpFill { background: linear-gradient(90deg, #1f7bf2, #49a8ff 70%, #6cc2ff); }
+  #portraitRing { position: absolute; left: 0; top: 0; width: 184px; height: 157px; background: url(./assets/ui/hud/portrait-ring.png) 0 0 / 100% 100% no-repeat; }
+  #portrait { position: absolute; left: 38px; top: 15px; width: 108px; height: 108px; border-radius: 50%; }
+  #levelBadge { position: absolute; left: 34px; top: 92px; width: 36px; height: 36px; border-radius: 50%; font-size: 15px; font-weight: 800; line-height: 32px;
+    text-align: center; color: #fff; background: #0a1210; border: 2px solid #e8b84a; box-shadow: 0 0 0 2px #0a1210, 0 2px 6px rgba(0, 0, 0, .6); }
+
+  /* The right edge, from the top: the row of window buttons, the radar, the place the cat is in, and two more buttons. */
+  #right { position: absolute; top: 12px; right: 14px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  #menubar { display: flex; gap: 2px; padding: 5px 6px; pointer-events: auto; border-radius: 14px; background: var(--plate); border: 1px solid var(--line);
+    backdrop-filter: blur(6px); }
+  #sidebar { display: flex; flex-direction: column; gap: 8px; pointer-events: auto; }
+  /* a window button: its sign and, in the row, its name under it; lit while its window is open */
+  .mbtn { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; width: 64px; height: 52px;
+    cursor: pointer; color: #f4fbf8; border-radius: 10px; font-size: 11.5px; line-height: 1; }
+  .mbtn:hover { background: rgba(255, 255, 255, .1); }
+  .mbtn.on { color: var(--gold); background: rgba(255, 215, 106, .13); }
+  .mbtn svg { width: 26px; height: 26px; fill: currentColor; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .6)); }
+  #sidebar .mbtn { width: 44px; height: 44px; border-radius: 12px; background: var(--plate); border: 1px solid var(--line); backdrop-filter: blur(6px); }
+  #sidebar .mbtn:hover { filter: brightness(1.5); }
+  #sidebar .mbtn.on { border-color: var(--gold); }
   /* on the Skills button: how many skills the unspent points would buy now */
-  .mbtn .badge { position: absolute; top: -6px; left: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 800;
+  .mbtn .badge { position: absolute; top: 0; right: 8px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 800;
     line-height: 17px; text-align: center; color: #04211c; background: var(--gold); box-shadow: 0 0 8px rgba(255, 215, 106, .8); }
   .mbtn .badge:empty { display: none; }
+  /* The radar: the live picture on a canvas, and over it the gold ring with its "N" (shown at 0.6 of its picture: the
+     hole in the ring is centred on 113, 134.4 and 104.4 in radius). A click on the picture opens the world map. */
+  #radar { position: relative; width: 228px; height: 256px; }
+  #minimap { position: absolute; left: 8px; top: 29px; width: 210px; height: 210px; border-radius: 50%; pointer-events: auto; cursor: pointer; }
+  #radarRing { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .45)); }
+  #radar button { position: absolute; left: 187px; width: 36px; height: 36px; padding: 0; border-radius: 50%; background: 0 0 / 100% 100% no-repeat; box-shadow: none;
+    font-size: 0; }
+  #radar button:hover { transform: none; }
+  #radar button:disabled { opacity: .45; cursor: default; }
+  #radar #zoomIn { top: 175px; background-image: url(./assets/ui/hud/zoom-in.png); }
+  #radar #zoomOut { top: 214px; background-image: url(./assets/ui/hud/zoom-out.png); }
+  #radar #zoomIn:hover:enabled { background-image: url(./assets/ui/hud/zoom-in-lit.png); }
+  #radar #zoomOut:hover:enabled { background-image: url(./assets/ui/hud/zoom-out-lit.png); }
+  #place { display: flex; align-items: center; gap: 10px; width: 196px; padding: 6px 12px; font-size: 13px; line-height: 1.3; border-radius: 12px;
+    background: var(--plate); border: 1px solid var(--line); backdrop-filter: blur(6px); }
+  #place svg { flex: none; width: 20px; height: 20px; fill: #dfe9e5; }
+  #place div { min-width: 0; }
+  #place b, #place span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  #place span { opacity: .8; font-variant-numeric: tabular-nums; }
   .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85;
     display: flex; justify-content: space-between; }
   .title { font-size: 17px; font-weight: 800; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar { height: 9px; margin: 3px 0 7px; border-radius: 6px; background: rgba(255, 255, 255, .1); overflow: hidden; }
   .bar:last-child { margin-bottom: 0; }
   .bar > i { display: block; height: 100%; width: 0; border-radius: 6px; transition: width .12s; }
-  #hpFill, #tgFill { background: linear-gradient(90deg, #ff6b8e, #ffb3c4); }
-  #mpFill { background: linear-gradient(90deg, #4f8dff, #a9c8ff); }
+  #tgFill { background: linear-gradient(90deg, #e8263f, #ff7a7a); }
   @keyframes pulse { to { filter: brightness(1.6); } }
 
   #target { top: 16px; left: 50%; transform: translateX(-50%); width: 260px; display: none; text-align: center; }
@@ -59,7 +102,7 @@
     letter-spacing: .04em; color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, .8), 0 0 24px rgba(127, 232, 214, .9); opacity: 0;
     transition: opacity .4s; }
   #banner.on { opacity: 1; }
-  #shop { position: absolute; bottom: 94px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
+  #shop { position: absolute; bottom: 112px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px;
     border-radius: 999px; background: rgba(6, 24, 21, .75); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold);
     display: none; }
   #cast { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); width: 150px; height: 10px; display: none;
@@ -74,50 +117,51 @@
   #draw::before { content: ''; position: absolute; left: -5px; top: -4px; bottom: -4px; width: 3px; border-radius: 2px; background: var(--gold); }
   /* the action bar: ten slots in the middle of the lower edge - the attack is in one of them - and the
      experience bar under them. Only the slots take room in it, so the bar itself is exactly as wide as their row. */
-  #actionbar { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; pointer-events: auto; }
-  /* experience: a thin line from the left edge of slot 1 to the right edge of slot 0, with a mark at every tenth.
+  #actionbar { position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: auto; }
+  /* experience: a gold line from the left edge of slot 1 to the right edge of slot 0, and the numbers under it.
      #xpbar is what the cursor finds (the line alone would be hard to hit); .track is what is seen. */
-  #xpbar { position: absolute; left: 0; right: 0; top: 100%; padding: 4px 0 4px; }
-  #xpbar .track { position: relative; height: 7px; overflow: hidden; border-radius: 4px; background: rgba(2, 10, 9, .6);
-    border: 1px solid rgba(127, 232, 214, .3); }
-  #xpbar .track::after { content: ''; position: absolute; top: 0; bottom: 0; left: 10%; right: 0;
-    background: linear-gradient(90deg, rgba(255, 255, 255, .3) 1px, transparent 0) 0 0 / calc(100% / 9) 100%; }
-  #xpFill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #b58cff, #e0ccff); transition: width .25s; }
+  #xpbar { position: absolute; left: 0; right: 0; top: 100%; padding: 7px 0 0; }
+  #xpbar .track { position: relative; height: 8px; overflow: hidden; border-radius: 4px; background: rgba(2, 10, 9, .7);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .1), inset 0 1px 2px rgba(0, 0, 0, .7); }
+  #xpFill { display: block; height: 100%; width: 0; border-radius: 4px; background: linear-gradient(90deg, #d9962a, #f7c74f 60%, #ffe08a); transition: width .25s; }
+  #xpText { margin-top: 4px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, .7); }
   /* experience came in: the line lights up for a moment */
   #xpbar.gain .track { animation: xpGlow .8s ease-out; }
   #xpbar.gain #xpFill { animation: xpGain .8s ease-out; }
-  @keyframes xpGlow { from { border-color: #e0ccff; box-shadow: 0 0 12px 2px rgba(181, 140, 255, .9); } }
-  @keyframes xpGain { from { filter: brightness(1.8); } }
-  .act { position: relative; flex: none; width: 48px; height: 48px; padding: 14px 1px 0; line-height: 1.05; text-align: center; font-size: 8px;
-    letter-spacing: -.1px; overflow: hidden; cursor: pointer; background: rgba(8, 18, 20, .82); border: 1px solid rgba(160, 190, 185, .45); border-radius: 6px;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(0, 0, 0, .55); }
+  @keyframes xpGlow { from { box-shadow: 0 0 12px 2px rgba(255, 215, 106, .9); } }
+  @keyframes xpGain { from { filter: brightness(1.6); } }
+  .act { position: relative; flex: none; width: 56px; height: 56px; padding: 17px 1px 0; line-height: 1.05; text-align: center; font-size: 8.5px;
+    letter-spacing: -.1px; overflow: hidden; cursor: pointer; background: rgba(8, 18, 16, .86); border: 2px solid rgba(255, 255, 255, .2); border-radius: 12px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .5); }
   .act:hover { filter: brightness(1.25); }
-  .act.empty { cursor: default; background: rgba(8, 18, 20, .6); border-color: rgba(160, 190, 185, .25); }
+  .act.empty { cursor: default; background: rgba(8, 18, 16, .62); border-color: rgba(255, 255, 255, .13); }
   .act.item { color: var(--tint); border-color: var(--tint); box-shadow: inset 0 0 16px -5px var(--tint); }
-  .act.active { border-color: #fff; box-shadow: 0 0 12px rgba(127, 232, 214, .8); }
+  .act.active { border-color: var(--gold); box-shadow: 0 0 14px rgba(255, 215, 106, .75); }
   .act.drop { border-color: var(--gold); box-shadow: 0 0 14px rgba(255, 215, 106, .8); }   /* what is dragged would land here */
   .act.dim { opacity: .5; }                          /* not enough mana, or none of the item left */
   .act.off { opacity: .4; border-style: dashed; }    /* a skill this character has not learned */
   .act .icon, .sk .icon { display: block; width: 20px; height: 20px; margin: 0 auto 2px; border-radius: 50%; flex: none;
     background: radial-gradient(#fff, var(--tint, var(--teal))); box-shadow: 0 0 10px var(--tint, var(--teal)); }
-  .act svg { position: absolute; left: 11px; top: 13px; width: 24px; height: 24px; fill: currentColor; }
+  .act svg { position: absolute; left: 13px; top: 15px; width: 26px; height: 26px; fill: currentColor; }
   /* a picture of the icon set fills its slot; whatever is written on the slot (key, cost, count, cooldown) lies over it */
   .icon.pic { background-size: cover; background-position: center; box-shadow: none; }
-  .act .icon.pic { position: absolute; inset: 0; width: auto; height: auto; margin: 0; border-radius: 5px; }
+  .act .icon.pic { position: absolute; inset: 0; width: auto; height: auto; margin: 0; border-radius: 10px; }
   .act kbd, .act .mp, .act .n { z-index: 1; text-shadow: 0 1px 2px #000; }
-  .act kbd { background: rgba(4, 16, 14, .78); }
   .act .cd, .act .time { z-index: 1; }
   .slot .icon.pic { position: absolute; inset: 1px; width: auto; height: auto; margin: 0; border-radius: 4px; }
   .slot .n, .slot .cd { z-index: 1; }
-  .act .mp { position: absolute; top: 2px; right: 3px; font-size: 9px; color: #a9c8ff; }
-  .act .n { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
-  .act kbd { position: absolute; top: 2px; left: 2px; min-width: 0; margin: 0; padding: 0 4px; font-size: 9.5px; line-height: 1.25; border-radius: 3px; }
+  .act .mp { position: absolute; top: 3px; right: 5px; font-size: 10px; color: #a9c8ff; }
+  /* how many of an item the bag holds: a number on a dark disc in the corner */
+  .act .n { position: absolute; right: 2px; bottom: 2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 800;
+    line-height: 18px; color: #fff; background: rgba(4, 12, 10, .85); box-shadow: 0 0 0 1px rgba(255, 255, 255, .25); }
+  .act .n:empty { display: none; }
+  .act kbd { position: absolute; top: 3px; left: 6px; min-width: 0; margin: 0; padding: 0; font-size: 11px; line-height: 1.2; color: #fff; border: 0; background: none; }
   .act .cd { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: rgba(0, 0, 0, .65); }
-  .act .time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #fff; }
+  .act .time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; color: #fff; }
   /* what is being dragged onto the bar follows the cursor */
-  #ghost { position: fixed; z-index: 6; margin: -24px 0 0 -24px; pointer-events: none; opacity: .9; transform: scale(.85);
+  #ghost { position: fixed; z-index: 6; margin: -28px 0 0 -28px; pointer-events: none; opacity: .9; transform: scale(.85);
     box-shadow: 0 6px 18px rgba(0, 0, 0, .6); }
-  #buffs { position: absolute; top: 131px; left: 16px; display: flex; gap: 6px; font-size: 12px; }
+  #buffs { position: absolute; top: 166px; left: 30px; display: flex; gap: 6px; font-size: 12px; }
   #buffs span.bad { border-color: rgba(255, 90, 106, .7); color: #ffb3c4; }
   #buffs span { padding: 3px 8px; border-radius: 999px; background: rgba(6, 24, 21, .7); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold); }
 
@@ -208,14 +252,7 @@
   #bagSide { display: flex; flex-direction: column; }
   #bagTop { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
   #bagTabs { display: flex; gap: 3px; }
-  /* the graphics quality, in the Help window; and the frame rate at the top edge, when asked for */
-  #gfx { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 12px; }
-  #gfx b { margin-right: 4px; }
-  #gfx button { padding: 3px 10px; font-size: 11px; font-weight: 700; color: #e8fffa; background: rgba(255, 255, 255, .1); border-radius: 5px; box-shadow: none; }
-  #gfx button:hover { transform: none; filter: brightness(1.3); }
-  #gfx button.on { color: #04211c; background: var(--teal); }
-  #gfx span { opacity: .75; }
-  #gfx label { margin-left: auto; display: flex; align-items: center; gap: 4px; cursor: pointer; pointer-events: auto; }
+  /* the frame rate at the top edge, when the settings ask for it */
   #fps { display: none; position: absolute; top: 1px; left: 50%; transform: translateX(-50%); font-size: 10.5px; font-weight: 700; color: #d5f5ee; text-shadow: 0 1px 2px #000; opacity: .8; }
   #bagTabs button { padding: 3px 9px; font-size: 11px; font-weight: 700; color: #e8fffa; background: rgba(255, 255, 255, .1); border-radius: 5px;
     box-shadow: none; }
@@ -245,6 +282,46 @@
     #store, #hud.bagOpen #sheet { transform: translate(calc(-100% - 8px), -50%); }
   }
 
+  /* the world map: a square as large as the room between the target frame and the action bar, and between the chat
+     and the radar, allows (90px: the padding of the window and the two lines above the map) */
+  #worldmap { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); display: none; padding: 14px 16px 16px; pointer-events: auto; }
+  #worldmap.on { display: block; }
+  #worldmap h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
+  #mapHead { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; margin-bottom: 8px; font-size: 13px; white-space: nowrap; }
+  #mapSub { flex: 1; min-width: 0; opacity: .85; overflow: hidden; text-overflow: ellipsis; }
+  #mapLegend { display: flex; gap: 9px; font-size: 11px; opacity: .85; }
+  #mapLegend span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: var(--tint); }
+  #mapView { display: block; width: min(calc(var(--win-h) - 90px), 54vw); aspect-ratio: 1; border-radius: 8px; cursor: crosshair;
+    border: 1px solid rgba(127, 232, 214, .25); background: #18546f; }
+
+  /* settings: a name and its control a row, under a heading per group */
+  #settings { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(400px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
+  #settings.on { display: block; }
+  #settings h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
+  #settings .sub { font-size: 13px; opacity: .8; margin-bottom: 10px; }
+  #setList { display: grid; grid-template-columns: 1fr max-content; gap: 9px 14px; align-items: center; font-size: 14px; }
+  #setList h3 { grid-column: 1 / -1; margin: 8px 0 0; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85; }
+  #setList h3:first-child { margin-top: 0; }
+  #setList label small { display: block; font-size: 11px; opacity: .65; }
+  #setList > :not(h3, label) { justify-self: end; }   /* the controls line up along the right edge */
+  /* a switch: the knob is on the right, and the track lit, while the setting is on */
+  .switch { appearance: none; position: relative; width: 40px; height: 22px; margin: 0; border-radius: 11px; cursor: pointer; outline: none;
+    background: rgba(255, 255, 255, .14); border: 1px solid rgba(127, 232, 214, .3); transition: background .15s; }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #e8fffa; transition: transform .15s; }
+  .switch:checked { background: var(--teal-dim); border-color: var(--teal); }
+  .switch:checked::after { transform: translateX(18px); }
+  .switch:hover { filter: brightness(1.25); }
+  #setList .range { display: flex; align-items: center; gap: 8px; }
+  #setVolume { width: 150px; accent-color: var(--teal); cursor: pointer; }
+  #setVolume:disabled { opacity: .4; cursor: default; }
+  #setVolumeText { width: 38px; text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
+  #setResolution { display: flex; gap: 3px; }
+  #setResolution button, #setReset { padding: 5px 12px; font-size: 12px; font-weight: 700; color: #e8fffa; background: rgba(255, 255, 255, .1); border-radius: 6px;
+    box-shadow: none; }
+  #setResolution button:hover, #setReset:hover { transform: none; filter: brightness(1.3); }
+  #setResolution button.on { color: #04211c; background: var(--teal); }
+  #setReset { display: block; margin: 14px 0 0 auto; }
+
   /* help: every control, a row each */
   #helpList { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: baseline; font-size: 13px; }
   #helpList h3 { grid-column: 1 / -1; margin: 8px 0 0; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85; }
@@ -273,20 +350,49 @@
   #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
     background: radial-gradient(transparent 40%, rgba(255, 60, 110, .55)); transition: opacity .25s; }
 
-  /* dev bar: only for whoever may edit the map. It sits above the band of the action bar */
-  #devbar { right: 16px; bottom: 102px; display: none; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; font-size: 13px;
+  /* dev bar: only for whoever may edit the map. It sits over the chat, out of the way of everything a player uses */
+  #devbar { left: 14px; bottom: 262px; display: none; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; font-size: 13px;
     white-space: nowrap; }
   #devbar.on { display: flex; }
   /* a region name may be 48 characters long: it is cut where the bar would reach under a window in the middle */
   #devPos { max-width: min(320px, 14vw); overflow: hidden; text-overflow: ellipsis; }
   #devbar button { padding: 6px 14px; font-size: 13px; box-shadow: none; }
 
-  #chat { position: absolute; left: 16px; bottom: 102px; width: min(380px, 20vw); font-size: 13px; }
-  #chatLog div { padding: 1px 0; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
-  #chatLog .sys { color: var(--teal); opacity: .8; }
+  /* The chat: its tabs, the last lines, and the line to write on. Only the tabs and the writing line take the mouse:
+     a click on the lines goes through to the world behind them. */
+  #chat { left: 14px; bottom: 14px; width: min(380px, 20vw); padding: 8px 12px 10px; font-size: 13px; }
+  #chatTabs { display: flex; gap: 4px; margin: 0 -4px 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); pointer-events: auto; }
+  #chatTabs button { flex: 1; padding: 5px 0; font-size: 13px; font-weight: 600; color: #b9c6c2; background: none; border-radius: 8px; box-shadow: none; }
+  #chatTabs button:hover { transform: none; color: #fff; }
+  #chatTabs button.on { color: #fff; box-shadow: inset 0 -2px 0 var(--gold); border-radius: 8px 8px 0 0; }
+  #chatLog { display: flex; flex-direction: column; justify-content: flex-end; height: 133px; overflow: hidden; }
+  #chatLog div { flex: none; padding: 1px 0; line-height: 17px; text-shadow: 0 1px 3px #000; overflow-wrap: anywhere; }
+  #chatLog .sys { color: var(--teal); opacity: .85; }
   #chatLog b { color: var(--gold); }
-  #chatInput { display: none; width: 100%; margin-top: 6px; padding: 7px 10px; font: inherit; color: #fff; pointer-events: auto;
-    background: rgba(6, 24, 21, .85); border: 1px solid var(--teal); border-radius: 8px; outline: none; }
+  #chat.sys #chatLog div:not(.sys) { display: none; }   /* the System tab: what the game itself said */
+  #chatRow { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); pointer-events: auto; }
+  #chatRow svg { flex: none; width: 20px; height: 20px; fill: #e8fffa; }
+  #chatInput { flex: 1; min-width: 0; padding: 4px 0; font: inherit; color: #fff; background: none; border: 0; outline: none; }
+  #chatInput::placeholder { color: #9fb0ab; }
+  #chatSend { flex: none; width: 30px; height: 30px; padding: 5px; border-radius: 8px; background: none; box-shadow: none; }
+  #chatSend:hover { transform: none; background: rgba(255, 255, 255, .12); }
+
+  /* The pad in the lower right corner, for the mouse: the attack in the middle of it, and around it the jump, the
+     dash (while the cat knows one) and the next target. Each wears the key that does the same. */
+  #pad { position: absolute; right: 0; bottom: 0; width: 240px; height: 230px; }
+  #pad button { position: absolute; display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 50%; color: #fff;
+    background: radial-gradient(circle at 50% 35%, #1b2a26, #0a1412 70%); border: 2px solid rgba(255, 255, 255, .22); box-shadow: 0 3px 10px rgba(0, 0, 0, .5); }
+  #pad button:hover { transform: none; filter: brightness(1.3); }
+  #pad button:active { transform: scale(.94); }
+  #pad svg { width: 52%; height: 52%; fill: currentColor; }
+  #pad kbd { position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); margin: 0; padding: 1px 9px; font-size: 11.5px; font-weight: 700; color: #fff;
+    background: #0a1412; border: 1px solid rgba(255, 255, 255, .22); border-radius: 9px; }
+  #padAttack { right: 28px; bottom: 28px; width: 112px; height: 112px; color: #ffd98a !important; border: 3px solid #e8b84a !important;
+    box-shadow: 0 0 0 3px #0a1412, 0 0 0 4px rgba(232, 184, 74, .45), 0 4px 14px rgba(0, 0, 0, .6) !important; }
+  #padAttack.on { box-shadow: 0 0 0 3px #0a1412, 0 0 0 4px rgba(232, 184, 74, .6), 0 0 22px 4px rgba(255, 215, 106, .75) !important; }   /* the cat is attacking */
+  #padJump { right: 147px; bottom: 48px; width: 60px; height: 60px; }
+  #padDash { right: 121px; bottom: 144px; width: 60px; height: 60px; }
+  #padTarget { right: 10px; bottom: 130px; width: 54px; height: 54px; }
 
   .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
     justify-content: flex-end; padding-bottom: 6vh; text-align: center;
@@ -395,16 +501,32 @@
   </div>
 </div>
 <div id="hud">
-  <div class="panel" id="stats">
-    <div class="title" id="who">Cat · Lv 1</div>
-    <div class="label"><span>Health</span><span id="hpText"></span></div>
-    <div class="bar"><i id="hpFill"></i></div>
-    <div class="label"><span>Mana</span><span id="mpText"></span></div>
-    <div class="bar"><i id="mpFill"></i></div>
+  <div id="stats">
+    <div id="statsPlate">
+      <div id="statsText">
+        <div id="who"></div>
+        <div id="whoSub"><img src="./assets/ui/hud/shield.png" alt=""><span id="whoLevel"></span><i></i><span id="whoClass"></span></div>
+        <div class="gauge"><i id="hpFill"></i><span id="hpText"></span></div>
+        <div class="gauge"><i id="mpFill"></i><span id="mpText"></span></div>
+      </div>
+    </div>
+    <div id="portraitRing"></div>
+    <img id="portrait" src="./assets/ui/hud/portrait.png" alt="">
+    <div id="levelBadge"></div>
   </div>
   <div id="right">
-    <canvas id="minimap" width="288" height="288"></canvas>
-    <div class="panel" id="menubar"></div>
+    <div id="menubar"></div>
+    <div id="radar">
+      <canvas id="minimap" width="420" height="420"></canvas>
+      <img id="radarRing" src="./assets/ui/hud/radar-ring.png" alt="">
+      <button id="zoomIn" type="button">Zoom in</button>
+      <button id="zoomOut" type="button">Zoom out</button>
+    </div>
+    <div id="place">
+      <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 00-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 00-7-7zm0 4.200a2.800 2.800 0 110 5.600 2.800 2.800 0 010-5.600z" fill-rule="evenodd"/></svg>
+      <div><b id="placeName"></b><span id="placeAt"></span></div>
+    </div>
+    <div id="sidebar"></div>
   </div>
   <div class="panel" id="target">
     <div class="title" id="tgName"></div>
@@ -415,11 +537,25 @@
   <div id="fps"></div>
   <div id="banner"></div>
   <div id="notice"></div>
-  <div id="chat"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…"></div>
+  <div class="panel" id="chat">
+    <div id="chatTabs"><button type="button" data-tab="all" class="on">General</button><button type="button" data-tab="sys">System</button></div>
+    <div id="chatLog"></div>
+    <div id="chatRow">
+      <svg viewBox="0 0 24 24"><path d="M5 4h14a3 3 0 013 3v8a3 3 0 01-3 3h-8l-5 4v-4h-1a3 3 0 01-3-3v-8a3 3 0 013-3zm2.500 5.700a1.300 1.300 0 100 2.600 1.300 1.300 0 000-2.600zm4.500 0a1.300 1.300 0 100 2.600 1.300 1.300 0 000-2.600zm4.500 0a1.300 1.300 0 100 2.600 1.300 1.300 0 000-2.600z" fill-rule="evenodd"/></svg>
+      <input id="chatInput" maxlength="140" placeholder="Type a message…" autocomplete="off">
+      <button id="chatSend" type="button" title="Send (Enter)"><svg viewBox="0 0 24 24"><path d="M21.500 2.500l-7 19-3.700-8.300-8.300-3.700zm-4.200 4.200l-8.600 3 3.900 1.700z" fill-rule="evenodd"/></svg></button>
+    </div>
+  </div>
   <div id="cast"><i id="castFill"></i></div>
   <div id="draw"><i id="drawFill"></i></div>
   <div id="buffs"></div>
   <div id="actionbar"></div>
+  <div id="pad">
+    <button id="padDash" type="button"><svg viewBox="0 0 24 24"><path d="M14.500 2.500a2 2 0 110 4 2 2 0 010-4zM9 7.500l4.500-.500 2.500 3.500 3.500.500-.300 2-4.500-.500-1.200-1.700-1 3.200 3 2.500-1 5h-2.200l.700-4-3.500-2.500 1.200-4.700-2 .300-1.200 2.700-1.900-.800zM2 9h4v1.500h-4zM1 12.500h4v1.500h-4zM7.500 15.500l1.800 1.300-2.800 4.700h-2.300z"/></svg><kbd>Shift</kbd></button>
+    <button id="padTarget" type="button" title="Next target (Tab)"><svg viewBox="0 0 24 24"><path d="M11 1h2v3.100a8 8 0 016.900 6.900h3.100v2h-3.100a8 8 0 01-6.900 6.900v3.100h-2v-3.100a8 8 0 01-6.900-6.900h-3.100v-2h3.100a8 8 0 016.900-6.900zm1 5a6 6 0 100 12 6 6 0 000-12zm0 3.500a2.500 2.500 0 110 5 2.500 2.500 0 010-5z" fill-rule="evenodd"/></svg></button>
+    <button id="padJump" type="button"><svg viewBox="0 0 24 24"><path d="M12 3l8 8.500h-5v5.500h-6v-5.500h-5zM7 19h10v2.500h-10z"/></svg><kbd>Space</kbd></button>
+    <button id="padAttack" type="button" title="Attack the target (1)"><svg viewBox="0 0 24 24"><path d="M21.500 2.500l-1 5.500-9.300 9.300-2.500-2.500 9.300-9.300zM6.300 13.500l4.200 4.200-1.500 1.500-1.400-1.400-3.400 3.400-1.400-1.400 3.400-3.400-1.400-1.400z"/></svg></button>
+  </div>
   <div class="panel" id="sheet">
     <h2 id="sheetTitle"></h2>
     <div class="sub" id="sheetSub"></div>
@@ -452,15 +588,34 @@
       </div>
     </div>
   </div>
+  <div class="panel" id="worldmap">
+    <h2>World Map</h2>
+    <div id="mapHead"><span id="mapSub"></span><span id="mapLegend"></span></div>
+    <canvas id="mapView"></canvas>
+  </div>
+  <div class="panel" id="settings">
+    <h2>Settings</h2>
+    <div class="sub">A change is at work at once and is remembered in this browser.</div>
+    <div id="setList">
+      <h3>Sound</h3>
+      <label for="setSound">Sound</label><input type="checkbox" class="switch" id="setSound" data-set="sound">
+      <label for="setVolume">Volume</label>
+      <div class="range"><input type="range" id="setVolume" min="0" max="100" step="5"><span id="setVolumeText"></span></div>
+      <h3>Graphics</h3>
+      <label>Resolution<small>Lower is faster, and less sharp</small></label>
+      <div id="setResolution"><button data-v="low">Low</button><button data-v="medium">Medium</button><button data-v="high">High</button></div>
+      <label for="setShadows">Shadows</label><input type="checkbox" class="switch" id="setShadows" data-set="shadows">
+      <label for="setGlow">Glow<small>The shine of lamps, crystals and spells</small></label><input type="checkbox" class="switch" id="setGlow" data-set="glow">
+      <label for="setGrass">Grass and flowers</label><input type="checkbox" class="switch" id="setGrass" data-set="grass">
+      <label for="setAuto">Auto<small>Lowers the graphics while the game runs slow, and gives them back when it has room</small></label><input type="checkbox" class="switch" id="setAuto" data-set="auto">
+      <label for="setFps">Show the frame rate</label><input type="checkbox" class="switch" id="setFps" data-set="fps">
+    </div>
+    <div class="sub" id="setAutoNow"></div>
+    <button id="setReset" type="button">Reset to defaults</button>
+  </div>
   <div class="panel" id="help">
     <h2>Controls</h2>
     <div class="sub">Everything the keyboard and the mouse do. <kbd>H</kbd> or <kbd>F1</kbd> closes this window.</div>
-    <div id="gfx">
-      <b>Graphics</b>
-      <button data-q="auto" title="Follows the frame rate: lower when the game runs slow, higher when it has room">Auto</button><button data-q="low" title="No shadows, no bloom, less grass, plain resolution">Low</button><button data-q="medium">Medium</button><button data-q="high" title="Everything on, at the full resolution of the screen">High</button>
-      <span id="gfxNow"></span><span id="gfxFps"></span>
-      <label><input type="checkbox" id="fpsShow"> show FPS</label>
-    </div>
     <div id="helpList">
       <h3>Moving and looking</h3>
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows</div><span>Move, relative to the camera</span>
@@ -484,12 +639,14 @@
       <div><kbd>C</kbd></div><span>Character: attributes and combat stats</span>
       <div><kbd>I</kbd></div><span>Inventory: the bag and what the cat wears</span>
       <div><kbd>K</kbd></div><span>Skill book; next to the Sage it sells skills and professions</span>
+      <div><kbd>M</kbd></div><span>World map: the whole island, its zones and their levels, the monster camps. A click on the radar opens it too</span>
       <div><kbd>T</kbd></div><span>Trade, next to the Trader</span>
       <div><kbd>B</kbd></div><span>Buy a weapon upgrade, next to the Blacksmith</span>
+      <div><kbd>O</kbd></div><span>Settings: sound and graphics</span>
       <div><kbd>H</kbd> / <kbd>F1</kbd></div><span>This window</span>
       <h3>Other</h3>
-      <div><kbd>Enter</kbd></div><span>Open the chat, send the message</span>
-      <div><kbd>M</kbd></div><span>Sound on and off</span>
+      <div><kbd>Enter</kbd></div><span>Write in the chat, send the message; a click on its line does the same. Its System tab shows only what the game said</span>
+      <div><kbd>+</kbd> <kbd>−</kbd> on the radar</div><span>Show less or more of the surroundings</span>
     </div>
     <div class="sub" id="online"></div>
   </div>
@@ -501,7 +658,7 @@
 
 <div class="overlay" id="menu">
   <h1 class="logo"><svg viewBox="0 0 640 250" role="img" aria-label="HyperCat Online"><use href="#logo"/></svg></h1>
-  <p>An open online world of cats: level up and hunt skeletons together with other players</p>
+  <p>An open online world of cats: level up and hunt monsters together with other players</p>
   <div class="keys">
     <div><kbd>WASD</kbd>move</div>
     <div><kbd>Click</kbd>target</div>
@@ -510,6 +667,7 @@
     <div><kbd>K</kbd>skill book</div>
     <div><kbd>I</kbd>inventory</div>
     <div><kbd>C</kbd>character</div>
+    <div><kbd>M</kbd>world map</div>
     <div><kbd>X</kbd>sit</div>
     <div><kbd>RMB</kbd>camera</div>
     <div><kbd>Enter</kbd>chat</div>

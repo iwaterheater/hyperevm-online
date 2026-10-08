@@ -11,7 +11,102 @@ export const MOB_TYPES = {
   shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 45,   speed: 2.4, pAtk: 12, pDef: 0.7, mDef: 1.6, eva: 0, xp: 16,  color: 0xffe14d, magic: true },
   tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 210,  speed: 1.8, pAtk: 31, pDef: 1.6, mDef: 0.8, eva: 0, xp: 45,  color: 0xb04dff },
   boss:    { name: 'Skeleton King',    r: 2.8,  hp: 2400, speed: 2.2, pAtk: 22, pDef: 1.5, mDef: 1.5, eva: 2, xp: 600, color: 0xff2244, magic: true },
+  // New kinds go at the end: a monster travels as its index in this table.
+  // `draw: 'monster'` marks a kind that is not a skeleton: src/monster.js draws it. `fly` lifts a monster off the
+  // ground; the server walks it like any other.
+  slime:      { name: 'Green Slime',   r: 0.6,  hp: 24,  speed: 2.6, pAtk: 10, pDef: 0.9, mDef: 0.9, eva: 0, xp: 8,  color: 0x7fd45a, draw: 'monster' },
+  pinkslime:  { name: 'Pink Slime',    r: 0.55, hp: 18,  speed: 3.4, pAtk: 9,  pDef: 0.8, mDef: 1.0, eva: 3, xp: 8,  color: 0xff8fc0, draw: 'monster' },
+  mushnub:    { name: 'Mushnub',       r: 0.65, hp: 34,  speed: 2.4, pAtk: 13, pDef: 1.1, mDef: 1.0, eva: 0, xp: 11, color: 0x6fb7e8, draw: 'monster' },
+  spikeslime: { name: 'Spiky Slime',   r: 1.0,  hp: 90,  speed: 2.2, pAtk: 22, pDef: 1.4, mDef: 1.0, eva: 0, xp: 30, color: 0x5f8f4a, draw: 'monster' },
+  frog:       { name: 'Bog Frog',      r: 0.75, hp: 36,  speed: 4.2, pAtk: 12, pDef: 0.9, mDef: 1.0, eva: 4, xp: 13, color: 0xf2c230, draw: 'monster' },
+  cactoro:    { name: 'Cactoro',       r: 0.8,  hp: 44,  speed: 2.8, pAtk: 16, pDef: 1.2, mDef: 0.9, eva: 0, xp: 14, color: 0x7bbf4a, draw: 'monster' },
+  orc:        { name: 'Orc Raider',    r: 0.75, hp: 40,  speed: 3.4, pAtk: 16, pDef: 1.1, mDef: 0.8, eva: 0, xp: 14, color: 0x7fbf5a, draw: 'monster' },
+  orcbrute:   { name: 'Orc Brute',     r: 1.2,  hp: 150, speed: 2.0, pAtk: 28, pDef: 1.6, mDef: 0.8, eva: 0, xp: 46, color: 0x9bbf6a, draw: 'monster' },
+  shaman:     { name: 'Tribal Shaman', r: 0.7,  hp: 30,  speed: 2.6, pAtk: 12, pDef: 0.7, mDef: 1.5, eva: 0, xp: 17, color: 0xff7a3a, draw: 'monster', magic: true },
+  yeti:       { name: 'Yeti',          r: 1.2,  hp: 160, speed: 2.2, pAtk: 28, pDef: 1.5, mDef: 1.0, eva: 0, xp: 48, color: 0xbfe4ff, draw: 'monster' },
+  demon:      { name: 'Imp',           r: 0.7,  hp: 34,  speed: 4.6, pAtk: 14, pDef: 0.9, mDef: 1.1, eva: 5, xp: 15, color: 0xff4a4a, draw: 'monster' },
+  bluedemon:  { name: 'Blue Demon',    r: 1.2,  hp: 150, speed: 2.0, pAtk: 29, pDef: 1.5, mDef: 1.2, eva: 0, xp: 48, color: 0x4a8fd8, draw: 'monster' },
+  alien:      { name: 'Void Alien',    r: 0.75, hp: 32,  speed: 2.6, pAtk: 12, pDef: 0.8, mDef: 1.5, eva: 0, xp: 17, color: 0xa05ad8, draw: 'monster', magic: true },
+  bee:        { name: 'Armabee',       r: 0.55, hp: 16,  speed: 5.4, pAtk: 9,  pDef: 0.7, mDef: 0.8, eva: 8, xp: 9,  color: 0xffd23a, draw: 'monster', fly: true },
+  ghost:      { name: 'Ghost',         r: 0.7,  hp: 28,  speed: 2.6, pAtk: 12, pDef: 0.6, mDef: 1.6, eva: 4, xp: 16, color: 0x8a6fd0, draw: 'monster', magic: true, fly: true },
+  wraith:     { name: 'Skull Wraith',  r: 0.8,  hp: 40,  speed: 4.4, pAtk: 15, pDef: 0.8, mDef: 1.3, eva: 6, xp: 18, color: 0xe8dcc0, draw: 'monster', fly: true },
+  dragon:     { name: 'Dragonling',    r: 0.8,  hp: 34,  speed: 2.8, pAtk: 13, pDef: 0.9, mDef: 1.4, eva: 0, xp: 20, color: 0xff8a3a, draw: 'monster', magic: true, fly: true },
+  birb:         { name: 'Horned Birb',    r: 0.75, hp: 42,  speed: 3.2, pAtk: 16, pDef: 1.1, mDef: 0.9, eva: 0, xp: 14, color: 0x4a7fe0, draw: 'monster' },
+  bunny:        { name: 'Wild Bunny',     r: 0.55, hp: 16,  speed: 5.6, pAtk: 8,  pDef: 0.7, mDef: 0.8, eva: 8, xp: 8,  color: 0xf2f2f2, draw: 'monster' },
+  dino:         { name: 'Crimson Dino',   r: 0.8,  hp: 46,  speed: 3.4, pAtk: 17, pDef: 1.2, mDef: 0.9, eva: 0, xp: 15, color: 0xc83a5a, draw: 'monster' },
+  fishman:      { name: 'Fishman',        r: 0.75, hp: 38,  speed: 3.0, pAtk: 14, pDef: 1.0, mDef: 1.1, eva: 2, xp: 13, color: 0x3aa8e0, draw: 'monster' },
+  monkroose:    { name: 'Monkroose',      r: 0.7,  hp: 30,  speed: 4.8, pAtk: 12, pDef: 0.9, mDef: 0.9, eva: 6, xp: 13, color: 0x9bd45a, draw: 'monster' },
+  mushroomking: { name: 'Mushroom King',  r: 1.2,  hp: 150, speed: 2.0, pAtk: 27, pDef: 1.5, mDef: 1.1, eva: 0, xp: 46, color: 0x5aa8d8, draw: 'monster' },
+  ninja:        { name: 'Shadow Ninja',   r: 0.65, hp: 26,  speed: 5.4, pAtk: 13, pDef: 0.8, mDef: 0.9, eva: 10, xp: 15, color: 0x2a2a33, draw: 'monster' },
+  alienblob:    { name: 'Void Sprout',    r: 0.7,  hp: 30,  speed: 2.6, pAtk: 12, pDef: 0.8, mDef: 1.5, eva: 0, xp: 17, color: 0x8a4ad0, draw: 'monster', magic: true },
+  puffbirb:     { name: 'Frost Birb',     r: 0.65, hp: 34,  speed: 3.0, pAtk: 13, pDef: 1.0, mDef: 1.0, eva: 0, xp: 12, color: 0x4a7fe0, draw: 'monster' },
+  cactoblob:    { name: 'Cactus Bandit',  r: 0.7,  hp: 36,  speed: 2.6, pAtk: 14, pDef: 1.2, mDef: 0.9, eva: 0, xp: 12, color: 0x7bbf4a, draw: 'monster' },
+  tabby:        { name: 'Wild Tabby',     r: 0.55, hp: 20,  speed: 5.0, pAtk: 10, pDef: 0.8, mDef: 0.8, eva: 6, xp: 9,  color: 0xf0a040, draw: 'monster' },
+  chicken:      { name: 'Angry Chicken',  r: 0.55, hp: 14,  speed: 4.6, pAtk: 8,  pDef: 0.7, mDef: 0.8, eva: 5, xp: 7,  color: 0xf4f4f4, draw: 'monster' },
+  pup:          { name: 'Stray Pup',      r: 0.55, hp: 24,  speed: 4.0, pAtk: 10, pDef: 0.9, mDef: 0.8, eva: 3, xp: 9,  color: 0xf2c040, draw: 'monster' },
+  snapper:      { name: 'Snapper',        r: 0.65, hp: 32,  speed: 3.4, pAtk: 14, pDef: 0.9, mDef: 1.0, eva: 2, xp: 12, color: 0x3aa8e0, draw: 'monster' },
+  eldermushnub: { name: 'Elder Mushnub',  r: 1.0,  hp: 90,  speed: 2.2, pAtk: 22, pDef: 1.4, mDef: 1.1, eva: 0, xp: 30, color: 0x4a8fd8, draw: 'monster' },
+  ninjablob:    { name: 'Ninja Blob',     r: 0.65, hp: 24,  speed: 5.0, pAtk: 12, pDef: 0.8, mDef: 0.9, eva: 8, xp: 13, color: 0x2a2a33, draw: 'monster' },
+  orcwhelp:     { name: 'Orc Whelp',      r: 0.6,  hp: 30,  speed: 3.4, pAtk: 13, pDef: 1.0, mDef: 0.8, eva: 0, xp: 11, color: 0x7fbf5a, draw: 'monster' },
+  pigeon:       { name: 'Plump Pigeon',   r: 0.55, hp: 18,  speed: 3.0, pAtk: 8,  pDef: 0.8, mDef: 0.9, eva: 2, xp: 7,  color: 0x8a5ad8, draw: 'monster' },
+  hexblob:      { name: 'Hex Blob',       r: 0.65, hp: 28,  speed: 2.4, pAtk: 12, pDef: 0.7, mDef: 1.6, eva: 0, xp: 17, color: 0x8fd45a, draw: 'monster', magic: true },
+  snowball:     { name: 'Snowball',       r: 0.65, hp: 40,  speed: 2.8, pAtk: 15, pDef: 1.2, mDef: 1.0, eva: 0, xp: 13, color: 0xbfe4ff, draw: 'monster' },
+  alpaking:     { name: 'Alpaking',       r: 0.6,  hp: 24,  speed: 4.2, pAtk: 11, pDef: 0.8, mDef: 1.0, eva: 5, xp: 11, color: 0xe8c040, draw: 'monster', fly: true },
+  alpakinglord: { name: 'Alpaking Lord',  r: 0.9,  hp: 60,  speed: 2.8, pAtk: 16, pDef: 1.1, mDef: 1.4, eva: 0, xp: 26, color: 0xe8c040, draw: 'monster', magic: true, fly: true },
+  queenbee:     { name: 'Armabee Queen',  r: 0.8,  hp: 70,  speed: 3.6, pAtk: 18, pDef: 1.2, mDef: 1.0, eva: 4, xp: 26, color: 0xffd23a, draw: 'monster', fly: true },
+  drake:        { name: 'Fire Drake',     r: 1.2,  hp: 150, speed: 2.4, pAtk: 26, pDef: 1.4, mDef: 1.4, eva: 0, xp: 50, color: 0xff8a3a, draw: 'monster', magic: true, fly: true },
+  glub:         { name: 'Glub',           r: 0.6,  hp: 22,  speed: 4.4, pAtk: 11, pDef: 0.8, mDef: 1.1, eva: 6, xp: 11, color: 0x5a4a8a, draw: 'monster', fly: true },
+  glublord:     { name: 'Glub Totem',     r: 0.8,  hp: 44,  speed: 2.6, pAtk: 14, pDef: 0.9, mDef: 1.5, eva: 0, xp: 22, color: 0x5a4a8a, draw: 'monster', magic: true, fly: true },
+  goleling:     { name: 'Goleling',       r: 0.55, hp: 18,  speed: 5.2, pAtk: 9,  pDef: 0.7, mDef: 0.9, eva: 8, xp: 10, color: 0x9bc84a, draw: 'monster', fly: true },
+  golelingelder:{ name: 'Goleling King',  r: 0.8,  hp: 70,  speed: 3.4, pAtk: 18, pDef: 1.2, mDef: 1.1, eva: 3, xp: 26, color: 0x9bc84a, draw: 'monster', fly: true },
+  hywirl:       { name: 'Hywirl',         r: 0.7,  hp: 36,  speed: 3.6, pAtk: 15, pDef: 1.0, mDef: 1.2, eva: 3, xp: 15, color: 0xb04ad8, draw: 'monster', fly: true },
+  skypigeon:    { name: 'Sky Pigeon',     r: 0.55, hp: 14,  speed: 5.0, pAtk: 8,  pDef: 0.7, mDef: 0.8, eva: 8, xp: 8,  color: 0x8a5ad8, draw: 'monster', fly: true },
+  squidle:      { name: 'Squidle',        r: 0.7,  hp: 30,  speed: 5.0, pAtk: 13, pDef: 0.8, mDef: 1.1, eva: 7, xp: 15, color: 0xe85a9a, draw: 'monster', fly: true },
+  tribalmask:   { name: 'Tribal Spirit',  r: 0.75, hp: 32,  speed: 2.6, pAtk: 13, pDef: 0.8, mDef: 1.5, eva: 0, xp: 18, color: 0xff7a3a, draw: 'monster', magic: true, fly: true },
+  // the Cute Animated Monsters pack
+  stalker:      { name: 'Antenna Alien',   r: 0.6,  hp: 28,  speed: 2.6, pAtk: 12, pDef: 0.8, mDef: 1.5, eva: 0, xp: 17, color: 0x8a4ad0, draw: 'monster', magic: true },
+  lanky:        { name: 'Three-Eyed Blob', r: 0.6,  hp: 34,  speed: 3.0, pAtk: 13, pDef: 1.0, mDef: 1.1, eva: 0, xp: 12, color: 0x5ab8d8, draw: 'monster' },
+  prickle:      { name: 'Prickle',         r: 0.6,  hp: 36,  speed: 2.6, pAtk: 14, pDef: 1.2, mDef: 0.9, eva: 0, xp: 12, color: 0x5aa84a, draw: 'monster' },
+  hen:          { name: 'Chubby Chick',    r: 0.55, hp: 14,  speed: 4.6, pAtk: 8,  pDef: 0.7, mDef: 0.8, eva: 5, xp: 7,  color: 0xf2c83a, draw: 'monster' },
+  crab:         { name: 'Red Crab',        r: 0.7,  hp: 34,  speed: 3.2, pAtk: 13, pDef: 1.3, mDef: 0.8, eva: 0, xp: 12, color: 0xc84a3a, draw: 'monster' },
+  cyclops:      { name: 'Sand Cyclops',    r: 0.65, hp: 44,  speed: 2.8, pAtk: 16, pDef: 1.2, mDef: 0.9, eva: 0, xp: 14, color: 0xe0b070, draw: 'monster' },
+  deer:         { name: 'Young Deer',      r: 0.6,  hp: 22,  speed: 5.4, pAtk: 9,  pDef: 0.8, mDef: 0.8, eva: 7, xp: 9,  color: 0x9a6a4a, draw: 'monster' },
+  fiend:        { name: 'Red Fiend',       r: 0.6,  hp: 32,  speed: 4.6, pAtk: 14, pDef: 0.9, mDef: 1.1, eva: 5, xp: 15, color: 0xd83a3a, draw: 'monster' },
+  spook:        { name: 'Sheet Ghost',     r: 0.6,  hp: 26,  speed: 2.6, pAtk: 12, pDef: 0.6, mDef: 1.6, eva: 4, xp: 16, color: 0xe8e8f0, draw: 'monster', magic: true },
+  gremlin:      { name: 'Gremlin',         r: 0.6,  hp: 32,  speed: 3.6, pAtk: 13, pDef: 0.9, mDef: 1.0, eva: 3, xp: 12, color: 0x3aa86a, draw: 'monster' },
+  shroom:       { name: 'Toadstool',       r: 0.6,  hp: 30,  speed: 2.4, pAtk: 12, pDef: 1.1, mDef: 1.0, eva: 0, xp: 10, color: 0xc8703a, draw: 'monster' },
+  panda:        { name: 'Panda',           r: 0.65, hp: 42,  speed: 2.8, pAtk: 15, pDef: 1.2, mDef: 0.9, eva: 0, xp: 13, color: 0xd8d8d8, draw: 'monster' },
+  penguin:      { name: 'Penguin',         r: 0.55, hp: 30,  speed: 3.4, pAtk: 12, pDef: 1.0, mDef: 1.0, eva: 2, xp: 11, color: 0x50586a, draw: 'monster' },
+  pig:          { name: 'Pink Pig',        r: 0.6,  hp: 28,  speed: 3.4, pAtk: 11, pDef: 1.0, mDef: 0.8, eva: 0, xp: 9,  color: 0xd88ad0, draw: 'monster' },
+  skull:        { name: 'Hopping Skull',   r: 0.55, hp: 22,  speed: 4.4, pAtk: 12, pDef: 0.8, mDef: 1.0, eva: 5, xp: 12, color: 0xd8d0a0, draw: 'monster' },
+  treant:       { name: 'Stumpling',       r: 1.0,  hp: 95,  speed: 2.0, pAtk: 22, pDef: 1.5, mDef: 0.9, eva: 0, xp: 30, color: 0x7a5a3a, draw: 'monster' },
+  frostling:    { name: 'Frostling',       r: 0.6,  hp: 38,  speed: 3.0, pAtk: 15, pDef: 1.1, mDef: 1.1, eva: 0, xp: 13, color: 0x6ab8e8, draw: 'monster' },
+  bat:          { name: 'Cave Bat',        r: 0.55, hp: 18,  speed: 5.4, pAtk: 10, pDef: 0.7, mDef: 0.9, eva: 9, xp: 11, color: 0x4a4a5a, draw: 'monster', fly: true },
+  hornet:       { name: 'Marsh Hornet',    r: 0.55, hp: 20,  speed: 5.0, pAtk: 11, pDef: 0.8, mDef: 0.8, eva: 7, xp: 11, color: 0xf2c83a, draw: 'monster', fly: true },
+  cthulhu:      { name: 'Cthulhu Spawn',   r: 0.65, hp: 34,  speed: 2.6, pAtk: 13, pDef: 0.8, mDef: 1.5, eva: 0, xp: 19, color: 0x4a8a5a, draw: 'monster', magic: true, fly: true },
+  wyrmling:     { name: 'Sand Wyrmling',   r: 0.65, hp: 32,  speed: 2.8, pAtk: 13, pDef: 0.9, mDef: 1.4, eva: 0, xp: 19, color: 0xd8a83a, draw: 'monster', magic: true, fly: true },
+  // the animals
+  wolf:         { name: 'Grey Wolf',       r: 0.6,  hp: 22,  speed: 5.4, pAtk: 11, pDef: 0.8, mDef: 0.8, eva: 5, xp: 10, color: 0x8a8f98, draw: 'monster' },
+  fox:          { name: 'Red Fox',         r: 0.5,  hp: 16,  speed: 5.6, pAtk: 9,  pDef: 0.7, mDef: 0.8, eva: 8, xp: 9,  color: 0xe07a30, draw: 'monster' },
+  bull:         { name: 'Wild Bull',       r: 1.0,  hp: 110, speed: 2.6, pAtk: 24, pDef: 1.4, mDef: 0.8, eva: 0, xp: 36, color: 0x7a5a40, draw: 'monster' },
+  stag:         { name: 'Forest Stag',     r: 0.8,  hp: 40,  speed: 3.8, pAtk: 15, pDef: 1.0, mDef: 0.9, eva: 3, xp: 14, color: 0x9a6a40, draw: 'monster' },
+  alpaca:       { name: 'Alpaca',          r: 0.7,  hp: 34,  speed: 3.0, pAtk: 12, pDef: 1.0, mDef: 1.0, eva: 0, xp: 11, color: 0xe8dcc0, draw: 'monster' },
+  spider:       { name: 'Giant Spider',    r: 0.7,  hp: 28,  speed: 3.2, pAtk: 12, pDef: 0.8, mDef: 1.3, eva: 2, xp: 16, color: 0x4a4a55, draw: 'monster', magic: true },
+  raptor:       { name: 'Raptor',          r: 0.7,  hp: 36,  speed: 5.2, pAtk: 15, pDef: 0.9, mDef: 0.8, eva: 6, xp: 16, color: 0xb08a5a, draw: 'monster' },
 };
+// How a kind of monster fights, where it is not plain melee, and how many coins it drops, where it is not one.
+//   ai     'shooter': keeps its distance and fires bolts        'boss': fires rings of bolts while it closes in
+//   calm   it minds its own business until somebody hurts it; every other kind goes for a player it notices.
+//          Its name is written in white over its head, an aggressive monster's in red.
+for (const kind of [
+  'slime', 'pinkslime', 'mushnub', 'shroom', 'bunny', 'chicken', 'hen', 'pig', 'pup', 'tabby', 'pigeon', 'skypigeon', 'deer', 'stag', 'fox',
+  'alpaca', 'bull', 'panda', 'penguin', 'crab', 'frog', 'snowball', 'monkroose', 'treant',
+]) MOB_TYPES[kind].calm = true;
+for (const kind of ['shooter', 'shaman', 'alien', 'ghost', 'dragon', 'alienblob', 'hexblob', 'alpakinglord', 'drake', 'glublord', 'tribalmask', 'stalker', 'spook', 'cthulhu', 'wyrmling', 'spider']) MOB_TYPES[kind].ai = 'shooter';
+MOB_TYPES.boss.ai = 'boss';
+for (const kind of ['tank', 'orcbrute', 'yeti', 'bluedemon', 'mushroomking', 'drake']) MOB_TYPES[kind].drops = 3;
+for (const kind of ['spikeslime', 'eldermushnub', 'alpakinglord', 'queenbee', 'golelingelder', 'treant', 'bull']) MOB_TYPES[kind].drops = 2;
+MOB_TYPES.boss.drops = 12;
 export const MOB_KEYS = Object.keys(MOB_TYPES);
 // How far monsters sense and roam, in world units; the map editor draws its threat rings from the same numbers.
 export const AGGRO_R = 13;        // a monster notices a player this close
@@ -23,12 +118,15 @@ export const WANDER_R = 5;        // an idle monster strolls this far from its h
 export const RESPAWN_MULT = 4;
 export const MOB_RISE = 1.4;
 
+// How much stronger every monster is than the table above says: its health and its blows are multiplied by this.
+export const MOB_POWER = 2;
+
 // A monster's combat stats at a given level.
 export function mobStats(type, level) {
   const d = MOB_TYPES[type];
   return {
-    maxHp: Math.ceil(d.hp * (1 + 0.45 * (level - 1))),
-    pAtk: Math.round(d.pAtk * (1 + 0.15 * (level - 1))),
+    maxHp: Math.ceil(d.hp * MOB_POWER * (1 + 0.45 * (level - 1))),
+    pAtk: Math.round(d.pAtk * MOB_POWER * (1 + 0.15 * (level - 1))),
     pDef: Math.round((15 + 3 * level) * d.pDef),
     mDef: Math.round((12 + 2.5 * level) * d.mDef),
     acc: level + 10,
@@ -444,6 +542,10 @@ export function barAdd(bar, id) {
 
 // The chance that a monster leaves a piece of gear, at level 1; it grows by 4 % of itself with each level.
 const GEAR_CHANCE = { chaser: 0.06, runner: 0.05, shooter: 0.08, tank: 0.2, boss: 1 };
+// the kinds that came later: by what they are like - a caster, a brute, a quick one, or plain
+for (const [kind, def] of Object.entries(MOB_TYPES)) {
+  GEAR_CHANCE[kind] ??= def.drops ? 0.2 : def.ai === 'shooter' ? 0.08 : def.speed > 4 ? 0.05 : 0.06;
+}
 export const POTION_CHANCE = 0.12;
 export const gearChance = (type, lvl) => Math.min(1, GEAR_CHANCE[type] * (1 + 0.04 * (lvl - 1)));
 // The best tier a character - or the loot of a monster - of this level can be.

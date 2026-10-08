@@ -184,7 +184,7 @@ test('make refuses what would leave no file form', () => {
   assert.throws(() => cmd.make('region', { shape: { type: 'square', x: 0, z: 0, r: 1 } }), TypeError);
   assert.throws(() => cmd.make('region', { shape: { type: 'poly', points: [[0, 0], [1]] } }), TypeError);
   assert.throws(() => cmd.make('region', { levels: [1] }), TypeError);
-  assert.throws(() => cmd.make('spawn', { types: { dragon: 1 } }), TypeError);
+  assert.throws(() => cmd.make('spawn', { types: { goblin: 1 } }), TypeError);
   assert.throws(() => cmd.make('spawn', { types: { chaser: '3' } }), TypeError);
   assert.throws(() => cmd.make('spawn', { lvl: [1, NaN] }), TypeError);
   assert.throws(() => cmd.make('chest', { big: 1 }), TypeError);
@@ -357,7 +357,7 @@ test('set refuses values that would leave no file form, before anything is writt
   const before = text(map);
   const bad = [
     [o, { x: NaN }], [o, { s: Infinity }], [o, { ry: '90' }], [o, { m: null }], [o, { g: 7 }], [o, { col: 'round' }], [o, { col: [{ x: 0, z: 0, r: NaN }] }],
-    [s, { types: { ghost: 1 } }], [s, { types: [] }], [s, { lvl: [1] }], [s, { count: '3' }], [s, { r: null }],
+    [s, { types: { goblin: 1 } }], [s, { types: [] }], [s, { lvl: [1] }], [s, { count: '3' }], [s, { r: null }],
     [n, { kind: 'wizard' }], [r, { mood: 'sunny' }], [r, { safe: 'yes' }], [r, { name: null }], [r, { levels: 5 }],
     [r, { shape: null }], [r, { shape: { type: 'circle', x: 0, z: 0 } }], [r, { shape: { type: 'poly', points: [[0, 0], [1, 'a']] } }],
     [[map.start], { r: NaN }],
@@ -1597,10 +1597,10 @@ test('typesPatch: the boss respawn rule', () => {
 test('the spawn Stats field: HP, P.Atk and XP at the lowest and the highest level', () => {
   const stats = FIELDS.spawn.find((f) => f.type === 'computed');
   assert.equal(stats.label, 'Stats');
-  assert.equal(stats.text(cmd.make('spawn')), 'Skeleton Minion: HP 45 · P.Atk 16 · XP 10');
+  assert.equal(stats.text(cmd.make('spawn')), 'Skeleton Minion: HP 90 · P.Atk 32 · XP 10');
   assert.equal(stats.text(cmd.make('spawn', { types: { runner: 1, chaser: 3 }, lvl: [1, 2] })),
-    'Skeleton Minion: HP 45–66 · P.Atk 16–18 · XP 10–20\nSkeleton Rogue: HP 24–35 · P.Atk 9–10 · XP 8–16');
-  assert.equal(stats.text(cmd.make('spawn', { types: { boss: 1 }, lvl: [18, 18] })), 'Skeleton King: HP 20,760 · P.Atk 78 · XP 10,800');
+    'Skeleton Minion: HP 90–131 · P.Atk 32–37 · XP 10–20\nSkeleton Rogue: HP 48–70 · P.Atk 18–21 · XP 8–16');
+  assert.equal(stats.text(cmd.make('spawn', { types: { boss: 1 }, lvl: [18, 18] })), 'Skeleton King: HP 41,520 · P.Atk 156 · XP 10,800');
   assert.equal(stats.text(cmd.make('spawn', { types: {} })), '—');
   assert.equal(stats.text(cmd.make('spawn', { lvl: [5, 2] })), '—', 'levels that validate rejects show nothing, and nothing throws');
   assert.equal(stats.text(cmd.make('spawn', { lvl: [1.5, 2] })), '—');

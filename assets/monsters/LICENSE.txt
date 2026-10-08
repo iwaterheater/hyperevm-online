@@ -1,0 +1,7 @@
+All the models here are by Quaternius (quaternius.com).
+License: CC0 1.0 Universal (public domain) - https://creativecommons.org/publicdomain/zero/1.0/
+
+They come from his packs Ultimate Monsters and Cute Animated Monsters, and - the wolf, fox, bull, stag, alpaca, spider
+and raptor - from his animal models as the open-source game World of ClaudeCraft ships them
+(github.com/levy-street/world-of-claudecraft, which records them as CC0 in its CREDITS.md).
+Each file keeps up to five of the model's animations (see tools/import-monsters.mjs).

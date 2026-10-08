@@ -776,7 +776,7 @@ function damageMob(m, hit, dx, dz, knock, p) {
   m.dead = true;
   m.respawnAt = now + m.respawn * (m.type === 'boss' ? 1 : RESPAWN_MULT);
   emit({ k: 'kill', ti: m.ti, ...ev }, m.x, m.z);
-  const drops = m.type === 'boss' ? 12 : m.type === 'tank' ? 3 : 1;
+  const drops = m.def.drops ?? 1;
   for (let i = 0; i < drops; i++) {
     gems.push({
       id: nextId++, x: m.x + rand(-1, 1) * m.r * 1.5, z: m.z + rand(-1, 1) * m.r * 1.5,
@@ -960,7 +960,8 @@ function updateMob(m, dt) {
   if (t && (t.dead || t.safe || Math.hypot(t.x - m.x, t.z - m.z) > 26 || leash > LEASH_R + 4)) t = null;
   if (!t) {
     m.target = 0;
-    let bestD = m.type === 'boss' ? BOSS_AGGRO_R : AGGRO_R;
+    // a calm monster looks for nobody: it fights whoever hurt it (damageMob gives it that target) and then forgets
+    let bestD = m.def.calm ? 0 : m.type === 'boss' ? BOSS_AGGRO_R : AGGRO_R;
     for (const p of players.values()) {
       if (p.dead || p.safe) continue;
       const d = Math.hypot(p.x - m.x, p.z - m.z);
@@ -975,9 +976,10 @@ function updateMob(m, dt) {
     const dist = Math.hypot(dx, dz) || 0.001;
     dx /= dist; dz /= dist;
     mx = dx; mz = dz;
-    if (m.type !== 'shooter' && dist < m.r + 0.9) { mx = 0; mz = 0; }   // melee monsters stop at arm's length instead of walking into the player
-    if (m.type === 'shooter' || m.type === 'boss') {
-      if (m.type === 'shooter') {
+    const shooter = m.def.ai === 'shooter';
+    if (!shooter && dist < m.r + 0.9) { mx = 0; mz = 0; }   // melee monsters stop at arm's length instead of walking into the player
+    if (shooter || m.type === 'boss') {
+      if (shooter) {
         if (dist < 9) { mx = -dx; mz = -dz; } else if (dist < 14) { mx = -dz * m.strafe; mz = dx * m.strafe; }
       }
       m.fireT -= dt;
@@ -1002,7 +1004,7 @@ function updateMob(m, dt) {
 
   // a spell: the Mage stands still to gather it (the King walks on), and it is thrown when the wind-up is over
   if (m.cast) {
-    if (m.type === 'shooter') speed = 0;
+    if (m.def.ai === 'shooter') speed = 0;
     if (now >= m.cast.at) {
       throwOrbs(m, players.get(m.cast.pid));
       m.cast = null;
@@ -1040,7 +1042,7 @@ function updateMob(m, dt) {
         damageMob(m, physical(p, 3, m), -dx / dist, -dz / dist, 14, p);
         if (m.dead) return;
       }
-    } else if (now >= m.hitAt && !m.swing) {
+    } else if (now >= m.hitAt && !m.swing && (m.target || !m.def.calm)) {   // a calm monster lets a cat walk right past it
       m.hitAt = now + 1.2;
       m.swing = { at: now + ATTACK_WINDUP, pid: p.id };
       emit({ k: 'atk', id: m.id }, m.x, m.z);

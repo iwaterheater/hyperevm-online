@@ -18,7 +18,32 @@ function shape(geo, stretch, y) {
   geo.deleteAttribute('uv');
   return geo.scale(1, stretch, 1).translate(0, y, 0);
 }
-const flower = (color) => () => ({ geometry: part(new THREE.IcosahedronGeometry(0.1, 0), color, { pos: [0, 0.28, 0] }), material: flat });
+
+// A flower: a stem with a leaf, a yellow heart and five petals around it. A meadow gives each of its flowers a colour
+// of its own (the colour of the instance), and only the petals take it: `tint` is 1 on them and 0 on the rest, which
+// keeps the stem green and the heart yellow.
+const petals = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
+petals.onBeforeCompile = (shader) => {
+  shader.vertexShader = `attribute float tint;\n${shader.vertexShader}`.replace('#include <color_vertex>', `#include <color_vertex>
+    #ifdef USE_INSTANCING_COLOR
+      vColor.xyz = mix( color.xyz, vColor.xyz, tint );
+    #endif`);
+};
+petals.customProgramCacheKey = () => 'petals';
+const tinted = (geo, tint) => geo.setAttribute('tint', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(tint), 1));
+const flower = (color) => () => {
+  const parts = [
+    tinted(part(cyl(0.012, 0.018, 0.3, 5), 0x4f9a3c, { pos: [0, 0.15, 0] }), 0),
+    tinted(part(new THREE.IcosahedronGeometry(0.05, 0), 0x5aa844, { pos: [0.05, 0.11, 0], rot: [0, 0, 0.5], scale: [1.3, 0.25, 0.6] }), 0),
+    tinted(part(new THREE.IcosahedronGeometry(0.042, 0), 0xffc93a, { pos: [0, 0.325, 0], scale: [1, 0.7, 1] }), 0),
+  ];
+  for (let i = 0; i < 5; i++) {
+    // a petal lies along x, lifted a little at its tip, and is turned to its place around the heart
+    const petal = part(new THREE.IcosahedronGeometry(0.06, 0), color, { pos: [0.078, 0, 0], scale: [1, 0.3, 0.62] });
+    parts.push(tinted(petal.rotateZ(0.5).rotateY(i / 5 * Math.PI * 2).translate(0, 0.31, 0), 1));
+  }
+  return { geometry: merge(parts), material: petals };
+};
 
 const BUILD = {
   fountain: () => ({

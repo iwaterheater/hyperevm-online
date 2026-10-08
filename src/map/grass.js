@@ -355,11 +355,6 @@ export class Grass {
     this.stale = true;
   }
 
-  // How many of the rings are drawn, counted from the cat outwards: fewer blades for a slower machine.
-  setDetail(n) {
-    this.rings.forEach((mesh, i) => { mesh.visible = i < n; });
-  }
-
   // Once per frame. player { x, z } | null: the blades around it lie down. ground: the height it stands on.
   update(time, player = null, ground = 0) {
     this.shared.uTime.value = time;

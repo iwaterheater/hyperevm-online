@@ -24,8 +24,10 @@ export function createComposer(renderer, scene, camera) {
       renderer.setRenderTarget(target);
       return done;
     },
-    setSize(w, h) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); },
-    // the bloom costs several passes over the whole picture: the lowest quality does without
-    setBloom(on) { bloom.enabled = !!on; },
+    setSize(w, h) { composer.setSize(w, h); },
+    // after renderer.setPixelRatio(): the buffers of the passes follow
+    setPixelRatio(ratio) { composer.setPixelRatio(ratio); },
+    // the bloom on or off; without it the frame is the scene and the tone mapping alone
+    setGlow(on) { bloom.enabled = !!on; },
   };
 }
