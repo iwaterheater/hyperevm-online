@@ -440,6 +440,18 @@ export function createFx(scene, { groundY, layOnGround, burst }) {
       burst(x, y, z, tint, 6, 5);
       if (fx === 'fire') flames(x, z, r * 0.6, 3, 0.55, 1.2);
     },
+    // A monster gathers a spell for `dur` seconds: fire turns under its feet and licks up around it, so that everyone
+    // sees it coming. `big` is the King's.
+    mobCast(v, dur, big) {
+      circle('CircleFire', v.x, v.z, v.def.r * 1.6 + 1.3, big ? RED : FIRE, dur + 0.3, { who: v, spin: 5 });
+      flames(v.x, v.z, v.def.r + 0.4, big ? 6 : 3, dur + 0.25, big ? 1.5 : 0.9);
+    },
+    // the blow of a monster's weapon, `delay` seconds from now: an arc as wide as the monster is big
+    mobSwing(v, dx, dz, delay) {
+      slash(v.x, v.z, dx, dz, { h: v.top * 0.45, size: v.def.r * 1.3 + 1.6, tint: PALE, dur: 0.24, delay });
+    },
+    // a cat is wounded
+    wound(x, y, z) { impact(x, y, z, RED, 0.8); },
     // a monster's blast on the ground (the Skeleton King's slam)
     boom(x, z, r) {
       circle('CircleWar', x, z, r, FIRE, 0.5, { wave: true, spin: 0 });

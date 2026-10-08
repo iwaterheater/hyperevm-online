@@ -10,7 +10,7 @@ import { createFx } from './fx.js';
 import { skillIcon, itemIcon, ATTACK_ICON, ICON_FILES } from './icons.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
-  MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
+  ATTACK_WINDUP, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
@@ -232,12 +232,6 @@ function makePool(create) {
 }
 
 const sphereGeo = new THREE.SphereGeometry(1, 12, 8);
-const meshPool = (geo, mat, scale) => makePool(() => {
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.scale.setScalar(scale);
-  scene.add(mesh);
-  return { mesh };
-});
 const bulletMat = new THREE.MeshBasicMaterial({ color: glow(TEAL, 3) });
 const fireMat = new THREE.MeshBasicMaterial({ color: glow(FIRE, 3) });
 const frostMat = new THREE.MeshBasicMaterial({ color: glow(0xa9d8ff, 3) });
@@ -249,7 +243,6 @@ const orbMat = (id) => {
   const k = SKILLS[id];
   return !k ? bulletMat : k.kind === 'heal' ? healMat : k.kind === 'ground' ? fireMat : FX[k.fx] || bulletMat;
 };
-const orbPool = meshPool(sphereGeo, new THREE.MeshBasicMaterial({ color: glow(0xff3b6b, 3) }), 0.32);
 // dropped gold: a glowing placeholder until the coin model has loaded, then a spinning coin
 let gemLook = { geo: new THREE.OctahedronGeometry(0.28), mat: new THREE.MeshBasicMaterial({ color: glow(0xffd76a, 1.8) }) };
 const gemMeshes = [];
@@ -431,8 +424,8 @@ let state = 'menu';   // menu | connecting | playing | lost | reloading
 let ws = null, myId = 0, time = 0, shake = 0, online = 1;
 let joinName = '', testSpeed = 1;   // testSpeed: a play-test may run at double speed
 const names = new Map();
-const others = new Map(), mobViews = new Map(), gemViews = new Map();
-let bullets = [], orbs = [];
+const others = new Map(), mobViews = new Map(), gemViews = new Map(), orbViews = new Map();
+let bullets = [];
 
 const me = makeAvatar();
 // Until the server places it the cat waits where it will appear: on the start point - the menu pose - or, when the page
@@ -655,6 +648,17 @@ function onSnapshot(s) {
     () => {},
     (g) => gemPool.release(g));
 
+  // What the monsters have thrown. The server flies it - a fireball follows its cat - and says where it is; between
+  // two snapshots it is carried on at the speed it last had.
+  syncViews(orbViews, s.o || [],
+    ([, x, z, kind]) => ({ mesh: fx.bolt('fire', kind ? 1.7 : 1.4, kind ? 0xff6a9a : 0xffffff), x, z, sx: x, sz: z, st: time, vx: 0, vz: 0, puff: 0, fresh: true }),
+    (v, [, x, z]) => {
+      const dt = time - v.st;
+      if (!v.fresh && dt > 0.001) { v.vx = (x - v.sx) / dt; v.vz = (z - v.sz) / dt; }
+      Object.assign(v, { sx: x, sz: z, st: time, fresh: false });
+    },
+    (v) => fx.drop(v.mesh));
+
   const open = new Set(s.c);
   chestViews.forEach((v, i) => { v.open = open.has(i); });
 
@@ -673,13 +677,6 @@ function spawnBolt(x, z, id, kind, skill) {
   b.mesh.position.set(x, groundY(x, z) + b.h, z);
   b.speed = kind === 'arrow' ? 42 : 34;
   bullets.push(b);
-}
-
-function spawnProjectile(list, pool, x, z, dx, dz, speed, life) {
-  const b = pool.get();
-  b.mesh.position.set(x, groundY(x, z) + 1, z);
-  b.vx = dx * speed; b.vz = dz * speed; b.life = life;
-  list.push(b);
 }
 
 function onEvent(ev) {
@@ -722,8 +719,16 @@ function onEvent(ev) {
       if (Math.hypot(ev.x - me.x, ev.z - me.z) < 25) shake = Math.max(shake, 0.5);
       sfx(70, 0.5, 'sawtooth', 0.12, -40);
       break;
-    case 'orb':
-      spawnProjectile(orbs, orbPool, ev.x, ev.z, ev.dx, ev.dz, 10, 3.5);
+    case 'orb': {   // a monster lets its spell go; the snapshot that brought this has put the fireball into the world
+      const v = orbViews.get(ev.id);
+      if (v) { v.vx = ev.vx; v.vz = ev.vz; }
+      burst(ev.x, 1.1, ev.z, FIRE, 6, 4);
+      if (Math.hypot(ev.x - me.x, ev.z - me.z) < 30) sfx(300, 0.18, 'sawtooth', 0.03, -160);
+      break;
+    }
+    case 'orbx':    // it burst on a cat, or burnt out
+      fx.hit('fire', ev.x, 1, ev.z, ev.h ? 1 : 0.3);
+      if (ev.h && Math.hypot(ev.x - me.x, ev.z - me.z) < 30) sfx(110, 0.25, 'sawtooth', 0.06, -50);
       break;
     case 'hit': {   // a blow that landed, on a monster or on a cat
       const v = viewOf(ev.id);
@@ -741,9 +746,14 @@ function onEvent(ev) {
     case 'dodge':
       floatText(me.x, 3.3, me.z, 'Dodge', '#a9d8ff');
       break;
-    case 'atk':
-      mobViews.get(ev.id)?.skeleton.attack();
+    case 'atk': {   // a monster starts its blow, or (c) gathers a spell: both land when the wind-up is over
+      const v = mobViews.get(ev.id);
+      if (!v) break;
+      v.skeleton.attack();
+      if (ev.c) fx.mobCast(v, ATTACK_WINDUP, v.def === MOB_TYPES.boss);
+      else fx.mobSwing(v, Math.sin(v.yaw), Math.cos(v.yaw), ATTACK_WINDUP - 0.1);
       break;
+    }
     case 'kill': {
       const r = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].r : 0.7;
       burst(ev.x, r * 1.5, ev.z, ev.ti >= 0 ? BONE : 0xffffff, 16 + r * 14, 8);
@@ -834,6 +844,7 @@ function onEvent(ev) {
       $('flash').style.opacity = 1;
       setTimeout(() => { $('flash').style.opacity = 0; }, 120);
       burst(me.x, me.y + 1, me.z, 0xff4d7a, 10, 6);
+      fx.wound(me.x, me.y + 1.1, me.z);
       sfx(140, 0.2, 'sawtooth', 0.09, -60);
       break;
     case 'tp': {
@@ -1352,15 +1363,17 @@ function updateViews(dt) {
     layOnGround(targetRing, tv.x, tv.z, targetRing.scale.x / 2, 0.07);
     targetRing.material.color.setHex(attacking ? 0xff4d5e : 0xffd76a);
   }
-  orbs = orbs.filter((o) => {
-    const m = o.mesh.position;
-    m.x += o.vx * dt; m.z += o.vz * dt;
-    m.y = groundY(m.x, m.z) + 1;   // it skims the ground: the server lets it hit whoever is not jumping
-    o.life -= dt;
-    const dead = o.life <= 0 || isSafe(map, m.x, m.z) || (Math.hypot(m.x - me.x, m.z - me.z) < 0.7 && me.y < 1.4);
-    if (dead) { burst(m.x, 1, m.z, 0xff3b6b, 4, 3); orbPool.release(o); }
-    return !dead;
-  });
+  // The monsters' fireballs: each is carried on from where the server last had it, and leaves a wake of sparks. It
+  // skims the ground - the server lets it hit whoever is not jumping.
+  const pull = 1 - Math.exp(-18 * dt);
+  for (const v of orbViews.values()) {
+    const ahead = time - v.st;
+    v.x += (v.sx + v.vx * ahead - v.x) * pull; v.z += (v.sz + v.vz * ahead - v.z) * pull;
+    const y = groundY(v.x, v.z) + 1;
+    v.mesh.position.set(v.x, y, v.z);
+    fx.point(v.mesh, v.x + v.vx, y, v.z + v.vz, dt);
+    if ((v.puff -= dt) <= 0) { v.puff = 0.045; burst(v.x, 1, v.z, FIRE, 1, 1.4); }
+  }
 
   for (let j = floaters.length - 1; j >= 0; j--) {
     const f = floaters[j];

@@ -535,7 +535,7 @@ let chests = [];
 const rand = (a, b) => a + Math.random() * (b - a);
 const r2 = (v) => Math.round(v * 100) / 100;
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-const CLEAN = { kx: 0, kz: 0, target: 0, swing: null, stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null };
+const CLEAN = { kx: 0, kz: 0, target: 0, swing: null, cast: null, stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null };
 // Seconds the movement check stays loose after the server has put a player somewhere (a join, a respawn, a corrected
 // position, a new map), and the units a step may then be beyond the speed limit. A cat that lands beside blocked ground
 // or scenery is pushed several units by its own client; without the grace the server would snap it back for ever.
@@ -898,6 +898,21 @@ function respawnPlayer(p) {
 
 // ---------------------------------------------------------------- simulation
 
+// What a Skeleton Mage and the King throw. The Mage's fireball follows the cat it was thrown at, but it turns only so
+// fast: a jump over it, a dash through it or a sharp step aside at the last moment lets it fly past, and it has burnt
+// out before it comes round again. The King's ring of eight flies straight: one at his target, the rest around him.
+const ORB_SPEED = 12, ORB_TURN = 2.2, ORB_LIFE = 3.5, KING_ORB_SPEED = 10;
+function throwOrbs(m, t) {
+  if (!t || t.dead || t.safe) return;
+  const king = m.type === 'boss', aim = Math.atan2(t.z - m.z, t.x - m.x), shots = king ? 8 : 1, speed = king ? KING_ORB_SPEED : ORB_SPEED;
+  for (let i = 0; i < shots; i++) {
+    const a = aim + i * Math.PI * 2 / shots, ox = Math.cos(a), oz = Math.sin(a);
+    const o = { id: nextId++, x: m.x + ox * m.r, z: m.z + oz * m.r, vx: ox * speed, vz: oz * speed, speed, life: ORB_LIFE, from: m, kind: king ? 1 : 0, target: king ? 0 : t.id };
+    orbs.push(o);
+    emit({ k: 'orb', id: o.id, o: m.id, x: r2(o.x), z: r2(o.z), vx: r2(o.vx), vz: r2(o.vz) }, m.x, m.z);
+  }
+}
+
 function updateMob(m, dt) {
   if (m.dead) {
     if (now >= m.respawnAt) Object.assign(m, { dead: false, x: m.sx, z: m.sz, hp: m.maxHp }, CLEAN);
@@ -917,6 +932,7 @@ function updateMob(m, dt) {
   const damp = Math.exp(-6 * dt);
   if (now < m.stunUntil || now < m.sleepUntil) {   // out of action: no thinking, no moving, no attacking
     m.swing = null;
+    m.cast = null;   // and the spell it was gathering is lost
     const fromX = m.x, fromZ = m.z;
     m.x += m.kx * dt; m.z += m.kz * dt;
     m.kx *= damp; m.kz *= damp;
@@ -951,16 +967,11 @@ function updateMob(m, dt) {
         if (dist < 9) { mx = -dx; mz = -dz; } else if (dist < 14) { mx = -dz * m.strafe; mz = dx * m.strafe; }
       }
       m.fireT -= dt;
-      if (m.fireT <= 0 && dist < 22) {
+      if (m.fireT <= 0 && dist < 22 && !m.cast) {
+        // the spell is gathered first, for as long as a blade takes to fall: everyone sees it coming (c: a cast)
         m.fireT = m.type === 'boss' ? 1.4 : 2.2;
-        emit({ k: 'atk', id: m.id }, m.x, m.z);
-        const shots = m.type === 'boss' ? 8 : 1;
-        for (let i = 0; i < shots; i++) {
-          const a = Math.atan2(dz, dx) + i * Math.PI * 2 / shots;
-          const ox = Math.cos(a), oz = Math.sin(a);
-          orbs.push({ x: m.x + ox * m.r, z: m.z + oz * m.r, vx: ox * 10, vz: oz * 10, life: 3.5, from: m });
-          emit({ k: 'orb', x: r2(m.x + ox * m.r), z: r2(m.z + oz * m.r), dx: r2(ox), dz: r2(oz) }, m.x, m.z);
-        }
+        m.cast = { at: now + ATTACK_WINDUP, pid: t.id };
+        emit({ k: 'atk', id: m.id, c: 1 }, m.x, m.z);
       }
     }
   } else {
@@ -973,6 +984,15 @@ function updateMob(m, dt) {
     }
     const dx = m.wx - m.x, dz = m.wz - m.z, dist = Math.hypot(dx, dz);
     if (dist > 0.5) { mx = dx / dist; mz = dz / dist; speed *= leash > 12 ? 1.5 : 0.4; }
+  }
+
+  // a spell: the Mage stands still to gather it (the King walks on), and it is thrown when the wind-up is over
+  if (m.cast) {
+    if (m.type === 'shooter') speed = 0;
+    if (now >= m.cast.at) {
+      throwOrbs(m, players.get(m.cast.pid));
+      m.cast = null;
+    }
   }
 
   // a melee swing: the monster plants its feet, and the hit lands after the wind-up if the target is still close
@@ -1094,17 +1114,27 @@ function tick() {
   });
 
   orbs = orbs.filter((o) => {
-    const ox = o.x, oz = o.z;
+    const ox = o.x, oz = o.z, t = o.target ? players.get(o.target) : null;
+    if (t && !t.dead) {   // a fireball bends towards its cat, as fast as it can turn
+      const want = Math.atan2(t.z - o.z, t.x - o.x), have = Math.atan2(o.vz, o.vx);
+      const off = Math.atan2(Math.sin(want - have), Math.cos(want - have)), a = have + Math.max(-ORB_TURN * dt, Math.min(ORB_TURN * dt, off));
+      o.vx = Math.cos(a) * o.speed; o.vz = Math.sin(a) * o.speed;
+    }
     o.x += o.vx * dt; o.z += o.vz * dt;
     o.life -= dt;
-    if (o.life <= 0 || regions.isSafe(o.x, o.z)) return false;
-    for (const p of players.values()) {
-      if (!p.dead && p.y < 1.4 && now >= p.dashUntil && segDist2(p.x, p.z, ox, oz, o.x, o.z) < 0.6) {
-        hurtPlayer(p, o.from, true);
-        return false;
+    let hit = 0;
+    if (o.life > 0 && !regions.isSafe(o.x, o.z)) {
+      for (const p of players.values()) {
+        if (!p.dead && p.y < 1.4 && now >= p.dashUntil && segDist2(p.x, p.z, ox, oz, o.x, o.z) < 0.6) {
+          hurtPlayer(p, o.from, true);
+          hit = 1;
+          break;
+        }
       }
+      if (!hit) return true;
     }
-    return true;
+    emit({ k: 'orbx', id: o.id, x: r2(o.x), z: r2(o.z), h: hit }, o.x, o.z);   // it burst on a cat (h), or burnt out
+    return false;
   });
 
   gems = gems.filter((g) => {
@@ -1146,6 +1176,7 @@ function tick() {
         buffs: Object.entries(p.buffs).filter(([, b]) => now < b.until).map(([stat, b]) => [stat, Math.ceil(b.until - now), b.mult]),
       },
       p: [], m: [], g: [],
+      o: orbs.filter(near).map((o) => [o.id, r2(o.x), r2(o.z), o.kind]),   // what the monsters have thrown: 0 a fireball, 1 the King's
       c: chests.filter((c) => now < c.openUntil && near(c)).map((c) => c.i),   // chests that currently stand open
       e: p.events,
     };

@@ -1736,3 +1736,43 @@ check('pvp: a cat put to sleep can neither move nor strike until a blow wakes it
   await victim.send({ t: 'm', x: BESIDE[0] + 2, y: 0, z: BESIDE[1], yaw: 0, s: 1 });
   await mage.until('the step', () => seen(mage, victim.w.id)[1] === BESIDE[0] + 2);
 }));
+
+
+// ---------------------------------------------------------------- what monsters throw
+
+check('monsters: a Skeleton Mage gathers its fireball in sight of everyone, and the fireball follows the cat - unless the cat jumps over it', () => withServer({
+  map: edited((file) => { file.spawns = [{ ...FILE.spawns[0], types: { shooter: 1 }, lvl: [1, 1], x: 100, z: 100, r: 2, count: 1 }]; }),
+}, async (s) => {
+  // a cat that cannot be hurt, twelve steps from the Mage: a fireball still bursts on it
+  const p = await enter(s, { test: { at: [100, 112], god: true, lvl: 40 } });
+  const mage = await p.until('the Mage', () => p.mobs[0]);
+  const orbsSeen = [];
+  p.c.ws.on('message', (data) => { const m = JSON.parse(data); if (m.t === 's') orbsSeen.push(...m.o); });
+  const cast = await p.event('atk');
+  assert.deepEqual(cast, { k: 'atk', id: mage[0], c: 1 });   // the wind-up, before anything flies
+  const first = await p.event('orb');
+  assert.equal(first.o, mage[0]);
+  assert.ok(Math.abs(Math.hypot(first.vx, first.vz) - 12) < 0.05, 'it leaves at its speed');
+  // the cat steps ten units aside of the line the fireball left on: a straight one would pass far away
+  const len = Math.hypot(first.vx, first.vz), aside = { x: p.w.x - first.vz / len * 10, z: p.w.z + first.vx / len * 10 };
+  await p.send({ t: 'm', x: aside.x, y: 0, z: aside.z, yaw: 0, s: 0 });
+  const end = await p.until('the end of the fireball', () => {
+    const i = p.events.findIndex((ev) => ev.k === 'orbx' && ev.id === first.id);
+    return i >= 0 && p.events.splice(i, 1)[0];
+  });
+  assert.equal(end.h, 1);
+  assert.ok(Math.hypot(end.x - aside.x, end.z - aside.z) < 2, 'it burst where the cat stood');
+  assert.ok(orbsSeen.some((o) => o[0] === first.id && o[3] === 0), 'the snapshots carried it');
+  // the next one finds the cat in the air: it flies through under it and burns out
+  const second = await p.event('orb');
+  const hop = setInterval(() => p.send({ t: 'm', x: aside.x, y: 3, z: aside.z, yaw: 0, s: 0 }), 60);
+  try {
+    const missed = await p.until('the end of the second fireball', () => {
+      const i = p.events.findIndex((ev) => ev.k === 'orbx' && ev.id === second.id);
+      return i >= 0 && p.events.splice(i, 1)[0];
+    });
+    assert.equal(missed.h, 0);
+  } finally {
+    clearInterval(hop);
+  }
+}));

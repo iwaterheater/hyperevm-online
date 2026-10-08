@@ -90,7 +90,7 @@ A zone is a region of the map: a circle or a polygon with a name, a level range,
 | --- | --- |
 | Skeleton Minion | Shambles at you with a blade |
 | Skeleton Rogue | Small, fast, fragile, dual-wields blades |
-| Skeleton Mage | Keeps its distance and fires orbs from its staff |
+| Skeleton Mage | Keeps its distance, gathers a spell in a ring of fire and throws a fireball that follows its target - jump over it, dash through it or step aside at the last moment |
 | Skeleton Warrior | Slow, tough, hits hard with an axe, drops extra gold |
 | Skeleton King | Boss; fires rings of orbs, respawns after 90 seconds |
 
