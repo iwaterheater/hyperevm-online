@@ -671,9 +671,10 @@ const viewOf = (id) => mobViews.get(id) || others.get(id) || (id && id === myId 
 // A bolt that homes in on a monster or a cat; purely visual, the server decides the damage. A skill's bolt is larger than that
 // of a plain attack and may carry the skill's colour.
 const BOLT_LOOK = { power_shot: [1.7, 0xffd76a], pinning_shot: [1.4, 0xa9d8ff], fireball: [1.25] };
-function spawnBolt(x, z, id, kind, skill) {
+const boltFrom = new THREE.Vector3();
+function spawnBolt(x, z, id, kind, skill, h = 1.1) {
   const b = { mesh: fx.bolt(kind, ...(BOLT_LOOK[skill] || [])), kind, id };
-  b.h = 1.1;   // its height above the ground it flies over
+  b.h = h;   // its height above the ground it flies over
   b.mesh.position.set(x, groundY(x, z) + b.h, z);
   b.speed = kind === 'arrow' ? 42 : 34;
   bullets.push(b);
@@ -700,7 +701,11 @@ function onEvent(ev) {
         if (ev.o !== myId) Object.assign(a, { swingT: 0, swingKind: 2 });
         sfx(240, 0.14, 'sawtooth', 0.05, 300);
       } else if (k.kind === 'shot' || k.kind === 'bolt') {
-        spawnBolt(a.x, a.z, ev.tid, k.fx, ev.s);
+        // a spell leaves the crystal of the staff, when the cat holds one
+        if (a.cat.castPoint(boltFrom)) {
+          a.cat.group.localToWorld(boltFrom);
+          spawnBolt(boltFrom.x, boltFrom.z, ev.tid, k.fx, ev.s, boltFrom.y - groundY(boltFrom.x, boltFrom.z));
+        } else spawnBolt(a.x, a.z, ev.tid, k.fx, ev.s);
         a.shootPose = 0.25;
         sfx(660, 0.12, 'square', 0.04, -400);
       } else if (k.kind === 'ground') {
@@ -1087,7 +1092,12 @@ function useSkill(id, tdx, tdz) {
   if (k.kind === 'ground') [msg.x, msg.z] = groundPoint(k.range);
   if (k.kind === 'strike') Object.assign(me, { swingT: 0, swingKind: 2 });   // the blow itself is drawn when the server confirms it
   if (k.kind === 'dash') startDash();
-  if (k.kind === 'strike' || k.kind === 'shot' || k.kind === 'bolt') attacking = true;   // an attack skill also starts the auto-attack
+  // An attack skill also starts the auto-attack - when that goes on from where the cat stands: a blow does, and a shot
+  // from a bow. A spell or a shot by a cat with a blade or a staff in its paw does not: it would run up to its target
+  // to hit it, and whoever casts means to stay where they are. One that was running up already stops.
+  const ranged = fightStyle(stats.cls, heldFamily(stats.cls, stats.eq)).ranged;
+  if (k.kind === 'strike' || ((k.kind === 'shot' || k.kind === 'bolt') && ranged)) attacking = true;
+  else if (k.kind === 'shot' || k.kind === 'bolt' || k.kind === 'sleep' || k.kind === 'ground') attacking = false;
   me.sitting = false;
   send(msg);
 }
@@ -1289,6 +1299,7 @@ function updateAvatar(a, dt, isMe) {
   a.status?.update(flags, time);
   const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
   a.orb.visible = a.castT >= 0;
+  if (a.orb.visible && !a.cat.castPoint(a.orb.position)) a.orb.position.set(0, 1.0, 0.85);   // at the crystal of a staff, else between the paws
   a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
   a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
