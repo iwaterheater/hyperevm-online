@@ -114,12 +114,15 @@ export const BOSS_AGGRO_R = 20;   // the same for a boss
 export const LEASH_R = 30;        // it only picks a target while it is this close to its home
 export const WANDER_R = 5;        // an idle monster strolls this far from its home on each axis
 
+// How much stronger every monster is than the table above says: its health and its blows are multiplied by this.
+export const MOB_POWER = 2;
+
 // A monster's combat stats at a given level.
 export function mobStats(type, level) {
   const d = MOB_TYPES[type];
   return {
-    maxHp: Math.ceil(d.hp * (1 + 0.45 * (level - 1))),
-    pAtk: Math.round(d.pAtk * (1 + 0.15 * (level - 1))),
+    maxHp: Math.ceil(d.hp * MOB_POWER * (1 + 0.45 * (level - 1))),
+    pAtk: Math.round(d.pAtk * MOB_POWER * (1 + 0.15 * (level - 1))),
     pDef: Math.round((15 + 3 * level) * d.pDef),
     mDef: Math.round((12 + 2.5 * level) * d.mDef),
     acc: level + 10,
