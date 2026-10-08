@@ -1643,7 +1643,7 @@ function toggleHelp(open = !helpOpen) {
 }
 
 // ---- the world map: the whole island, where the radar shows only what is around the cat. It is surveyed and painted
-// when it is first opened, and drawn again every frame while it is open (src/worldmap.js).
+// when it is first opened, and drawn again ten times a second while it is open (src/worldmap.js).
 // How dangerous a monster of a level is for this player: at least so many levels above it, the colour, the word.
 const THREAT = [[5, '#ff5a6a', 'deadly'], [3, '#ffa24d', 'hard'], [-2, '#fff3b0', 'even'], [-5, '#8ee68e', 'easy'], [-Infinity, '#aab4b8', 'trivial']];
 const threat = (lvl) => THREAT.find(([above]) => lvl - stats.level >= above)[1];
@@ -1657,14 +1657,22 @@ function toggleMap(open = !mapOpen) {
     drawWorldMap();
   } else mapHover = null;
 }
+const MAP_EVERY = 0.1;   // seconds between two drawings of the open map: nothing on an island moves faster than that shows
+let mapDue = 0;
 function drawWorldMap() {
+  mapDue = MAP_EVERY;
   worldMap.draw({ me, others: others.values(), threat });
+  tellMapHover();
+}
+// The line over the map: what is under the cursor, or where the cat is. It follows the cursor at once - the picture
+// itself has not changed, so it is not drawn again for that.
+function tellMapHover() {
   const hit = mapHover && worldMap.pick(mapHover.x, mapHover.y);
   const text = hit ? worldMap.describe(hit) : `You are in ${regionLabel(regionAt(map, me.x, me.z))}`;
   if ($('mapSub').textContent !== text) $('mapSub').textContent = text;
 }
-$('mapView').addEventListener('mousemove', (e) => { mapHover = { x: e.clientX, y: e.clientY }; });
-$('mapView').addEventListener('mouseleave', () => { mapHover = null; });
+$('mapView').addEventListener('mousemove', (e) => { mapHover = { x: e.clientX, y: e.clientY }; tellMapHover(); });
+$('mapView').addEventListener('mouseleave', () => { mapHover = null; tellMapHover(); });
 $('minimap').addEventListener('click', () => { if (state === 'playing') toggleMap(); });   // the radar opens the map it is a part of
 $('mapLegend').append('Camps', ...[...THREAT].reverse().map(([, color, word]) => {
   const item = el('span', '', word);
@@ -2163,8 +2171,8 @@ function toggleSheet(open = !sheetOpen) {
   $('sheet').classList.toggle('on', open);
 }
 
-// ---- the window buttons: a row over the radar, each with its name under its sign, and a column of plain ones (`side`)
-// under it. A click does what the key does, and a button is lit while its window is open. The Trader's button is
+// ---- the window buttons: a row under the radar and the place, each with its name under its sign, and a column of
+// plain ones (`side`) under that. A click does what the key does, and a button is lit while its window is open. The Trader's button is
 // there only while he is in reach, like his key.
 const MENU = [
   { name: 'Shop', key: 'T', toggle: () => tradeKey(), isOpen: () => storeOpen, near: 'trader',
@@ -2411,26 +2419,26 @@ function drawMinimap() {
     const w = h * img.width / img.height;
     g.drawImage(img, at[0] - w / 2, at[1] - h / 2, w, h);
   };
-  for (const v of mobViews.values()) dot(v.x, v.z, v.def.r * 4 + 3.5, css(v.def.color));
+  for (const v of mobViews.values()) dot(v.x, v.z, v.def.r * 4 + 5, css(v.def.color));
   for (const gem of gemViews.values()) dot(gem.mesh.position.x, gem.mesh.position.z, 4.5, '#ffd76a');
   chestViews.forEach((v, i) => {
     const c = map.chests[i];
-    if (c && !v.open) mark('chest', c.x, c.z, c.big ? 30 : 22);
+    if (c && !v.open) mark('chest', c.x, c.z, c.big ? 36 : 28);
   });
-  for (const spawn of map.spawns) if (hasBoss(spawn)) mark('skull', spawn.x, spawn.z, 34, true);
-  mark('house', map.start.x, map.start.z, 34, true);          // town
+  for (const spawn of map.spawns) if (hasBoss(spawn)) mark('skull', spawn.x, spawn.z, 42, true);
+  mark('house', map.start.x, map.start.z, 42, true);          // town
   g.lineWidth = 2;
   g.strokeStyle = 'rgba(4, 16, 14, .85)';
   for (const a of others.values()) {
     const at = place(a.x, a.z);
     if (!at) continue;
     g.fillStyle = a.st ? PVP_COLORS[a.st] : '#ffffff';
-    g.beginPath(); g.arc(at[0], at[1], 7, 0, 7); g.fill(); g.stroke();
+    g.beginPath(); g.arc(at[0], at[1], 8.5, 0, 7); g.fill(); g.stroke();
   }
   // the player: an arrow that points where the cat looks
   g.translate(C, C);
   g.rotate(Math.atan2(Math.sin(me.yaw), -Math.cos(me.yaw)));   // 0 = north, clockwise
-  g.beginPath(); g.moveTo(0, -23); g.lineTo(17, 18); g.lineTo(0, 10); g.lineTo(-17, 18); g.closePath();
+  g.beginPath(); g.moveTo(0, -27); g.lineTo(20, 21); g.lineTo(0, 12); g.lineTo(-20, 21); g.closePath();
   g.fillStyle = '#ffffff'; g.fill();
   g.lineJoin = 'round';
   g.lineWidth = 3; g.strokeStyle = '#0a1412'; g.stroke();
@@ -2479,7 +2487,7 @@ function tick(dt) {
     updateViews(dt);
     updateHud();
     if ((mapT -= dt) <= 0) { mapT = 0.15; drawMinimap(); }
-    if (mapOpen) drawWorldMap();
+    if (mapOpen && (mapDue -= dt) <= 0) drawWorldMap();
   } else {
     me.yaw = Math.sin(time * 0.6) * 0.7;
   }

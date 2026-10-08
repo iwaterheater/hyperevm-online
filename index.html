@@ -23,61 +23,63 @@
 
   /* The player's frame, from the pieces of assets/ui/hud (tools/build-hud.py): the long plate with its leaves, over
      its left end the portrait in the laurel ring, and on the plate the name, the level and class, health and mana.
-     The numbers place the pieces on each other: the plate is shown at 0.415 of its picture and the ring at 0.565, so
-     that the disc inside the ring (centre 92, 69; radius 55) covers the round end of the plate. */
-  #stats { position: absolute; top: 10px; left: 14px; width: 388px; height: 158px; }
-  #statsPlate { position: absolute; left: 67px; top: 16px; width: 318px; height: 110px; background: url(./assets/ui/hud/frame.png) 0 0 / 100% 100% no-repeat; }
-  #statsText { position: absolute; left: 96px; top: 11px; width: 196px; }
-  #who { font-size: 17px; font-weight: 800; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; }
-  #whoSub { display: flex; align-items: center; gap: 5px; margin: 1px 0 4px; font-size: 12.5px; line-height: 16px; white-space: nowrap; }
-  #whoSub img { width: 13px; height: 15px; }
-  #whoSub i { width: 1px; height: 11px; margin: 0 2px; background: rgba(255, 255, 255, .45); }
+     The numbers place the pieces on each other: the plate is shown at 0.324 of its picture and the ring at 0.441, so
+     that the disc inside the ring (centre 72, 54; radius 43) covers the round end of the plate. */
+  #stats { position: absolute; top: 8px; left: 10px; width: 303px; height: 124px; }
+  #statsPlate { position: absolute; left: 52px; top: 12px; width: 248px; height: 86px; background: url(./assets/ui/hud/frame.png) 0 0 / 100% 100% no-repeat; }
+  /* 140px: the bars end inside the notch in the plate's upper right corner; the name ends sooner, under the notch itself */
+  #statsText { position: absolute; left: 75px; top: 9px; width: 140px; }
+  #who { max-width: 122px; font-size: 14px; font-weight: 800; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px #000; }
+  #whoSub { display: flex; align-items: center; gap: 4px; margin: 1px 0 3px; font-size: 10.5px; line-height: 13px; white-space: nowrap; }
+  #whoSub img { width: 10px; height: 12px; }
+  #whoSub i { width: 1px; height: 9px; margin: 0 1px; background: rgba(255, 255, 255, .45); }
   /* a gauge: the filled part under the numbers */
-  .gauge { position: relative; height: 16px; margin-top: 4px; border-radius: 8px; background: rgba(2, 8, 7, .75); overflow: hidden;
+  .gauge { position: relative; height: 13px; margin-top: 3px; border-radius: 7px; background: rgba(2, 8, 7, .75); overflow: hidden;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, .7); }
-  .gauge i { display: block; height: 100%; width: 0; border-radius: 8px; transition: width .12s; }
-  .gauge span { position: absolute; inset: 0 9px 0 0; text-align: right; font-size: 11.5px; font-weight: 700; line-height: 16px; text-shadow: 0 1px 2px rgba(0, 0, 0, .8); }
+  .gauge i { display: block; height: 100%; width: 0; border-radius: 7px; transition: width .12s; }
+  .gauge span { position: absolute; inset: 0 7px 0 0; text-align: right; font-size: 10px; font-weight: 700; line-height: 13px; text-shadow: 0 1px 2px rgba(0, 0, 0, .8); }
   #hpFill { background: linear-gradient(90deg, #e8263f, #ff5a66 70%, #ff7a7a); }
   #mpFill { background: linear-gradient(90deg, #1f7bf2, #49a8ff 70%, #6cc2ff); }
-  #portraitRing { position: absolute; left: 0; top: 0; width: 184px; height: 157px; background: url(./assets/ui/hud/portrait-ring.png) 0 0 / 100% 100% no-repeat; }
-  #portrait { position: absolute; left: 38px; top: 15px; width: 108px; height: 108px; border-radius: 50%; }
-  #levelBadge { position: absolute; left: 34px; top: 92px; width: 36px; height: 36px; border-radius: 50%; font-size: 15px; font-weight: 800; line-height: 32px;
+  #portraitRing { position: absolute; left: 0; top: 0; width: 144px; height: 122px; background: url(./assets/ui/hud/portrait-ring.png) 0 0 / 100% 100% no-repeat; }
+  #portrait { position: absolute; left: 30px; top: 12px; width: 84px; height: 84px; border-radius: 50%; }
+  #levelBadge { position: absolute; left: 26px; top: 71px; width: 28px; height: 28px; border-radius: 50%; font-size: 12px; font-weight: 800; line-height: 24px;
     text-align: center; color: #fff; background: #0a1210; border: 2px solid #e8b84a; box-shadow: 0 0 0 2px #0a1210, 0 2px 6px rgba(0, 0, 0, .6); }
 
-  /* The right edge, from the top: the row of window buttons, the radar, the place the cat is in, and two more buttons. */
-  #right { position: absolute; top: 12px; right: 14px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-  #menubar { display: flex; gap: 2px; padding: 5px 6px; pointer-events: auto; border-radius: 14px; background: var(--plate); border: 1px solid var(--line);
+  /* The right edge, from the top: the radar, the place the cat is in, the row of window buttons, and two more buttons. */
+  #right { position: absolute; top: 10px; right: 12px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  #menubar { display: flex; gap: 1px; padding: 3px 4px; pointer-events: auto; border-radius: 12px; background: var(--plate); border: 1px solid var(--line);
     backdrop-filter: blur(6px); }
-  #sidebar { display: flex; flex-direction: column; gap: 8px; pointer-events: auto; }
+  #sidebar { display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
   /* a window button: its sign and, in the row, its name under it; lit while its window is open */
-  .mbtn { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; width: 64px; height: 52px;
-    cursor: pointer; color: #f4fbf8; border-radius: 10px; font-size: 11.5px; line-height: 1; }
+  .mbtn { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 51px; height: 38px;
+    cursor: pointer; color: #f4fbf8; border-radius: 8px; font-size: 9.5px; line-height: 1; }
   .mbtn:hover { background: rgba(255, 255, 255, .1); }
   .mbtn.on { color: var(--gold); background: rgba(255, 215, 106, .13); }
-  .mbtn svg { width: 26px; height: 26px; fill: currentColor; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .6)); }
-  #sidebar .mbtn { width: 44px; height: 44px; border-radius: 12px; background: var(--plate); border: 1px solid var(--line); backdrop-filter: blur(6px); }
+  .mbtn svg { width: 19px; height: 19px; fill: currentColor; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .6)); }
+  #sidebar .mbtn { width: 36px; height: 36px; border-radius: 10px; background: var(--plate); border: 1px solid var(--line); backdrop-filter: blur(6px); }
+  #sidebar .mbtn svg { width: 22px; height: 22px; }
   #sidebar .mbtn:hover { filter: brightness(1.5); }
   #sidebar .mbtn.on { border-color: var(--gold); }
   /* on the Skills button: how many skills the unspent points would buy now */
-  .mbtn .badge { position: absolute; top: 0; right: 8px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; font-size: 11px; font-weight: 800;
-    line-height: 17px; text-align: center; color: #04211c; background: var(--gold); box-shadow: 0 0 8px rgba(255, 215, 106, .8); }
+  .mbtn .badge { position: absolute; top: -3px; right: 3px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 800;
+    line-height: 15px; text-align: center; color: #04211c; background: var(--gold); box-shadow: 0 0 8px rgba(255, 215, 106, .8); }
   .mbtn .badge:empty { display: none; }
-  /* The radar: the live picture on a canvas, and over it the gold ring with its "N" (shown at 0.6 of its picture: the
-     hole in the ring is centred on 113, 134.4 and 104.4 in radius). A click on the picture opens the world map. */
-  #radar { position: relative; width: 228px; height: 256px; }
-  #minimap { position: absolute; left: 8px; top: 29px; width: 210px; height: 210px; border-radius: 50%; pointer-events: auto; cursor: pointer; }
+  /* The radar: the live picture on a canvas, and over it the gold ring with its "N" (shown at 0.456 of its picture:
+     the hole in the ring is centred on 86, 102 and 79 in radius). A click on the picture opens the world map. */
+  #radar { position: relative; width: 173px; height: 194px; }
+  #minimap { position: absolute; left: 6px; top: 22px; width: 160px; height: 160px; border-radius: 50%; pointer-events: auto; cursor: pointer; }
   #radarRing { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .45)); }
-  #radar button { position: absolute; left: 187px; width: 36px; height: 36px; padding: 0; border-radius: 50%; background: 0 0 / 100% 100% no-repeat; box-shadow: none;
+  #radar button { position: absolute; left: 143px; width: 28px; height: 28px; padding: 0; border-radius: 50%; background: 0 0 / 100% 100% no-repeat; box-shadow: none;
     font-size: 0; }
   #radar button:hover { transform: none; }
   #radar button:disabled { opacity: .45; cursor: default; }
-  #radar #zoomIn { top: 175px; background-image: url(./assets/ui/hud/zoom-in.png); }
-  #radar #zoomOut { top: 214px; background-image: url(./assets/ui/hud/zoom-out.png); }
+  #radar #zoomIn { top: 133px; background-image: url(./assets/ui/hud/zoom-in.png); }
+  #radar #zoomOut { top: 163px; background-image: url(./assets/ui/hud/zoom-out.png); }
   #radar #zoomIn:hover:enabled { background-image: url(./assets/ui/hud/zoom-in-lit.png); }
   #radar #zoomOut:hover:enabled { background-image: url(./assets/ui/hud/zoom-out-lit.png); }
-  #place { display: flex; align-items: center; gap: 10px; width: 196px; padding: 6px 12px; font-size: 13px; line-height: 1.3; border-radius: 12px;
+  #place { display: flex; align-items: center; gap: 8px; width: 173px; padding: 4px 10px; font-size: 11.5px; line-height: 1.3; border-radius: 10px;
     background: var(--plate); border: 1px solid var(--line); backdrop-filter: blur(6px); }
-  #place svg { flex: none; width: 20px; height: 20px; fill: #dfe9e5; }
+  #place svg { flex: none; width: 16px; height: 16px; fill: #dfe9e5; }
   #place div { min-width: 0; }
   #place b, #place span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
   #place span { opacity: .8; font-variant-numeric: tabular-nums; }
@@ -161,7 +163,7 @@
   /* what is being dragged onto the bar follows the cursor */
   #ghost { position: fixed; z-index: 6; margin: -28px 0 0 -28px; pointer-events: none; opacity: .9; transform: scale(.85);
     box-shadow: 0 6px 18px rgba(0, 0, 0, .6); }
-  #buffs { position: absolute; top: 166px; left: 30px; display: flex; gap: 6px; font-size: 12px; }
+  #buffs { position: absolute; top: 130px; left: 24px; display: flex; gap: 6px; font-size: 12px; }
   #buffs span.bad { border-color: rgba(255, 90, 106, .7); color: #ffb3c4; }
   #buffs span { padding: 3px 8px; border-radius: 999px; background: rgba(6, 24, 21, .7); border: 1px solid rgba(255, 215, 106, .5); color: var(--gold); }
 
@@ -281,15 +283,17 @@
   }
 
   /* the world map: a square as large as the room between the target frame and the action bar, and between the chat
-     and the radar, allows (90px: the padding of the window and the two lines above the map) */
-  #worldmap { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); display: none; padding: 14px 16px 16px; pointer-events: auto; }
+     and the radar, allows (108px: the padding of the window and the three lines above the map).
+     The window is exactly as wide as the map (--map) and its padding, whatever the lines above the map say: a line
+     that changes under the cursor must not move the map under it. */
+  #worldmap { --map: min(calc(var(--win-h) - 108px), 54vw); top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: calc(var(--map) + 34px);
+    display: none; padding: 14px 16px 16px; pointer-events: auto; }
   #worldmap.on { display: block; }
   #worldmap h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
-  #mapHead { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; margin-bottom: 8px; font-size: 13px; white-space: nowrap; }
-  #mapSub { flex: 1; min-width: 0; opacity: .85; overflow: hidden; text-overflow: ellipsis; }
-  #mapLegend { display: flex; gap: 9px; font-size: 11px; opacity: .85; }
+  #mapSub { height: 18px; font-size: 13px; line-height: 18px; white-space: nowrap; opacity: .85; overflow: hidden; text-overflow: ellipsis; }
+  #mapLegend { display: flex; gap: 9px; height: 16px; margin: 2px 0 8px; font-size: 11px; line-height: 16px; white-space: nowrap; overflow: hidden; opacity: .85; }
   #mapLegend span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: var(--tint); }
-  #mapView { display: block; width: min(calc(var(--win-h) - 90px), 54vw); aspect-ratio: 1; border-radius: 8px; cursor: crosshair;
+  #mapView { display: block; width: 100%; aspect-ratio: 1; border-radius: 8px; cursor: crosshair;
     border: 1px solid rgba(127, 232, 214, .25); background: #18546f; }
 
   /* settings: a name and its control a row, under a heading per group */
@@ -513,7 +517,6 @@
     <div id="levelBadge"></div>
   </div>
   <div id="right">
-    <div id="menubar"></div>
     <div id="radar">
       <canvas id="minimap" width="420" height="420"></canvas>
       <img id="radarRing" src="./assets/ui/hud/radar-ring.png" alt="">
@@ -524,6 +527,7 @@
       <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 00-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 00-7-7zm0 4.200a2.800 2.800 0 110 5.600 2.800 2.800 0 010-5.600z" fill-rule="evenodd"/></svg>
       <div><b id="placeName"></b><span id="placeAt"></span></div>
     </div>
+    <div id="menubar"></div>
     <div id="sidebar"></div>
   </div>
   <div class="panel" id="target">
@@ -587,7 +591,8 @@
   </div>
   <div class="panel" id="worldmap">
     <h2>World Map</h2>
-    <div id="mapHead"><span id="mapSub"></span><span id="mapLegend"></span></div>
+    <div id="mapSub"></div>
+    <div id="mapLegend"></div>
     <canvas id="mapView"></canvas>
   </div>
   <div class="panel" id="settings">
