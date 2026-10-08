@@ -24,7 +24,7 @@
   #right { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
   #right .panel { position: relative; }
   #minimap { display: block; width: 176px; height: 176px; border-radius: 50%; border: 1px solid rgba(127, 232, 214, .4);
-    box-shadow: 0 0 0 3px rgba(6, 24, 21, .45), 0 3px 12px rgba(0, 0, 0, .45); }
+    box-shadow: 0 0 0 3px rgba(6, 24, 21, .45), 0 3px 12px rgba(0, 0, 0, .45); pointer-events: auto; cursor: pointer; }   /* a click opens the world map */
   #menubar { display: flex; flex-direction: column; gap: 6px; padding: 6px; pointer-events: auto; }
   .mbtn { position: relative; width: 40px; height: 40px; cursor: pointer; color: var(--teal); background: rgba(6, 24, 21, .7);
     border: 2px solid rgba(127, 232, 214, .3); border-radius: 10px; }
@@ -229,6 +229,18 @@
     #bag { transform: translate(8px, -50%); }
     #store, #hud.bagOpen #sheet { transform: translate(calc(-100% - 8px), -50%); }
   }
+
+  /* the world map: a square as large as the room between the target frame and the action bar, and between the chat
+     and the radar, allows (90px: the padding of the window and the two lines above the map) */
+  #worldmap { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); display: none; padding: 14px 16px 16px; pointer-events: auto; }
+  #worldmap.on { display: block; }
+  #worldmap h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
+  #mapHead { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; margin-bottom: 8px; font-size: 13px; white-space: nowrap; }
+  #mapSub { flex: 1; min-width: 0; opacity: .85; overflow: hidden; text-overflow: ellipsis; }
+  #mapLegend { display: flex; gap: 9px; font-size: 11px; opacity: .85; }
+  #mapLegend span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: var(--tint); }
+  #mapView { display: block; width: min(calc(var(--win-h) - 90px), 54vw); aspect-ratio: 1; border-radius: 8px; cursor: crosshair;
+    border: 1px solid rgba(127, 232, 214, .25); background: #18546f; }
 
   /* help: every control, a row each */
   #helpList { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: baseline; font-size: 13px; }
@@ -435,6 +447,11 @@
       </div>
     </div>
   </div>
+  <div class="panel" id="worldmap">
+    <h2>World Map</h2>
+    <div id="mapHead"><span id="mapSub"></span><span id="mapLegend"></span></div>
+    <canvas id="mapView"></canvas>
+  </div>
   <div class="panel" id="help">
     <h2>Controls</h2>
     <div class="sub">Everything the keyboard and the mouse do. <kbd>H</kbd> or <kbd>F1</kbd> closes this window.</div>
@@ -457,12 +474,13 @@
       <div><kbd>C</kbd></div><span>Character: attributes and combat stats</span>
       <div><kbd>I</kbd></div><span>Inventory: the bag and what the cat wears</span>
       <div><kbd>K</kbd></div><span>Skill book; next to the Sage it sells skills and professions</span>
+      <div><kbd>M</kbd></div><span>World map: the whole island, its zones and their levels, the monster camps. A click on the radar opens it too</span>
       <div><kbd>T</kbd></div><span>Trade, next to the Trader</span>
       <div><kbd>B</kbd></div><span>Buy a weapon upgrade, next to the Blacksmith</span>
       <div><kbd>H</kbd> / <kbd>F1</kbd></div><span>This window</span>
       <h3>Other</h3>
       <div><kbd>Enter</kbd></div><span>Open the chat, send the message</span>
-      <div><kbd>M</kbd></div><span>Sound on and off</span>
+      <div><kbd>N</kbd></div><span>Sound on and off</span>
     </div>
     <div class="sub" id="online"></div>
   </div>
@@ -483,6 +501,7 @@
     <div><kbd>K</kbd>skill book</div>
     <div><kbd>I</kbd>inventory</div>
     <div><kbd>C</kbd>character</div>
+    <div><kbd>M</kbd>world map</div>
     <div><kbd>X</kbd>sit</div>
     <div><kbd>RMB</kbd>camera</div>
     <div><kbd>Enter</kbd>chat</div>

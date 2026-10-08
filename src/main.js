@@ -8,6 +8,7 @@ import { loading } from './loading.js';
 import { createComposer } from './postfx.js';
 import { createFx } from './fx.js';
 import { skillIcon, itemIcon, ATTACK_ICON, ICON_FILES } from './icons.js';
+import { createWorldMap } from './worldmap.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
@@ -920,7 +921,7 @@ addEventListener('keydown', (e) => {
     if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
   }
   if (e.code === 'Escape') {
-    if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
+    if (mapOpen) toggleMap(false); else if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
     else if (bookOpen) toggleBook(false); else if (sheetOpen) toggleSheet(false);
     else setTarget(0, false);
   }
@@ -932,7 +933,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyI') toggleBag();
   if (e.code === 'KeyT') tradeKey();
   if (e.code === 'KeyH' || e.code === 'F1') toggleHelp();
-  if (e.code === 'KeyM') muted = !muted;
+  if (e.code === 'KeyM') toggleMap();
+  if (e.code === 'KeyN') { muted = !muted; notice(muted ? 'Sound off' : 'Sound on'); }
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => { keys.clear(); cam.drag = null; endDrag(); });
@@ -1502,17 +1504,47 @@ const PAIRS = matchMedia('(min-width: 1720px)');
 PAIRS.addEventListener('change', () => { if (!PAIRS.matches && (storeOpen || sheetOpen)) toggleBag(false); });
 let bookOpen = false, bookKey = null, helpOpen = false;
 function toggleBook(open = !bookOpen) {
-  if (open) { toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); }
+  if (open) { toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); }
   bookOpen = open;
   bookKey = null;
   $('book').classList.toggle('on', open);
   if (!open && tipAnchor && $('book').contains(tipAnchor)) hideTip();
 }
 function toggleHelp(open = !helpOpen) {
-  if (open) { toggleBook(false); toggleSheet(false); toggleStore(false); toggleBag(false); }
+  if (open) { toggleBook(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); }
   helpOpen = open;
   $('help').classList.toggle('on', open);
 }
+
+// ---- the world map: the whole island, where the radar shows only what is around the cat. It is surveyed and painted
+// when it is first opened, and drawn again every frame while it is open (src/worldmap.js).
+// How dangerous a monster of a level is for this player: at least so many levels above it, the colour, the word.
+const THREAT = [[5, '#ff5a6a', 'deadly'], [3, '#ffa24d', 'hard'], [-2, '#fff3b0', 'even'], [-5, '#8ee68e', 'easy'], [-Infinity, '#aab4b8', 'trivial']];
+const threat = (lvl) => THREAT.find(([above]) => lvl - stats.level >= above)[1];
+let mapOpen = false, worldMap = null, mapHover = null;
+function toggleMap(open = !mapOpen) {
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); }
+  mapOpen = open;
+  $('worldmap').classList.toggle('on', open);
+  if (open) {
+    worldMap ??= createWorldMap($('mapView'), map);
+    drawWorldMap();
+  } else mapHover = null;
+}
+function drawWorldMap() {
+  worldMap.draw({ me, others: others.values(), threat });
+  const hit = mapHover && worldMap.pick(mapHover.x, mapHover.y);
+  const text = hit ? worldMap.describe(hit) : `You are in ${regionLabel(regionAt(map, me.x, me.z))}`;
+  if ($('mapSub').textContent !== text) $('mapSub').textContent = text;
+}
+$('mapView').addEventListener('mousemove', (e) => { mapHover = { x: e.clientX, y: e.clientY }; });
+$('mapView').addEventListener('mouseleave', () => { mapHover = null; });
+$('minimap').addEventListener('click', () => { if (state === 'playing') toggleMap(); });   // the radar opens the map it is a part of
+$('mapLegend').append('Camps', ...[...THREAT].reverse().map(([, color, word]) => {
+  const item = el('span', '', word);
+  item.style.setProperty('--tint', color);
+  return item;
+}));
 
 // The skill book lists everything the class can learn. Buying is only possible next to a Sage - and a map need not have one.
 const hasSage = npcsOf(map, 'sage').length > 0;
@@ -1677,7 +1709,7 @@ function itemTip(id, hint, worn = false) {
 
 let bagOpen = false, bagKey = null, bagCds = [], bagTab = 'all', statsKey = null;
 function toggleBag(open = !bagOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleMap(false); }
   if (open && !PAIRS.matches) { toggleSheet(false); toggleStore(false); }
   bagOpen = open;
   bagKey = statsKey = null;
@@ -1888,7 +1920,7 @@ function drawDoll(dt) {
 let storeOpen = false, storeTab = 'buy', storeKey = null;
 const hasTrader = npcsOf(map, 'trader').length > 0;
 function toggleStore(open = !storeOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleMap(false); }
   storeOpen = open;
   storeKey = null;
   $('store').classList.toggle('on', open);
@@ -1957,7 +1989,7 @@ function renderStore() {
 
 let sheetOpen = false, sheetKey = null;
 function toggleSheet(open = !sheetOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); toggleStore(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleStore(false); toggleMap(false); }
   if (open && !PAIRS.matches) toggleBag(false);
   sheetOpen = open;
   sheetKey = null;
@@ -1975,6 +2007,8 @@ const MENU = [
     icon: '<path d="M2.500 4.500c3-1.200 6-1.200 8.500.500v15c-2.500-1.700-5.500-1.700-8.500-.500zM21.500 4.500c-3-1.200-6-1.200-8.500.500v15c2.500-1.700 5.500-1.700 8.500-.500z"/>' },
   { name: 'Trader', key: 'T', toggle: () => tradeKey(), isOpen: () => storeOpen, near: 'trader',
     icon: '<path d="M12 2.500a9.500 9.500 0 100 19 9.500 9.500 0 000-19zM11 6h2v1.300c1.600.300 2.700 1.300 2.800 2.900h-2c-.100-.700-.700-1.200-1.800-1.200-1 0-1.700.400-1.700 1.100 0 .600.500.900 2 1.300 2.300.500 3.700 1.300 3.700 3.200 0 1.600-1.200 2.700-3 3v1.400h-2v-1.400c-1.900-.300-3.100-1.500-3.200-3.300h2c.100.900.900 1.500 2.100 1.500 1.200 0 1.900-.500 1.900-1.200s-.500-1-2.200-1.400c-2.200-.500-3.500-1.300-3.500-3.100 0-1.500 1.100-2.600 2.900-2.900z" fill-rule="evenodd"/>' },
+  { name: 'World map', key: 'M', toggle: () => toggleMap(), isOpen: () => mapOpen,
+    icon: '<path d="M2.500 6l6-2.500v14.500l-6 2.500zM9.500 3.500l5 2.500v14.500l-5-2.500zM15.500 6l6-2.500v14.500l-6 2.500z"/>' },
   { name: 'Help', key: 'H', toggle: () => toggleHelp(), isOpen: () => helpOpen,
     icon: '<path d="M12 2.500a9.500 9.500 0 100 19 9.500 9.500 0 000-19zM12 6c2.300 0 4 1.500 4 3.500 0 1.500-.800 2.300-1.900 3-.900.600-1.100.900-1.100 1.800h-2.200c0-1.700.500-2.500 1.700-3.300.900-.600 1.200-.900 1.200-1.500 0-.800-.700-1.400-1.700-1.400s-1.700.600-1.800 1.600h-2.200c.100-2.200 1.700-3.700 4-3.700zM10.700 15.500h2.600v2.500h-2.600z" fill-rule="evenodd"/>' },
 ];
@@ -2089,9 +2123,8 @@ function updateHud() {
   const tv = mobViews.get(targetId);
   $('target').style.display = tv ? 'block' : 'none';
   if (tv) {
-    const diff = tv.lvl - stats.level;
     $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
-    $('tgName').style.color = diff >= 5 ? '#ff5a6a' : diff >= 3 ? '#ffa24d' : diff >= -2 ? '#fff3b0' : diff >= -5 ? '#8ee68e' : '#aab4b8';
+    $('tgName').style.color = threat(tv.lvl);
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
     $('tgHp').textContent = `${Math.ceil(tv.hp)} / ${tv.maxHp}`;
     $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
@@ -2110,7 +2143,7 @@ function updateHud() {
     tips.push(`${stats.gold >= cost ? 'B — upgrade weapon' : 'Weapon upgrade'} Lv ${stats.weapon} → ${stats.weapon + 1}: ${cost} gold (you have ${stats.gold})`);
   }
   if (atTrader && !storeOpen) tips.push('T — trade with the Trader');
-  const tip = bookOpen || helpOpen || storeOpen ? '' : tips.join(' · ');   // those three reach down to where the line stands
+  const tip = bookOpen || helpOpen || storeOpen || mapOpen ? '' : tips.join(' · ');   // those four reach down to where the line stands
   $('shop').style.display = tip ? 'block' : 'none';
   $('shop').textContent = tip;
 
@@ -2213,6 +2246,7 @@ function tick(dt) {
     updateViews(dt);
     updateHud();
     if ((mapT -= dt) <= 0) { mapT = 0.15; drawMinimap(); }
+    if (mapOpen) drawWorldMap();
   } else {
     me.yaw = Math.sin(time * 0.6) * 0.7;
   }
@@ -2245,7 +2279,7 @@ loading.finish({
 });
 
 // debugging hook
-window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, toggleBook, toggleSheet, toggleHelp, setBar, get doll() { return doll; }, get sheet() { return sheet; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
+window.__game = { me, stats, others, mobViews, send, world, map, rev: mapRev, cam, camera, tick, local, fx, toggleBag, toggleStore, toggleBook, toggleSheet, toggleHelp, toggleMap, setBar, get doll() { return doll; }, get sheet() { return sheet; }, get worldMap() { return worldMap; }, get target() { return targetId; }, get attacking() { return attacking; }, get state() { return state; } };
 
 // A play-test, and a page that has reloaded itself for a saved map, go straight in.
 if (autoJoin) {
