@@ -390,25 +390,40 @@ export function lookOf(code) {
 }
 
 // ---- the action bar: BAR_SIZE slots on the keys 1 - 9 and 0. A slot is empty (null) or holds the id of an active skill
-// or of an item; the two tables share no id (a test keeps it that way), so the id alone says which of the two it is.
+// or of an item - the two tables share no id (a test keeps it that way), so the id alone says which of the two it is -
+// or BAR_ATTACK, the plain attack with the weapon. That one is on every bar exactly once: it starts on the key 1, can
+// be moved to another slot and never taken off.
 
 export const BAR_SIZE = 10;
+export const BAR_ATTACK = 'attack';
 // The skill of an id that came from outside, when it is one a slot can hold: a passive skill has nothing to press.
 export const barSkill = (id) => (typeof id === 'string' && Object.hasOwn(SKILLS, id) && SKILLS[id].kind !== 'passive' ? SKILLS[id] : undefined);
-// A bar as a client or a save file gives it, made safe: always BAR_SIZE slots, and whatever is not an active skill or an
-// item is an empty slot. Whether the character has learned the skill or owns the item is not asked: a slot keeps its
-// potion when the last one is drunk, and says "not learned" for a skill the character does not have.
+// A bar as a client or a save file gives it, made safe: always BAR_SIZE slots, and whatever is not the attack, an active
+// skill or an item is an empty slot. Whether the character has learned the skill or owns the item is not asked: a slot
+// keeps its potion when the last one is drunk, and says "not learned" for a skill the character does not have.
+// A bar without the attack - one saved before the attack had a slot - gets it on the key 1: what was there moves one
+// slot to the right, into the first gap; from a bar without a gap the last slot falls off.
 export function cleanBar(raw) {
   const list = Array.isArray(raw) ? raw : [];
-  return Array.from({ length: BAR_SIZE }, (_, i) => (barSkill(list[i]) || itemOf(list[i]) ? list[i] : null));
+  const bar = Array.from({ length: BAR_SIZE }, (_, i) => (list[i] === BAR_ATTACK || barSkill(list[i]) || itemOf(list[i]) ? list[i] : null));
+  const at = bar.indexOf(BAR_ATTACK);
+  if (at < 0) {
+    const gap = bar.indexOf(null);
+    bar.splice(gap < 0 ? BAR_SIZE - 1 : gap, 1);
+    bar.unshift(BAR_ATTACK);
+  } else for (let i = at + 1; i < BAR_SIZE; i++) if (bar[i] === BAR_ATTACK) bar[i] = null;
+  return bar;
 }
-// The bar of a character that has never arranged one: its learned skills from the first slot on, and a health and a
-// mana potion on the last two - the kind it carries, else the lesser one, which is what every new cat starts with.
+// The bar of a character that has never arranged one: the attack on the first slot, its learned skills after it, and a
+// health and a mana potion on the last two - the kind it carries, else the lesser one, which is what every new cat
+// starts with.
 export function defaultBar(cls, learned, inv = []) {
   const bar = cleanBar(activeSkills(cls, learned).slice(0, BAR_SIZE - 2));
-  ['hp', 'mp'].forEach((kind, i) => {
+  // a class with skills enough to reach the last slots keeps its skills there: then only the health potion has room
+  const free = [BAR_SIZE - 2, BAR_SIZE - 1].filter((slot) => !bar[slot]);
+  ['hp', 'mp'].slice(0, free.length).forEach((kind, i) => {
     const carried = inv.find((s) => itemOf(s[0])?.[kind]);
-    bar[BAR_SIZE - 2 + i] = carried ? carried[0] : `${kind}_small`;
+    bar[free[i]] = carried ? carried[0] : `${kind}_small`;
   });
   return bar;
 }

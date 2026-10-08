@@ -40,8 +40,8 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `Ctrl` + click on a cat | **Attack another player** - see [Fighting other cats](#fighting-other-cats). The Attack button under its name in the target frame does the same |
 | `Tab` | Select the next nearest monster |
 | `Esc` | Clear the target |
-| `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack) |
-| `1` – `9`, `0` | The ten slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and most have a cast time or a cooldown; the cat stands still while casting. A click on a slot does the same |
+| `1`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack). The attack is the first slot of the [action bar](#action-bar) |
+| `2` – `9`, `0` | The other slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and most have a cast time or a cooldown; the cat stands still while casting. A click on a slot does the same |
 | `I` | Inventory: the character's numbers, the cat with its six equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
 | `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
@@ -59,13 +59,13 @@ The windows also open from the strip of buttons under the minimap: Character, In
 
 ### Action bar
 
-Ten slots in the middle of the lower edge, on the keys `1` – `9` and `0`, with the Attack button (`F`) to their left. A slot holds a skill or an item:
+Ten slots in the middle of the lower edge, on the keys `1` – `9` and `0`, with the experience bar under them from end to end. The first slot holds the **attack**: it can be dragged onto another slot, but not taken off the bar. Any other slot holds a skill or an item:
 
 - **A skill** is cast by its key, exactly as a click on the slot does. The slot shows what it costs, its cooldown, and when the mana does not suffice.
 - **A potion** is drunk; the slot shows how many the bag holds and the cooldown all potions share, and stays - greyed - when the last one is gone.
 - **A piece of gear** is put on. Pressing the key again leaves it on (a second press in a fight must not strip the cat); it is taken off in the inventory. A worn piece is marked.
 
-Drag a learned skill from the skill book (`K`) or an item from the inventory (`I`) onto a slot; drag one slot onto another to swap them; drag a slot off the bar, or right-click it, to clear it. A character without a bar of its own - a new one, or one saved before the bar existed - gets its learned skills from slot 1 on and its health and mana potions on `9` and `0`. A skill learned later goes into the first empty slot. The bar is saved with the character on the server.
+Drag a learned skill from the skill book (`K`) or an item from the inventory (`I`) onto a slot; drag one slot onto another to swap them; drag a slot off the bar, or right-click it, to clear it. A character without a bar of its own - a new one, or one saved before the bar existed - gets the attack on slot 1, its learned skills after it and its health and mana potions on `9` and `0`. A skill learned later goes into the first empty slot. The bar is saved with the character on the server.
 
 ## The world
 

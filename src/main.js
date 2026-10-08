@@ -14,7 +14,7 @@ import {
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
-  CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES,
+  CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
@@ -957,7 +957,7 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (state !== 'playing') return;
-  if (e.code === 'Tab' || e.code === 'F1' || (e.code === 'KeyF' && e.ctrlKey)) e.preventDefault();   // F1 is the browser's own help, Ctrl + F its search
+  if (e.code === 'Tab' || e.code === 'F1') e.preventDefault();   // F1 is the browser's own help
   if (e.repeat) return;
   keys.add(e.code);
   fresh.add(e.code);
@@ -971,7 +971,6 @@ addEventListener('keydown', (e) => {
     else if (bookOpen) toggleBook(false); else if (sheetOpen) toggleSheet(false);
     else setTarget(0, false);
   }
-  if (e.code === 'KeyF') attackKey();
   if (e.code === 'KeyX' && !stats.dead && me.castT < 0) { me.sitting = !me.sitting; if (me.sitting) attacking = false; }
   if (e.code === 'KeyK') toggleBook();
   if (e.code === 'KeyC') toggleSheet();
@@ -1202,7 +1201,11 @@ function updateLocal(dt) {
   // The action bar, keys 1 - 9 and 0. An item is used once per press; a skill is tried for as long as its key is held,
   // so a held key casts again when the cooldown ends. Shift is a shortcut for a dash skill.
   const learned = activeSkills(stats.cls, stats.skills);
-  BAR_CODES.forEach((code, i) => { if (fresh.has(code) && ITEMS[stats.bar[i]]) useBarItem(stats.bar[i]); });
+  BAR_CODES.forEach((code, i) => {
+    if (!fresh.has(code)) return;
+    if (stats.bar[i] === BAR_ATTACK) attackKey();
+    else if (ITEMS[stats.bar[i]]) useBarItem(stats.bar[i]);
+  });
   if (me.castT < 0 && local.fireCd <= 0 && local.dashT <= 0) {
     let pick = null, code = '';
     for (let i = 0; i < BAR_SIZE && !pick; i++) if (keys.has(BAR_CODES[i]) && SKILLS[stats.bar[i]]) { pick = stats.bar[i]; code = BAR_CODES[i]; }
@@ -1404,11 +1407,13 @@ function skillOrb(id) {
   return icon;
 }
 
-// What a slot of the bar looks like with this in it - a skill or an item: its icon, edged in the tier's colour for
-// an item (the name is in the tooltip); nothing: an empty slot. The ghost of a drag is drawn by the same function.
+// What a slot of the bar looks like with this in it - the attack, a skill or an item: its icon, edged in the tier's
+// colour for an item (the name is in the tooltip); nothing: an empty slot. The ghost of a drag is drawn by the same
+// function.
 function barFace(id) {
   const face = el('div', 'act');
-  if (SKILLS[id]) face.append(skillOrb(id), ...(skillIcon(id) ? [] : [SKILLS[id].name]));
+  if (id === BAR_ATTACK) face.append(picture(ATTACK_ICON));
+  else if (SKILLS[id]) face.append(skillOrb(id), ...(skillIcon(id) ? [] : [SKILLS[id].name]));
   else if (ITEMS[id]) {
     face.classList.add('item');
     face.style.setProperty('--tint', itemTint(id));
@@ -1419,12 +1424,7 @@ function barFace(id) {
 
 // The bar is rebuilt only when what is in its slots changes; cooldowns, counts and states are updated every frame.
 let barKey = null, barSlots = [];
-const attackSlot = barFace(null);
-attackSlot.id = 'attackBtn';
-attackSlot.classList.remove('empty');
-attackSlot.append(picture(ATTACK_ICON), el('kbd', '', 'F'));
-attackSlot.addEventListener('click', attackKey);
-// The experience bar lies under the ten slots. It is a child of the action bar, which is as wide as the row of its
+// The experience bar lies under the ten slots, from the left edge of the first to the right edge of the last. It is a child of the action bar, which is as wide as the row of its
 // slots and nothing else, so the bar follows that width whatever the layout does. No text on it: hovering tells.
 const xpBar = el('div'), xpFill = el('i');
 xpBar.id = 'xpbar';
@@ -1447,14 +1447,14 @@ function renderBar() {
     node.prepend(el('kbd', '', BAR_KEYS[i]));
     node.append(note, cd, left);
     node.addEventListener('click', () => tapSlot(i));
-    node.addEventListener('contextmenu', () => { if (stats.bar[i]) setBar(stats.bar.map((entry, j) => (j === i ? null : entry))); });
+    // the attack is never taken off the bar
+    node.addEventListener('contextmenu', () => { if (stats.bar[i] && stats.bar[i] !== BAR_ATTACK) setBar(stats.bar.map((entry, j) => (j === i ? null : entry))); });
     dragFrom(node, () => stats.bar[i] && { id: stats.bar[i], from: i });
     tipOn(node, () => slotTip(i));
     return { id, k, it, node, note, cd, left };
   });
-  $('actionbar').replaceChildren(attackSlot, ...barSlots.map((slot) => slot.node), xpBar);
+  $('actionbar').replaceChildren(...barSlots.map((slot) => slot.node), xpBar);
 }
-tipOn(attackSlot, () => [el('b', 'name', 'Attack'), el('div', '', 'Runs up to the target and keeps hitting it with the weapon.'), el('div', 'hint', 'Key F or click')]);
 
 // A click on a slot is a press of its key that lasts one frame.
 function tapSlot(i) {
@@ -1494,6 +1494,10 @@ function skillTip(id, hints = []) {
 function slotTip(i) {
   const id = stats.bar[i], key = BAR_KEYS[i], it = ITEMS[id];
   if (!id) return [el('div', 'kind', `Slot ${key} · empty`), el('div', 'hint', 'Drag a skill from the skill book (K) or an item from the inventory (I) here')];
+  if (id === BAR_ATTACK) {
+    return [el('b', 'name', 'Attack'), el('div', '', 'Runs up to the target and keeps hitting it with the weapon.'),
+      el('div', 'hint', `Key ${key} or click`), el('div', 'hint', 'Drag onto another slot to move it')];
+  }
   const arrange = 'Drag to move · drag off the bar or right-click to clear';
   if (SKILLS[id]) return skillTip(id, [`Key ${key} or click to use it`, arrange]);
   const worn = !!it.slot && stats.eq[it.slot] === id;
@@ -1544,9 +1548,11 @@ function endDrag(e) {
   const to = slotAt(e.clientX, e.clientY), bar = [...stats.bar];
   if (to >= 0) {
     if (to === d.from) return;
+    // the attack stays on the bar: its slot swaps with another one, and nothing from the book or the bag replaces it
+    if (d.from < 0 && bar[to] === BAR_ATTACK) { notice('The Attack slot can only be moved, not replaced'); return; }
     if (d.from >= 0) bar[d.from] = bar[to];   // slot onto slot: the two swap
     bar[to] = d.id;
-  } else if (d.from >= 0 && !within($('actionbar'), e.clientX, e.clientY)) bar[d.from] = null;   // off the bar: the slot is cleared
+  } else if (d.from >= 0 && d.id !== BAR_ATTACK && !within($('actionbar'), e.clientX, e.clientY)) bar[d.from] = null;   // off the bar: the slot is cleared
   else return;   // let go between two slots, or a skill or an item dropped beside the bar
   setBar(bar);
 }
@@ -2124,7 +2130,6 @@ function updateHud() {
   if (sheetOpen) renderSheet();
 
   renderBar();
-  attackSlot.classList.toggle('active', attacking);
   const learned = activeSkills(stats.cls, stats.skills);
   const potionWait = local.potionAt - time, potionCd = `${Math.max(0, Math.min(1, potionWait / POTION_CD)) * 100}%`;
   const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
@@ -2136,6 +2141,8 @@ function updateHud() {
       node.classList.toggle('active', me.castT >= 0 && me.castSkill === id);
       node.classList.toggle('dim', known && stats.mp < k.mp);
       node.classList.toggle('off', !known);
+    } else if (id === BAR_ATTACK) {
+      node.classList.toggle('active', attacking);
     } else if (it) {
       // a potion: how many the bag holds, and the cooldown all potions share; gear: a mark while it is worn
       const n = bagCount(id), worn = !!it.slot && stats.eq[it.slot] === id, potion = it.kind === 'potion';
