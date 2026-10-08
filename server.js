@@ -766,7 +766,7 @@ function damageMob(m, hit, dx, dz, knock, p) {
   m.dead = true;
   m.respawnAt = now + m.respawn;
   emit({ k: 'kill', ti: m.ti, ...ev }, m.x, m.z);
-  const drops = m.type === 'boss' ? 12 : m.type === 'tank' ? 3 : 1;
+  const drops = m.def.drops ?? 1;
   for (let i = 0; i < drops; i++) {
     gems.push({
       id: nextId++, x: m.x + rand(-1, 1) * m.r * 1.5, z: m.z + rand(-1, 1) * m.r * 1.5,
@@ -877,9 +877,10 @@ function updateMob(m, dt) {
     const dist = Math.hypot(dx, dz) || 0.001;
     dx /= dist; dz /= dist;
     mx = dx; mz = dz;
-    if (m.type !== 'shooter' && dist < m.r + 0.9) { mx = 0; mz = 0; }   // melee monsters stop at arm's length instead of walking into the player
-    if (m.type === 'shooter' || m.type === 'boss') {
-      if (m.type === 'shooter') {
+    const shooter = m.def.ai === 'shooter';
+    if (!shooter && dist < m.r + 0.9) { mx = 0; mz = 0; }   // melee monsters stop at arm's length instead of walking into the player
+    if (shooter || m.type === 'boss') {
+      if (shooter) {
         if (dist < 9) { mx = -dx; mz = -dz; } else if (dist < 14) { mx = -dz * m.strafe; mz = dx * m.strafe; }
       }
       m.fireT -= dt;

@@ -1822,7 +1822,7 @@ test('pickType walks the weights in MOB_KEYS order', () => {
   assert.equal(pickType(types, 0.999999), 'runner');
   assert.equal(pickType({ boss: 1 }, 0.5), 'boss');
   const all = { boss: 1, tank: 1, shooter: 1, runner: 1, chaser: 1 };
-  assert.deepEqual([0.1, 0.3, 0.5, 0.7, 0.9].map((u) => pickType(all, u)), MOB_KEYS);
+  assert.deepEqual([0.1, 0.3, 0.5, 0.7, 0.9].map((u) => pickType(all, u)), MOB_KEYS.slice(0, 5));   // the skeletons come first
   const rnd = lcg(9), n = { chaser: 0, runner: 0 };
   for (let i = 0; i < 5000; i++) n[pickType(types, rnd())]++;
   assert.ok(Math.abs(n.chaser / 5000 - 0.6) < 0.03);

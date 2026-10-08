@@ -1,7 +1,7 @@
 # HyperCat Online
 
 A small open-world browser MMORPG starring a chibi cat in a hoodie, modelled on classic target-based MMORPGs.
-Players share one seamless world, pick a class, hunt skeletons together, level up, learn skills, choose a profession, and find, buy and wear weapons and armour.
+Players share one seamless world, pick a class, hunt slimes, wolves, orcs, demons and skeletons together, level up, learn skills, choose a profession, and find, buy and wear weapons and armour.
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0); slimes, orcs, demons, ghosts and the other creatures from [Ultimate Monsters](https://quaternius.com/packs/ultimatemonsters.html) and [Cute Animated Monsters](https://quaternius.com/packs/cutemonsters.html) by Quaternius (CC0); the wolf, fox, bull, stag, alpaca, spider and raptor are Quaternius's animals (CC0) as the open-source [World of ClaudeCraft](https://github.com/levy-street/world-of-claudecraft) ships them
@@ -71,20 +71,27 @@ Drag a learned skill from the skill book (`K`) or an item from the inventory (`I
 
 One continuous map with no loading screens between its zones. The world is a data file, `map/world.json`: the terrain, every tree and wall, the zones, the monster camps, the chests, the townsfolk and the point where new cats appear. It is built and changed in the [map editor](#map-editor); nothing of it is generated when the game starts.
 
-In the map that ships with the game, zones get harder the further you go from the town:
+The map that ships with the game is a long island with the town in its middle. The zones are patches of it, not rings, and they get harder the further you go from the town:
 
-| Zone | Distance from centre | Monster levels |
-| --- | --- | --- |
-| Hypercat Town | 0 – 24 | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon upgrades, the Trader's shop |
-| Green Meadows | 24 – 95 | 1 – 4 |
-| Graveyard Wastes | 95 – 175 | 5 – 9 |
-| Cursed Lands | 175 – 260 | 10 – 15 |
+| Zone | Where | Monster levels | Who lives there |
+| --- | --- | --- | --- |
+| Hypercat Town | The middle of the island | – | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon upgrades, the Trader's shop |
+| Green Meadows | Around the town | 1 – 4 | Slimes, Mushnubs, bunnies, chickens, pigs, pups, tabbies, pigeons, deer and stags, wolves and foxes, pandas, Armabees, a Stumpling and, rarely, the Mushroom King |
+| Graveyard Wastes | Beyond the meadows, to the north and west | 5 – 9 | Skeletons, Ghosts, Skull Wraiths, Hopping Skulls, Cave Bats, Giant Spiders, ninjas, Hex Blobs and Glubs |
+| Red Badlands | East | 6 – 10 | Cactoros, Prickles, orcs with their shamans and brutes, Sand Cyclopes, Crimson Dinos, Raptors, wolves, Wild Bulls with Alpacas, Alpakings, Sand Wyrmlings, Tribal Spirits |
+| Drowned Marsh | West | 7 – 10 | Bog Frogs, Fishmen, Snappers, Red Crabs, Gremlins, Giant Spiders, Monkrooses, Golelings, Marsh Hornets, Spiky Slimes |
+| Frostfang Peaks | The mountains of the north-west | 11 – 14 | Yetis, wolves, Snowballs, Frostlings, Penguins, Horned and Frost Birbs |
+| Cursed Lands | The rim of the island | 10 – 15 | Elite skeletons, Imps, Red Fiends, Blue Demons, Void and Antenna Aliens, Cthulhu Spawn, Raptors, Hywirls, Squidles, Dragonlings and Fire Drakes |
 
 The **Skeleton King** (level 18 boss) waits inside his walled fortress in the far north of the Cursed Lands. The minimap in the top-right corner always points to the town and to the boss lair.
 
 A zone is a region of the map: a circle or a polygon with a name, a level range, a lighting mood (meadow, graveyard, cursed) and, for a town, the "safe" flag. Where regions overlap, the one listed last in the file wins. The banner, the radar rings, the light and the place where monsters refuse to follow all come from the regions, so a new map changes them without a line of code.
 
 ### Monsters
+
+A monster is one of three kinds of fighter: it runs up and hits, it keeps its distance and shoots, or it is big, slow and hits hard. What a camp holds is written in the map, so any monster can be put anywhere in the [map editor](#map-editor); its strength comes from the level of the camp. How hard monsters are as a whole is one number, `MOB_POWER` in `src/shared.js`: every monster's health and blows are multiplied by it (now 2).
+
+Not every monster is out for blood. A name written in **red** over a monster's head means it goes for any cat it notices; a name in **white** means it minds its own business until somebody hurts it, and then fights back. The calm ones are the slimes, the Mushnub and the Toadstool, the farm and forest animals (bunnies, chickens, pigs, pups, tabbies, pigeons, deer, stags, foxes, alpacas, bulls, pandas, penguins), the Red Crab, the Bog Frog, the Snowball, the Monkroose and the Stumpling.
 
 | Type | Behaviour |
 | --- | --- |
@@ -93,6 +100,13 @@ A zone is a region of the map: a circle or a polygon with a name, a level range,
 | Skeleton Mage | Keeps its distance and fires orbs from its staff |
 | Skeleton Warrior | Slow, tough, hits hard with an axe, drops extra gold |
 | Skeleton King | Boss; fires rings of orbs, respawns after 90 seconds |
+| Imp, Armabee, Skull Wraith, Wild Bunny, Wild Tabby, Angry Chicken, Shadow Ninja, Ninja Blob, Monkroose, Goleling, Glub, Sky Pigeon, Squidle, Chubby Chick, Young Deer, Red Fiend, Hopping Skull, Cave Bat, Marsh Hornet, Grey Wolf, Red Fox, Raptor | Fast and fragile: on you before you have turned round |
+| Green Slime, Pink Slime, Mushnub, Bog Frog, Cactoro, Orc Raider, Orc Whelp, Cactus Bandit, Stray Pup, Plump Pigeon, Snapper, Fishman, Crimson Dino, Horned Birb, Frost Birb, Snowball, Alpaking, Hywirl, Three-Eyed Blob, Prickle, Red Crab, Sand Cyclops, Gremlin, Toadstool, Panda, Penguin, Pink Pig, Frostling, Forest Stag, Alpaca | Ordinary fighters that come up and hit |
+| Tribal Shaman, Void Alien, Ghost, Dragonling, Void Sprout, Hex Blob, Glub Totem, Tribal Spirit, Alpaking Lord, Antenna Alien, Sheet Ghost, Cthulhu Spawn, Sand Wyrmling, Giant Spider | Keep their distance and shoot, like the Skeleton Mage |
+| Orc Brute, Yeti, Blue Demon, Mushroom King, Fire Drake | Slow, tough, hit hard, drop extra gold; the Fire Drake shoots as well |
+| Spiky Slime, Elder Mushnub, Armabee Queen, Goleling King, Stumpling, Wild Bull | Stronger kin of the small ones, with a little more gold |
+
+Seventy-seven of them are Quaternius's models; the game loads only the ones the map uses.
 
 ### Classes
 
@@ -308,6 +322,7 @@ src/shared.js     Constants, tables (monsters, classes, skills, items) and formu
 tools/bake-map.mjs      Wrote the first map/world.json from the old world generator; refuses to overwrite an edited map without --force
 tools/check-imports.mjs Checks every import and page reference of this bundler-less project (npm run check)
 tools/build-fx.py       Builds the skill-effect shapes in art/fx.blend and exports assets/fx/fx.glb; run inside Blender
+tools/import-monsters.mjs  Brings the Quaternius monsters and animals into assets/monsters/, keeping the five animations the game plays
 test/             Tests of the map format, the items, the action bar, the server and the editor's logic (npm test)
 data/             Saved player progress (created at runtime, git-ignored)
 ```

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createCat, loadCat, swingTime, SWING_WINDUP } from './cat.js';
 import { createSkeleton, loadSkeletons, SKELETON_FILES, SKELETON_HEIGHT, BONE } from './skeleton.js';
+import { createMonster, loadMonsters, MONSTER_KINDS } from './monster.js';
 import { createWorld } from './world.js';
 import { createNpcs, npcModels } from './npc.js';
 import { loading } from './loading.js';
@@ -80,6 +81,8 @@ if (autoJoin) $('menu').classList.add('hidden');
 // The loading screen (index.html, src/loading.js) has covered the page since its first paint. It counts real things,
 // each announced before it is asked for: what does not depend on the map here, the map's own models once it has arrived.
 loading.step('engine');   // three.js and the game's modules are in: this line runs
+// the kinds of monster on a map that are drawn from a file of their own (src/monster.js)
+const monstersOf = (m) => [...new Set(m.spawns.flatMap((s) => Object.keys(s.types)))].filter((kind) => MONSTER_KINDS.includes(kind));
 loading.expect({ map: 1, cat: 1, effects: 1, monsters: SKELETON_FILES, treasure: 3, icons: ICON_FILES.length });
 // the pictures of the action bar and the bag: fetched now, so no slot is ever an empty square
 for (const file of ICON_FILES) {
@@ -100,11 +103,12 @@ try {
   throw err;
 }
 loading.step('map');
-loading.expect({ scenery: new Set(map.objects.map((o) => o.m)).size, townsfolk: npcModels(map.npcs).length });
+loading.expect({ scenery: new Set(map.objects.map((o) => o.m)).size, townsfolk: npcModels(map.npcs).length, monsters: monstersOf(map).length });
 loading.seal();   // the list is complete: the screen shows "N / M" from here on
 // asked for after the map, not beside it: a browser opens six connections to a host, and the map must not wait in line
 loading.track('cat', loadCat());
 loadSkeletons((ok) => loading.step('monsters', ok)).catch(() => {});   // connect() waits for them again and reports
+loadMonsters(monstersOf(map), (ok) => loading.step('monsters', ok)).catch(() => {});
 
 // A map that did not load must not leave a menu that looks alive.
 function showLoadFailure() {
@@ -400,12 +404,17 @@ function removeMobView(v) {
   v.skeleton.dispose();
 }
 
+// who draws a kind of monster (MOB_TYPES says which in `draw`), and the kinds of this map that need a file of their own
+const MOB_VIEW = { skeleton: createSkeleton, monster: createMonster };
+const mapMonsters = monstersOf(map);
+
 function makeMobView(ti, lvl) {
   const type = MOB_KEYS[ti], def = MOB_TYPES[type];
   const root = new THREE.Group();   // never rotates, so the label and bar stay screen-aligned
-  const skeleton = createSkeleton(type, def);
+  // a monster of the pack or a skeleton: both answer to the same calls, so the view keeps it under one name
+  const skeleton = MOB_VIEW[def.draw ?? 'skeleton'](type, def);
   root.add(skeleton.group);
-  const top = SKELETON_HEIGHT * skeleton.group.scale.y + (type === 'shooter' ? 0.4 : 0);
+  const top = def.draw ? skeleton.height : SKELETON_HEIGHT * skeleton.group.scale.y + (type === 'shooter' ? 0.4 : 0);
 
   const text = type === 'boss' ? `Skeleton King · Lv ${lvl}` : `Lv ${lvl}`;   // the full name is shown in the target frame
   if (!lvlLabels.has(text)) lvlLabels.set(text, textSprite(text, type === 'boss' ? '#ff8095' : '#f0e6d8', type === 'boss' ? 0.8 : 0.4));
@@ -547,7 +556,7 @@ async function connect() {
   if (!playMode) writeStore('localStorage', 'hypercat-name', joinName);
   $('playBtn').textContent = 'Loading models…';
   try {
-    await loadSkeletons();
+    await Promise.all([loadSkeletons(), loadMonsters(mapMonsters)]);
   } catch (err) {
     console.error(err);
     state = 'menu';
@@ -721,7 +730,7 @@ function onEvent(ev) {
       break;
     case 'hit': {
       const v = mobViews.get(ev.id);
-      if (v) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, BONE, 4, 5); }
+      if (v) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, v.def.draw ? v.def.color : BONE, 4, 5); }
       if (ev.o === myId) floatText(ev.x, (v ? v.top : 2) + 0.5, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
       sfx(520, 0.05, 'square', 0.025);
       break;
@@ -739,7 +748,7 @@ function onEvent(ev) {
       break;
     case 'kill': {
       const r = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].r : 0.7;
-      burst(ev.x, r * 1.5, ev.z, ev.ti >= 0 ? BONE : 0xffffff, 16 + r * 14, 8);
+      burst(ev.x, r * 1.5, ev.z, ev.ti < 0 ? 0xffffff : MOB_TYPES[MOB_KEYS[ev.ti]].draw ? MOB_TYPES[MOB_KEYS[ev.ti]].color : BONE, 16 + r * 14, 8);
       if (ev.o === myId && ev.d) floatText(ev.x, r * 3 + 1.2, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
       sfx(180, 0.18, 'sawtooth', 0.05, -120);
       break;
@@ -997,6 +1006,7 @@ for (const id of START_CLASSES) {
 }
 pickClass(pickedClass);
 loadSkeletons().catch(() => {});   // start downloading models while the player is still in the menu
+loadMonsters(mapMonsters).catch(() => {});
 
 function jump() {
   if (local.jumps >= 2 || stats.dead) return;
@@ -1306,7 +1316,7 @@ function updateViews(dt) {
   const tv = mobViews.get(targetId);
   targetRing.visible = !!tv;
   if (tv) {
-    targetRing.scale.setScalar(tv.skeleton.group.scale.y * 0.75 + 0.35);
+    targetRing.scale.setScalar(tv.def.draw ? tv.def.r * 1.3 + 0.4 : tv.skeleton.group.scale.y * 0.75 + 0.35);
     layOnGround(targetRing, tv.x, tv.z, targetRing.scale.x / 2, 0.07);
     targetRing.material.color.setHex(attacking ? 0xff4d5e : 0xffd76a);
   }
@@ -2278,7 +2288,8 @@ loading.finish({
   grow: () => world.update(time, 1 / 60, me.x, me.z),
   compile: () => composer.compile(),
   frame: () => tick(1 / 60),
-  extras: () => MOB_KEYS.map((type) => createSkeleton(type, MOB_TYPES[type]).group),
+  extras: () => MOB_KEYS.filter((type) => MOB_TYPES[type].draw !== 'monster' || mapMonsters.includes(type))
+    .map((type) => MOB_VIEW[MOB_TYPES[type].draw ?? 'skeleton'](type, MOB_TYPES[type]).group),
   programs: () => renderer.info.programs.length,
 });
 
