@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CLASSES, CLASS_KEYS, WEAPONS, MOB_KEYS, statsOf,
+  CLASSES, CLASS_KEYS, WEAPONS, MOB_KEYS, statsOf, castTime,
   ITEMS, ITEM_KEYS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_KEYS, BONUS_NAMES, WEAPON_FAMILIES, heldFamily, fightStyle, MELEE_REACH, BOW_REACH, BAG_SIZE, STACK_MAX, SELL_RATE, SHOP, SHOP_TIER,
   STARTER_KIT, KNIGHT_SHIELD, itemOf, stackMax, sellPrice, weaponFamily, basicFamily, handsOf, equipError, equipBonus, roomFor, addItem, takeItem, cleanBag, cleanEquip,
   pushedOff, comesOff, equipWith, wearError, wearItem,
@@ -104,7 +104,21 @@ test('statsOf: no equipment changes nothing; armour and weapons add where the cl
   assert.equal(worn.speed, bare.speed + 4);
   assert.ok(worn.move > bare.move);
   // what equipment does not touch
-  for (const k of ['maxHp', 'maxMp', 'eva', 'mCrit', 'atkSpd', 'castSpd', 'STR']) assert.equal(worn[k], bare[k], k);
+  for (const k of ['maxHp', 'maxMp', 'eva', 'mCrit', 'castSpd', 'STR']) assert.equal(worn[k], bare[k], k);
+  // Attack speed: armour leaves it alone, a weapon of a better tier is a quicker one, and it grows with the level - a
+  // beginner swings at three fifths of what its class does at level 40
+  const { weapon: blade, ...armour } = IRON;
+  assert.equal(statsOf('fighter', 5, {}, 1, {}, armour).atkSpd, bare.atkSpd);
+  assert.equal(statsOf('fighter', 5, {}, 1, {}, { weapon: 'bronze_sword' }).atkSpd, bare.atkSpd);
+  assert.equal(worn.atkSpd, Math.round(bare.atkSpd * 1.05));
+  assert.deepEqual([1, 40, 60].map((level) => statsOf('fighter', level).atkSpd), [180, 300, 300]);
+  assert.ok(statsOf('fighter', 10).atkSpd > statsOf('fighter', 9).atkSpd);
+  assert.equal(statsOf('fighter', 40, {}, 1, {}, { weapon: 'hypurr_sword' }).atkSpd, 345);
+  for (const cls of CLASS_KEYS) {
+    const a = statsOf(cls, 1), b = statsOf(cls, 40);
+    assert.ok(a.atkCd > b.atkCd && Math.abs(a.atkCd * 0.6 - b.atkCd) < 0.01, `${cls}: the same pace, grown into`);
+    assert.ok(Math.abs(a.atkMult - 1 / 0.6) < 1e-9 && b.atkMult === 1);
+  }
   // a staff raises M.Atk, daggers raise the critical rate
   assert.ok(statsOf('mystic', 5, {}, 1, {}, { weapon: 'iron_staff' }).mAtk > statsOf('mystic', 5).mAtk);
   assert.equal(statsOf('rogue', 20, {}, 1, {}, { weapon: 'iron_daggers' }).crit, statsOf('rogue', 20).crit + 20);
@@ -121,7 +135,8 @@ test('statsOf: the Knight is no weaker for his shield having become an item', ()
   for (const level of [20, 25, 40]) {
     const now = statsOf('knight', level), defLevel = 1 + 0.05 * (level - 1), atkLevel = 1 + 0.1 * (level - 1);
     assert.equal(now.pDef, Math.round((62 + 15) * defLevel), `level ${level}: the same defence with a bare paw`);
-    assert.ok(now.pAtk >= Math.round(17 * atkLevel) && now.atkSpd >= Math.round(290 * (1 + (28 - 30) * 0.012)));
+    const quick = 0.6 + 0.4 * Math.min(1, (level - 1) / 39);   // attack speed has since come to grow with the level
+    assert.ok(now.pAtk >= Math.round(17 * atkLevel) && now.atkSpd >= Math.round(290 * (1 + (28 - 30) * 0.012) * quick));
     assert.equal(statsOf('knight', level, {}, 1, {}, { offhand: KNIGHT_SHIELD }).pDef, Math.round((62 + 15 + 4) * defLevel), 'and more with the buckler he is handed');
   }
 });
@@ -526,4 +541,18 @@ test('how a cat fights follows what it holds, not its class', () => {
   assert.deepEqual(fightStyle('fighter', 'bow'), { ranged: true, reach: BOW_REACH });      // a fighter with a bow shoots
   assert.deepEqual(fightStyle('archer', 'sword'), { ranged: false, reach: MELEE_REACH });  // an archer with a sword strikes
   for (const cls of CLASS_KEYS) assert.equal(fightStyle(cls).reach, CLASSES[cls].reach, `${cls} fights as before with its own weapon`);
+});
+
+test('every skill takes a moment: spells are sped up by Casting Spd, blows and shouts by what speeds the attacks', () => {
+  for (const id of SKILL_KEYS) if (SKILLS[id].kind !== 'passive') assert.ok(SKILLS[id].cast > 0 && SKILLS[id].cast <= 2, id);
+  const young = statsOf('fighter', 1), grown = statsOf('fighter', 40), armed = statsOf('fighter', 40, {}, 1, {}, { weapon: 'hypurr_sword' });
+  assert.ok(Math.abs(castTime(SKILLS.power_strike, young) - 0.5 / 0.6) < 1e-9);
+  assert.equal(castTime(SKILLS.power_strike, grown), 0.5);
+  assert.ok(castTime(SKILLS.power_strike, armed) < 0.5);
+  // a spell does not care how fast the paw swings, and a blow not how fast the mind works
+  assert.equal(castTime(SKILLS.bolt, young), castTime(SKILLS.bolt, grown));
+  assert.equal(castTime(SKILLS.bolt, statsOf('mystic', 1)), 0.65);
+  assert.equal(castTime(SKILLS.backstab, { castMult: 3, atkMult: 1 }), SKILLS.backstab.cast);
+  assert.equal(castTime(SKILLS.bolt, { castMult: 1, atkMult: 3 }), SKILLS.bolt.cast);
+  assert.equal(castTime(SKILLS.power_strike, {}), 0.5, 'stats from before blows had a wind-up');
 });

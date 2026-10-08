@@ -10,11 +10,11 @@ import { createComposer } from './postfx.js';
 import { createFx } from './fx.js';
 import { skillIcon, itemIcon, ATTACK_ICON, ICON_FILES } from './icons.js';
 import { createWorldMap } from './worldmap.js';
-import { SETTINGS_KEY, DEFAULT_SETTINGS, cleanSettings, pixelRatio, loudness } from './settings.js';
+import { SETTINGS_KEY, DEFAULT_SETTINGS, AUTO_STEPS, cleanSettings, lowered, pixelRatio, loudness } from './settings.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
-  ATTACK_WINDUP, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
-  professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
+  TICK, ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
+  professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, isSpell, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
   CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK,
@@ -154,12 +154,15 @@ world.ready.catch(console.error);
 
 // The graphics settings, put to work: at the start (before the loading screen compiles the shaders, so that it
 // compiles the ones this player will see) and whenever the settings window changes one.
+// With Auto on they are lowered by as many steps as the frame rate has asked for (see measure, further down).
+const auto = { step: 0, floor: 0, fps: 0, frames: 0, span: 0, slow: 0, fast: 0, wait: 6 };
 function applySettings() {
-  const ratio = pixelRatio(settings.resolution, devicePixelRatio);
+  const now = lowered(settings, settings.auto ? auto.step : 0), ratio = pixelRatio(now.resolution, devicePixelRatio);
   if (renderer.getPixelRatio() !== ratio) { renderer.setPixelRatio(ratio); composer.setPixelRatio(ratio); }
-  composer.setGlow(settings.glow);
-  world.lighting.setShadows(settings.shadows);
-  world.view.setVisible('foliage', settings.grass);
+  composer.setGlow(now.glow);
+  world.lighting.setShadows(now.shadows);
+  world.view.setVisible('foliage', now.grass);
+  $('fps').style.display = settings.fps ? 'block' : 'none';
 }
 applySettings();
 
@@ -444,11 +447,10 @@ function makeMobView(ti, lvl) {
   label.position.y = top + 0.75;
   root.add(label);
 
-  root.scale.setScalar(0.01);
   scene.add(root);
   return {
     root, skeleton, label, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
-    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flags: 0, flash: 0, age: 0, yaw: 0,
+    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flags: 0, flash: 0, rise: 0, yaw: 0,
   };
 }
 
@@ -651,6 +653,21 @@ function onMessage(msg) {
   }
 }
 
+// Another cat or a monster is drawn walking in a straight line from where it was shown when a snapshot came to where
+// that snapshot has it, in the time one snapshot takes: an even pace a twentieth of a second behind the server,
+// instead of a rubber band that is always catching up. tween() notes the two ends; glide() says where it is now.
+function tween(v, x, y, z) {
+  // a little longer than a tick, so that a snapshot that is a frame late finds it still walking; after a real gap,
+  // as long as the gap was
+  const since = time - (v.seenAt ?? time - TICK), span = since > TICK * 1.6 ? Math.min(0.25, since) : TICK * 1.15;
+  Object.assign(v, { fx: v.x, fy: v.y ?? 0, fz: v.z, tx: x, ty: y, tz: z, t0: time, seenAt: time, span });
+}
+function glide(v) {
+  const u = Math.min(1, (time - v.t0) / v.span);
+  v.x = v.fx + (v.tx - v.fx) * u; v.z = v.fz + (v.tz - v.fz) * u;
+  return u;
+}
+
 function syncViews(views, list, create, update, remove) {
   const seen = new Set();
   for (const row of list) {
@@ -674,7 +691,8 @@ function onSnapshot(s) {
   syncViews(others, s.p,
     ([, x, y, z, yaw, , , , , , , cls]) => Object.assign(makeAvatar(CLASS_KEYS[cls]), { x, y, z, yaw }),
     (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit, cls, look, st = 0, flags = 0]) => {
-      Object.assign(a, { tx: x, ty: y, tz: z, tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
+      tween(a, x, y, z);
+      Object.assign(a, { tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
       setLook(a, CLASS_KEYS[cls], look);
       setLabel(a, `${a.name} · ${CLASSES[a.cls].name} ${level}`, PVP_COLORS[st]);   // purple while it is flagged, red for an outlaw
     },
@@ -684,7 +702,7 @@ function onSnapshot(s) {
   for (const ev of s.e) if (ev.k === 'kill' && mobViews.has(ev.id)) mobViews.get(ev.id).killed = true;
   syncViews(mobViews, s.m,
     ([, ti, lvl, x, z]) => Object.assign(makeMobView(ti, lvl), { x, z }),
-    (v, [, , , x, z, hp, maxHp, flags]) => Object.assign(v, { tx: x, tz: z, hp, maxHp, flags }),
+    (v, [, , , x, z, hp, maxHp, flags]) => { tween(v, x, 0, z); Object.assign(v, { hp, maxHp, flags }); },
     (v) => {
       if (!v.killed) { removeMobView(v); return; }
       v.skeleton.die();
@@ -802,6 +820,14 @@ function onEvent(ev) {
     case 'dodge':
       floatText(me.x, 3.3, me.z, 'Dodge', '#a9d8ff');
       break;
+    case 'rise': {   // a monster is back: it comes out of the ground at its home
+      const v = mobViews.get(ev.id);
+      if (!v) break;
+      v.rise = MOB_RISE;
+      fx.mobRise(ev.x, ev.z, v.def.r, MOB_RISE, v.def === MOB_TYPES.boss);
+      if (Math.hypot(ev.x - me.x, ev.z - me.z) < 30) sfx(90, 0.6, 'sawtooth', 0.04, 60);
+      break;
+    }
     case 'atk': {   // a monster starts its blow, or (c) gathers a spell: both land when the wind-up is over
       const v = mobViews.get(ev.id);
       if (!v) break;
@@ -1281,10 +1307,11 @@ function updateLocal(dt) {
       else if (s.kind === 'strike' && !inReach) attacking = true;   // run up to the target first; the skill fires on arrival
       else if (targeted && s.range && tDist > s.range) warn('The target is too far away');
       else if (s.cast) {
-        const duration = castTime(s, sheet);   // spells are sped up by Casting Spd
+        const duration = castTime(s, sheet);   // spells are sped up by Casting Spd, blows by what speeds the attacks
         Object.assign(me, { castT: 0, castSkill: pick, castDur: duration, sitting: false });
         send({ t: 'k', s: pick });
-        sfx(220, duration, 'sine', 0.04, 500);
+        if (isSpell(s)) sfx(220, duration, 'sine', 0.04, 500);   // a spell hums as it gathers; a blow is only heard when it lands
+        else sfx(130, Math.min(duration, 0.25), 'triangle', 0.03, 90);
       } else {
         useSkill(pick, tdx, tdz);
         local.fireCd = 0.3;
@@ -1329,9 +1356,8 @@ function updateLocal(dt) {
 
 function updateAvatar(a, dt, isMe) {
   if (!isMe) {
-    const k = 1 - Math.exp(-12 * dt);
-    a.x += (a.tx - a.x) * k; a.y += (a.ty - a.y) * k; a.z += (a.tz - a.z) * k;
-    a.yaw = lerpAngle(a.yaw, a.tyaw, k);
+    a.y = a.fy + (a.ty - a.fy) * glide(a);
+    a.yaw = lerpAngle(a.yaw, a.tyaw, 1 - Math.exp(-12 * dt));
     a.shootPose -= dt;
     if (a.castT >= 0 && (a.castT += dt) >= a.castDur) a.castT = -1;
     a.bar.set(a.hp / a.maxHp, !a.dead && a.hp < a.maxHp);
@@ -1346,11 +1372,13 @@ function updateAvatar(a, dt, isMe) {
   if (flags && !a.status) a.status = fx.status(a.root, a.top, a.def.r);
   a.status?.update(flags, time);
   const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
-  a.orb.visible = a.castT >= 0;
+  // a spell gathers as an orb; a blow or a shout is wound up, and shows in how the cat stands
+  const spell = a.castT >= 0 && isSpell(SKILLS[a.castSkill] ?? {});
+  a.orb.visible = spell;
   if (a.orb.visible && !a.cat.castPoint(a.orb.position)) a.orb.position.set(0, 1.0, 0.85);   // at the crystal of a staff, else between the paws
   a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: spell, windup: a.castT >= 0 && !spell ? a.castT / a.castDur : -1, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
 }
 
 function updateViews(dt) {
@@ -1361,18 +1389,19 @@ function updateViews(dt) {
 
   const k = 1 - Math.exp(-10 * dt);
   for (const v of mobViews.values()) {
-    const dx = v.tx - v.x, dz = v.tz - v.z;
+    const dx = v.tx - v.fx, dz = v.tz - v.fz;   // the step of this snapshot: where it is heading, and whether it walks
     if (dx * dx + dz * dz > 0.0004) v.yaw = lerpAngle(v.yaw, Math.atan2(dx, dz), k);
-    v.x += dx * k; v.z += dz * k;
-    v.age += dt;
-    v.root.position.set(v.x, groundY(v.x, v.z), v.z);
-    v.root.scale.setScalar(Math.min(1, v.age / 0.4));
+    glide(v);
+    // a monster that has just come back rises out of the ground, through the circle that opened for it
+    v.rise = Math.max(0, v.rise - dt);
+    const under = v.rise / MOB_RISE;
+    v.root.position.set(v.x, groundY(v.x, v.z) - (v.top + 1.2) * under * under, v.z);
     v.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
     v.skeleton.group.rotation.y = v.yaw - cam.yaw;
     // monsters far outside the camera's view are neither drawn nor animated
     v.root.visible = (v.x - me.x) ** 2 + (v.z - me.z) ** 2 < 55 * 55;
     // a stunned or sleeping monster freezes mid-pose
-    if (v.root.visible && !(v.flags & 3)) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
+    if (v.root.visible && !(v.flags & 3)) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.002);
     v.flash = Math.max(0, v.flash - dt * 6);
     v.skeleton.flash(v.flash);
     v.bar.set(v.hp / v.maxHp, v.hp < v.maxHp);
@@ -1686,9 +1715,17 @@ function showSettings() {
   $('setVolume').disabled = !settings.sound;
   $('setVolumeText').textContent = `${settings.volume}%`;
   for (const b of $('setResolution').children) b.classList.toggle('on', b.dataset.v === settings.resolution);
+  showAuto();
+}
+// what Auto is doing right now, and the frame rate it goes by
+function showAuto() {
+  const now = lowered(settings, settings.auto ? auto.step : 0);
+  const less = ['resolution', 'shadows', 'glow', 'grass'].filter((key) => now[key] !== settings[key]);
+  $('setAutoNow').textContent = `${Math.round(auto.fps)} frames a second${less.length ? ` · Auto has lowered: ${less.join(', ')}` : ''}`;
 }
 function changeSettings(change) {
   Object.assign(settings, cleanSettings({ ...settings, ...change }));
+  Object.assign(auto, { step: 0, floor: 0, slow: 0, fast: 0, wait: 5 });   // the player has spoken: Auto starts over from there
   writeStore('localStorage', SETTINGS_KEY, JSON.stringify(settings));
   applySettings();
   showSettings();
@@ -2230,6 +2267,15 @@ function renderSheet() {
   );
 }
 
+// The two bars that fill while the cat casts or draws its bow: every frame, or they would stutter. The rest of the
+// HUD (updateHud) is brought up to date twenty times a second, which the eye does not tell from sixty.
+function updateBars() {
+  $('draw').style.display = me.drawT >= 0 ? 'block' : 'none';
+  $('drawFill').style.width = `${Math.max(0, me.drawT) / me.drawDur * 100}%`;
+  $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
+  $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
+}
+
 let xpSeen = null;   // the level and the experience the bar showed last, to tell when more has come in
 function updateHud() {
   const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
@@ -2257,10 +2303,6 @@ function updateHud() {
     xpSeen = { level: stats.level, xp: stats.xp };
     if (tipAnchor === xpBar) $('tip').lastChild.textContent = xpLine();   // the tooltip is open: it counts along
   }
-  $('draw').style.display = me.drawT >= 0 ? 'block' : 'none';
-  $('drawFill').style.width = `${Math.max(0, me.drawT) / me.drawDur * 100}%`;
-  $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
-  $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
   if (helpOpen) $('online').textContent = `${online} ${online === 1 ? 'cat' : 'cats'} in the world right now`;
   $('buffs').replaceChildren(
     ...['Stunned', 'Asleep', 'Slowed'].filter((_, i) => stats.cc & (1 << i)).map((text) => el('span', 'bad', text)),
@@ -2310,13 +2352,13 @@ function updateHud() {
     $('tgName').textContent = `${tv.name} · ${CLASSES[tv.cls].name} ${tv.level}`;
     $('tgName').style.color = PVP_COLORS[tv.st];
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = `${Math.ceil(tv.hp)} / ${tv.maxHp}`;
+    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
     $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : PVP_TITLES[tv.st];
   } else if (tv) {
     $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
     $('tgName').style.color = threat(tv.lvl);
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = `${Math.ceil(tv.hp)} / ${tv.maxHp}`;
+    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
     $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
   }
 
@@ -2467,7 +2509,38 @@ function updateCamera(dt) {
 }
 
 const clock = new THREE.Clock();
-let mapT = 0;
+
+// ---------------------------------------------------------------- the frame rate, and Auto
+// Called with the real length of every frame: counts the frames of each half second and shows the rate where it is
+// asked for. With Auto on in the settings it also judges: when the game cannot hold 40 frames a second for three
+// seconds, the graphics go down a step (AUTO_STEPS in settings.js; a step that changes nothing for this player is
+// passed over); when it has run at the screen's own rate for twenty, a step comes back - but never the one that
+// proved too much. A tab nobody looks at gets no frames to speak of: it is not judged.
+function measure(dt) {
+  auto.frames++; auto.span += dt;
+  if (auto.span < 0.5) return;
+  auto.fps = auto.frames / auto.span;
+  const span = auto.span;
+  auto.frames = 0; auto.span = 0;
+  if (settings.fps) $('fps').textContent = `${Math.round(auto.fps)} FPS`;
+  if (settingsOpen) showAuto();
+  if (!settings.auto || state !== 'playing' || document.visibilityState !== 'visible') { auto.slow = auto.fast = 0; return; }
+  if ((auto.wait -= span) > 0) return;   // just joined, or just changed: the shaders are still settling
+  auto.slow = auto.fps < 40 ? auto.slow + span : 0;
+  auto.fast = auto.fps > 57 ? auto.fast + span : 0;
+  const same = (a, b) => JSON.stringify(lowered(settings, a)) === JSON.stringify(lowered(settings, b));
+  let to = auto.step;
+  if (auto.slow >= 3) {
+    do to++; while (to < AUTO_STEPS.length && same(to, auto.step));
+    if (to > AUTO_STEPS.length || same(to, auto.step)) return;   // nothing left to take away
+    auto.floor = to;   // where it was is too much for this machine
+  } else if (auto.fast >= 20 && auto.step > auto.floor) {
+    do to--; while (to > auto.floor && same(to, auto.step));
+  } else return;
+  Object.assign(auto, { step: to, slow: 0, fast: 0, wait: 5 });
+  applySettings();
+}
+let mapT = 0, hudT = 0;
 // One step of the client: simulation, HUD and rendering. Kept separate from the animation-frame loop so tests can drive it.
 function tick(dt) {
   time += dt;
@@ -2477,7 +2550,8 @@ function tick(dt) {
   if (state === 'playing') {
     updateLocal(dt);
     updateViews(dt);
-    updateHud();
+    updateBars();
+    if ((hudT -= dt) <= 0) { hudT = 0.05; updateHud(); }
     if ((mapT -= dt) <= 0) { mapT = 0.15; drawMinimap(); }
     if (mapOpen) drawWorldMap();
   } else {
@@ -2494,7 +2568,9 @@ function tick(dt) {
   composer.render();
 }
 function frame() {
-  tick(Math.min(clock.getDelta(), 0.05));
+  const real = clock.getDelta();
+  measure(real);
+  tick(Math.min(real, 0.05));
   requestAnimationFrame(frame);
 }
 frame();

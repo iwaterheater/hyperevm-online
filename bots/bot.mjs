@@ -45,7 +45,7 @@ export const LINES = {
 
 export class Bot {
   // world: what all bots share - { map, rev, nav, url, bots (the names of all of them), say(bot, kind), log(bot, text) }
-  // spec:  { name, cls, lvl, role, family?, prof? } - one line of the roster
+  // spec:  { name, cls, lvl, cap?, role, family?, prof? } - one line of the roster
   constructor(world, spec) {
     this.world = world;
     this.spec = spec;
@@ -75,7 +75,7 @@ export class Bot {
     const ws = this.ws = new WebSocket(this.world.url.replace(/^http/, 'ws'));
     ws.on('open', () => this.send({
       t: 'join', name: this.spec.name, cls: CLASSES[this.spec.cls].base ?? this.spec.cls, rev: this.world.rev,
-      token: `bot-${this.spec.name.toLowerCase()}`, bot: { lvl: this.spec.lvl, cls: this.spec.cls, family: this.spec.family },
+      token: `bot-${this.spec.name.toLowerCase()}`, bot: { lvl: this.spec.lvl, cls: this.spec.cls, family: this.spec.family, cap: this.spec.cap },
     }));
     ws.on('message', (data) => { try { this.receive(JSON.parse(data)); } catch (err) { this.world.log(this, `message failed: ${err.stack}`); } });
     ws.on('close', () => { this.joined = false; this.world.left(this, ws); });

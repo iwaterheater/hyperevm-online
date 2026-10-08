@@ -71,11 +71,12 @@ test('the roster: ten bots with names of their own, classes that exist and roles
   for (const b of ROSTER) {
     assert.ok(CLASSES[b.cls] && !CLASSES[b.cls].base, `${b.name}: a starting class`);
     assert.ok(ROLES[b.role], `${b.name}: ${b.role}`);
-    assert.ok(/^[A-Za-z]{3,16}$/.test(b.name) && b.lvl >= 1 && b.lvl <= 40);
+    assert.ok(/^[A-Za-z]{3,16}$/.test(b.name) && b.lvl >= 1 && b.cap >= b.lvl && b.cap <= b.lvl + 3);
   }
   const aggro = (kind) => ROSTER.filter((b) => ROLES[b.role].aggro === kind).length;
   assert.ok(aggro('pk') >= 2 && aggro('duel') >= 1 && aggro('guard') >= 1);
   assert.ok(ROSTER.some((b) => !ROLES[b.role].aggro), 'and some that only want to hunt in peace');
+  assert.ok(ROSTER.filter((b) => b.cap <= 6).length >= 3, 'some stay small for good');
 });
 
 test('the grid: a bot walks only where a player can, and finds its way from the town to every camp', () => {
@@ -146,7 +147,7 @@ test('bots at large: both walk out to the camp and hunt, and the murderer brings
   listen.on('message', (data) => { const m = JSON.parse(data); if (m.t === 'c' && m.sys) lines.push(m.m); });
   listen.on('open', async () => listen.send(JSON.stringify({ t: 'join', name: 'Watcher', cls: 'fighter', rev: (await fetch(`${s.url}/api/map`)).headers.get('x-map-rev') })));
   const lambs = await createWorld(quiet, [{ name: 'Lamb', cls: 'fighter', lvl: 2, role: 'farmer' }]);
-  const wolves = await createWorld(quiet, [{ name: 'Fang', cls: 'fighter', lvl: 6, role: 'pk' }]);
+  const wolves = await createWorld(quiet, [{ name: 'Fang', cls: 'fighter', lvl: 6, cap: 6, role: 'pk' }]);
   for (const world of [lambs, wolves]) { world.log = () => {}; stops.push(async () => world.stop()); }
   const lamb = lambs.list[0], fang = wolves.list[0], map = lambs.map;
   const until = async (what, fn, ms) => {
@@ -163,6 +164,9 @@ test('bots at large: both walk out to the camp and hunt, and the murderer brings
   await until('the count', () => fang.me.pk === 1 && fang.me.karma > 0, 5000);
   assert.ok(!isSafe(map, fang.pos.x, fang.pos.z), 'out in the field');
   assert.ok(fang.me.xp > 0 || lamb.me.xp > 0 || fang.me.gold !== 240, 'somebody found a monster first');
+  // the murderer goes on hunting, and stays the size its roster line says: what it kills teaches it, but it does not grow
+  await until('a monster down', () => fang.me.sp > 0, 90000);
+  assert.deepEqual([fang.me.level, fang.me.xp], [6, 0]);
   listen.close();
   lambs.stop(); wolves.stop();
 });
