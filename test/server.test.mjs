@@ -1780,3 +1780,25 @@ check('monsters: a Skeleton Mage gathers its fireball in sight of everyone, and 
     clearInterval(hop);
   }
 }));
+
+
+// ---------------------------------------------------------------- a save that fails
+
+check('a save of the characters that fails does not take the server down, and never leaves half a file', async () => {
+  // the data folder cannot be made: its place is taken by a file (what a full disk does to a save, as far as the server sees)
+  const blocked = await withServer({ setup: (s) => { fs.writeFileSync(s.dataDir, 'not a folder'); } }, async (s) => {
+    const p = await enter(s, { token: 'saver', name: 'Saver' });
+    await p.settled();
+  });
+  assert.equal(await blocked.closed, 0, `the server fell:\n${blocked.out}`);
+  assert.match(blocked.out, /^The characters could not be saved \(\w+\): /m);
+  // a save that works replaces the file in one step: no temp file is left beside it, and one from a run that was cut
+  // short is cleared away
+  const fine = await withServer({ setup: (s) => { fs.mkdirSync(s.dataDir); fs.writeFileSync(path.join(s.dataDir, 'players.json.tmp'), '{"half":'); } }, async (s) => {
+    assert.ok(!fs.existsSync(path.join(s.dataDir, 'players.json.tmp')));
+    const p = await enter(s, { token: 'saver', name: 'Saver' });
+    await p.settled();
+  });
+  assert.deepEqual(fs.readdirSync(fine.dataDir), ['players.json']);
+  assert.equal(savedPlayers(fine).saver.name, 'Saver');
+});

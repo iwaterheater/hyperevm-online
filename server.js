@@ -516,10 +516,16 @@ function persist(p) {
   };
   if (p.knightKit) saved[p.token].knightKit = 1;   // the Knight has had his shield (see grantShield)
 }
+// Writes every character to the save file: to a temp file first, which then takes its place, so a write that fails
+// half way - a full disk - leaves the last good file as it was. May throw; see keep().
 function flush() {
   for (const p of players.values()) persist(p);
   fs.mkdirSync(path.dirname(SAVE_FILE), { recursive: true });
-  fs.writeFileSync(SAVE_FILE, JSON.stringify(saved));
+  writeFileAtomic(SAVE_FILE, JSON.stringify(saved));
+}
+// flush() for the timer and the way out: a save that fails is said, and the game goes on - the next one may succeed.
+function keep() {
+  try { flush(); } catch (err) { console.error(`The characters could not be saved (${err.code ?? err.message}): ${SAVE_FILE}`); }
 }
 
 // ---------------------------------------------------------------- world state
@@ -1608,13 +1614,13 @@ wss.on('connection', (ws, req) => {
 
 // ---------------------------------------------------------------- start-up
 
-try { fs.unlinkSync(`${MAP_FILE}.tmp`); } catch { /* no save was cut short */ }   // the only temp file the server ever writes
+for (const file of [MAP_FILE, SAVE_FILE]) try { fs.unlinkSync(`${file}.tmp`); } catch { /* no save was cut short */ }   // the only temp files the server ever writes
 scanAssets();
 applyMap(loadMap());
 
 setInterval(tick, 1000 * TICK);
-setInterval(flush, 30000);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flush(); process.exit(0); });
+setInterval(keep, 30000);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { keep(); process.exit(0); });
 
 server.listen(PORT, () => {
   const { port } = server.address();
