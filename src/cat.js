@@ -295,11 +295,12 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     }
   }
 
-  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0, aim = 0, strike = 0;
+  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0, aim = 0, strike = 0, wind = 0;
 
+  // windup: how far the wind-up of a physical skill has come, 0..1; below 0 = none (casting is the same for a spell).
   // hurt: 1 at the moment the cat is hit, falling to 0 over the next half second.
   // draw: how far the bow is drawn, 0..1; below 0 = not drawing. shooting: the moment after the arrow has left.
-  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, sitting = false, hurt = 0, draw = -1, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
+  function update(dt, { speed = 0, airborne = false, shooting = false, dashing = false, casting = false, windup = -1, sitting = false, hurt = 0, draw = -1, swing: slash = -1, swingKind: slashKind = 2 } = {}) {
     t += dt;
     const k = Math.min(1, dt * 12);
     move += (Math.min(1, speed / 9) - move) * k;
@@ -342,6 +343,16 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       }
     }
 
+    // Winding up a blow or drawing breath for a shout: the weapon paw goes up and back as the moment comes, the other
+    // one is braced in front. What is let go then - the swing below - takes over from where this has brought the paw.
+    wind += ((windup >= 0 ? 1 : 0) - wind) * Math.min(1, dt * 12);
+    if (wind > 0.01) {
+      const drawn = smooth(0, 1, Math.max(0, windup));
+      arms[1].rotation.x += (mix(-0.9, -2.7, drawn) - arms[1].rotation.x) * wind;
+      arms[1].rotation.z += (0.12 - arms[1].rotation.z) * wind;
+      if (!rig.shield) arms[0].rotation.x += (-0.6 - arms[0].rotation.x) * wind * 0.7;
+    }
+
     inner.position.y = Math.abs(Math.sin(runPhase)) * 0.09 * move * (1 - air) + Math.sin(t * 2.2) * 0.012;
     // sword swing (0..1). Kinds: 0 = left to right, 1 = right to left, 2 = overhead chop.
     arms[1].rotation.y = 0;
@@ -368,7 +379,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
         inner.rotation.y = sweep * dir * 0.9;
       }
     }
-    inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0) - cast * 0.1;
+    inner.rotation.x = move * 0.16 + (dashing ? 0.55 : 0) - cast * 0.1 - wind * 0.12;
     // resting: drop to the ground with the legs stretched out in front and the paws on the knees
     if (sit > 0.01) {
       inner.position.y -= 0.3 * sit;
@@ -433,7 +444,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     // The staff, whatever its paw has just been told to do: upright on the ground, level on the move, crystal first
     // for a spell, and with the paw for a blow. It slides through the paw so that the right part of it is held: the
     // height of the paw above the ground when it is planted, its middle when it is carried.
-    strike += ((slash >= 0 && rig.staff ? 1 : 0) - strike) * Math.min(1, dt * 18);
+    strike += (((slash >= 0 || windup >= 0) && rig.staff ? 1 : 0) - strike) * Math.min(1, dt * 18);
     if (rig.staff) {
       const { g, staff } = rig.staff, [foot, top] = rig.staffSpan, arm = arms[1], length = top - foot;
       const level = carry * (1 - sit), spell = Math.max(cast, shoot);

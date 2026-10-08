@@ -180,13 +180,13 @@ export const classLine = (cls) => (CLASSES[cls].base ? [CLASSES[cls].base, cls] 
 //     | heal | buff | taunt | sleep | dash | revive | passive
 export const SKILLS = {
   // Fighter
-  power_strike: { name: 'Power Strike', cls: 'fighter', lvl: 1, kind: 'strike', power: [3.5, 4.5, 5.5], mp: 6, cd: 5, sp: [0, 60, 220],
+  power_strike: { name: 'Power Strike', cls: 'fighter', lvl: 1, kind: 'strike', power: [3.5, 4.5, 5.5], mp: 6, cast: 0.5, cd: 5, sp: [0, 60, 220],
     text: 'A heavy blow at your target.' },
   weapon_mastery: { name: 'Weapon Mastery', cls: 'fighter', lvl: 3, kind: 'passive', stat: 'patk', add: [0.08, 0.16, 0.24], sp: [40, 150, 400],
     text: 'Permanently raises physical attack.' },
-  stun_strike: { name: 'Stun Strike', cls: 'fighter', lvl: 5, kind: 'strike', power: [2, 2.6], stun: [2, 3], mp: 10, cd: 12, sp: [120, 350],
+  stun_strike: { name: 'Stun Strike', cls: 'fighter', lvl: 5, kind: 'strike', power: [2, 2.6], stun: [2, 3], mp: 10, cast: 0.6, cd: 12, sp: [120, 350],
     text: 'Hits the target and stuns it for a few seconds.' },
-  war_cry: { name: 'War Cry', cls: 'fighter', lvl: 8, kind: 'buff', stat: 'patk', mult: [1.2, 1.3], dur: 20, mp: 12, cd: 30, sp: [300, 700],
+  war_cry: { name: 'War Cry', cls: 'fighter', lvl: 8, kind: 'buff', stat: 'patk', mult: [1.2, 1.3], dur: 20, mp: 12, cast: 0.6, cd: 30, sp: [300, 700],
     text: 'Raises your physical attack for 20 seconds.' },
   armor_mastery: { name: 'Armor Mastery', cls: 'fighter', lvl: 12, kind: 'passive', stat: 'pdef', add: [0.1, 0.2, 0.3], sp: [700, 1400, 2500],
     text: 'Permanently raises defence.' },
@@ -204,21 +204,21 @@ export const SKILLS = {
     text: 'Permanently raises maximum mana.' },
 
   // Knight
-  provoke: { name: 'Provoke', cls: 'knight', lvl: 20, kind: 'taunt', radius: 10, mp: 8, cd: 10, sp: [0, 900],
+  provoke: { name: 'Provoke', cls: 'knight', lvl: 20, kind: 'taunt', radius: 10, mp: 8, cast: 0.4, cd: 10, sp: [0, 900],
     text: 'Forces every monster nearby to attack you instead of your allies.' },
-  shield_bash: { name: 'Shield Bash', cls: 'knight', lvl: 22, kind: 'strike', power: [1.5, 2], stun: [3, 4], mp: 12, cd: 12, sp: [800, 1600],
+  shield_bash: { name: 'Shield Bash', cls: 'knight', lvl: 22, kind: 'strike', power: [1.5, 2], stun: [3, 4], mp: 12, cast: 0.5, cd: 12, sp: [800, 1600],
     text: 'Slams the target with the shield, stunning it for longer.' },
-  iron_wall: { name: 'Iron Wall', cls: 'knight', lvl: 25, kind: 'buff', stat: 'pdef', mult: [2, 2.5], dur: 10, mp: 15, cd: 40, sp: [1200, 2400],
+  iron_wall: { name: 'Iron Wall', cls: 'knight', lvl: 25, kind: 'buff', stat: 'pdef', mult: [2, 2.5], dur: 10, mp: 15, cast: 0.6, cd: 40, sp: [1200, 2400],
     text: 'Doubles your defence for 10 seconds.' },
   shield_mastery: { name: 'Shield Mastery', cls: 'knight', lvl: 28, kind: 'passive', stat: 'pdef', add: [0.15, 0.3], sp: [1800, 3200],
     text: 'Permanently raises defence further.' },
 
   // Rogue
-  backstab: { name: 'Backstab', cls: 'rogue', lvl: 20, kind: 'strike', power: [5, 6.5], mp: 10, cd: 6, sp: [0, 900],
+  backstab: { name: 'Backstab', cls: 'rogue', lvl: 20, kind: 'strike', power: [5, 6.5], mp: 10, cast: 0.35, cd: 6, sp: [0, 900],
     text: 'A vicious stab for very high damage.' },
-  shadow_step: { name: 'Shadow Step', cls: 'rogue', lvl: 22, kind: 'dash', mp: 6, cd: 6, sp: [800],
+  shadow_step: { name: 'Shadow Step', cls: 'rogue', lvl: 22, kind: 'dash', mp: 6, cast: 0.2, cd: 6, sp: [800],
     text: 'Dash forward; you cannot be hit while dashing.' },
-  rend: { name: 'Rend', cls: 'rogue', lvl: 25, kind: 'strike', power: [1.5, 2], dot: [1.2, 1.8], dotDur: 5, mp: 10, cd: 10, sp: [1200, 2400],
+  rend: { name: 'Rend', cls: 'rogue', lvl: 25, kind: 'strike', power: [1.5, 2], dot: [1.2, 1.8], dotDur: 5, mp: 10, cast: 0.45, cd: 10, sp: [1200, 2400],
     text: 'Opens a wound that bleeds for 5 seconds.' },
   crit_mastery: { name: 'Critical Mastery', cls: 'rogue', lvl: 28, kind: 'passive', stat: 'crit', add: [0.08, 0.16], sp: [1800, 3200],
     text: 'Permanently raises the chance of a critical hit.' },
@@ -246,9 +246,9 @@ export const SKILLS = {
   // Cleric
   healing_circle: { name: 'Healing Circle', cls: 'cleric', lvl: 20, kind: 'heal', power: [70, 100], radius: 9, mp: 22, cast: 1, cd: 6, sp: [0, 900],
     text: 'Heals you and every player nearby.' },
-  blessing_might: { name: 'Blessing of Might', cls: 'cleric', lvl: 22, kind: 'buff', stat: 'atk', mult: [1.15, 1.25], dur: 60, radius: 9, mp: 20, cd: 20, sp: [800, 1600],
+  blessing_might: { name: 'Blessing of Might', cls: 'cleric', lvl: 22, kind: 'buff', stat: 'atk', mult: [1.15, 1.25], dur: 60, radius: 9, mp: 20, cast: 0.8, cd: 20, sp: [800, 1600],
     text: 'Raises the damage of everyone nearby for a minute.' },
-  blessing_ward: { name: 'Blessing of Ward', cls: 'cleric', lvl: 25, kind: 'buff', stat: 'pdef', mult: [1.25, 1.4], dur: 60, radius: 9, mp: 20, cd: 20, sp: [1200, 2400],
+  blessing_ward: { name: 'Blessing of Ward', cls: 'cleric', lvl: 25, kind: 'buff', stat: 'pdef', mult: [1.25, 1.4], dur: 60, radius: 9, mp: 20, cast: 0.8, cd: 20, sp: [1200, 2400],
     text: 'Raises the defence of everyone nearby for a minute.' },
   resurrection: { name: 'Resurrection', cls: 'cleric', lvl: 28, kind: 'revive', radius: 8, mp: 40, cast: 2, cd: 60, sp: [1800],
     text: 'Raises fallen players nearby on the spot.' },
@@ -584,8 +584,9 @@ export function chestLoot(gold, big, rnd = Math.random) {
 // Every combat stat of a character, derived from its class attributes, level, weapon upgrade level, passive skills,
 // active buffs (`buffs` maps a stat name to a multiplier) and what it wears (`equip` maps a slot to an item id).
 // A weapon item adds to what the class's basic weapon gives, so the Blacksmith's upgrades multiply both.
-//   STR -> P.Atk      DEX -> Atk.Spd, Accuracy, Evasion, Critical, Speed      CON -> HP
+//   STR -> P.Atk      DEX -> Atk.Spd (with the level and the weapon's tier), Accuracy, Evasion, Critical, Speed      CON -> HP
 //   INT -> M.Atk      WIT -> Casting Spd, M.Critical                         MEN -> M.Def, MP
+export const ATK_SPD_START = 0.6, ATK_SPD_TIER = 0.05;
 export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}, equip = null) {
   const c = CLASSES[cls], w = WEAPONS[c.weapon], gear = equipBonus(equip, cls);
   const [STR, DEX, CON, INT, WIT, MEN] = c.attr;
@@ -600,7 +601,10 @@ export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}, equip 
   const buff = (stat) => buffs[stat] || 1;
   const grade = 1 + 0.4 * (weapon - 1);          // the Blacksmith's upgrades
   const atkLevel = 1 + 0.1 * (level - 1), defLevel = 1 + 0.05 * (level - 1);
-  const atkSpd = Math.round(w.spd * (1 + (DEX - 30) * 0.012));
+  // How fast it attacks grows as the cat does: a beginner swings at ATK_SPD_START of the speed its class has at level
+  // 40. And a better weapon is a quicker one: ATK_SPD_TIER more for every tier above the first.
+  const quick = (ATK_SPD_START + (1 - ATK_SPD_START) * Math.min(1, (level - 1) / 39)) * (1 + ATK_SPD_TIER * (itemOf(equip?.weapon)?.tier ?? 0));
+  const atkSpd = Math.round(w.spd * (1 + (DEX - 30) * 0.012) * quick);
   const castSpd = Math.round(333 * (1 + (WIT - 20) * 0.02));
   const speed = Math.round(100 + DEX * 0.6) + gear.speed;
   return {
@@ -618,13 +622,15 @@ export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}, equip 
     atkSpd, castSpd, speed,
     atkCd: 150 / atkSpd,          // seconds between auto-attacks
     castMult: 333 / castSpd,      // multiplier on the cast time of spells
+    atkMult: 1 / quick,           // the same for physical skills: the wind-up of a blow shortens as the attacks quicken
     move: speed * 0.075,          // world units per second
   };
 }
 
-// Spells are sped up by Casting Spd; physical skills keep their own timing.
+// Every skill takes a moment: a spell is cast, a blow is wound up, a shout is drawn breath for. Spells are sped up by
+// Casting Spd, physical skills by what speeds the attacks - the level and the weapon (atkMult).
 export const isSpell = (s) => ['bolt', 'heal', 'sleep', 'buff', 'revive'].includes(s.kind) || (s.kind === 'ground' && !s.phys);
-export const castTime = (s, st) => (s.cast || 0) * (isSpell(s) ? st.castMult : 1);
+export const castTime = (s, st) => (s.cast || 0) * (isSpell(s) ? st.castMult : st.atkMult ?? 1);
 
 // Damage after the target's defence, and the chance of a physical attack landing.
 export const mitigate = (attack, defence) => attack * 100 / (100 + defence);

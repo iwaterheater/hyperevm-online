@@ -41,7 +41,7 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `Tab` | Select the next nearest monster |
 | `Esc` | Clear the target |
 | `1`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack). The attack is the first slot of the [action bar](#action-bar) |
-| `2` – `9`, `0` | The other slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and most have a cast time or a cooldown; the cat stands still while casting. A click on a slot does the same |
+| `2` – `9`, `0` | The other slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and every one takes a moment - a spell is cast, a blow is wound up - and most have a cooldown; the cat stands still for that moment. A click on a slot does the same |
 | `I` | Inventory: the character's numbers, the cat with its six equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
 | `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
@@ -141,7 +141,8 @@ Press `C` for the character status window. Every class has six fixed base attrib
 - **P. Atk / M. Atk** against the target's **P. Def / M. Def**: damage is `attack × 100 / (100 + defence)`. Monsters have both defences too — warriors resist blades, mages resist spells.
 - **Accuracy** against **Evasion** decides whether a physical attack lands; spells always land.
 - **Critical** and **M. Critical** (per 1000) are the chances of a double-damage hit.
-- **Atk. Spd** sets the auto-attack interval, **Casting Spd** shortens the cast time of spells, **Speed** is how fast the cat runs.
+- **Atk. Spd** sets the auto-attack interval. It grows with the cat: a beginner attacks at three fifths of the speed its class has at level 40, and a weapon of a better tier adds a twentieth per tier. What speeds the attacks also shortens the wind-up of physical skills.
+- **Casting Spd** shortens the cast time of spells, **Speed** is how fast the cat runs.
 
 ### Skills
 

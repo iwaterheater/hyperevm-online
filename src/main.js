@@ -14,7 +14,7 @@ import { SETTINGS_KEY, DEFAULT_SETTINGS, AUTO_STEPS, cleanSettings, lowered, pix
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   TICK, ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
-  professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
+  professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, isSpell, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
   CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK,
@@ -1307,10 +1307,11 @@ function updateLocal(dt) {
       else if (s.kind === 'strike' && !inReach) attacking = true;   // run up to the target first; the skill fires on arrival
       else if (targeted && s.range && tDist > s.range) warn('The target is too far away');
       else if (s.cast) {
-        const duration = castTime(s, sheet);   // spells are sped up by Casting Spd
+        const duration = castTime(s, sheet);   // spells are sped up by Casting Spd, blows by what speeds the attacks
         Object.assign(me, { castT: 0, castSkill: pick, castDur: duration, sitting: false });
         send({ t: 'k', s: pick });
-        sfx(220, duration, 'sine', 0.04, 500);
+        if (isSpell(s)) sfx(220, duration, 'sine', 0.04, 500);   // a spell hums as it gathers; a blow is only heard when it lands
+        else sfx(130, Math.min(duration, 0.25), 'triangle', 0.03, 90);
       } else {
         useSkill(pick, tdx, tdz);
         local.fireCd = 0.3;
@@ -1371,11 +1372,13 @@ function updateAvatar(a, dt, isMe) {
   if (flags && !a.status) a.status = fx.status(a.root, a.top, a.def.r);
   a.status?.update(flags, time);
   const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
-  a.orb.visible = a.castT >= 0;
+  // a spell gathers as an orb; a blow or a shout is wound up, and shows in how the cat stands
+  const spell = a.castT >= 0 && isSpell(SKILLS[a.castSkill] ?? {});
+  a.orb.visible = spell;
   if (a.orb.visible && !a.cat.castPoint(a.orb.position)) a.orb.position.set(0, 1.0, 0.85);   // at the crystal of a staff, else between the paws
   a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: a.castT >= 0, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: spell, windup: a.castT >= 0 && !spell ? a.castT / a.castDur : -1, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
 }
 
 function updateViews(dt) {
