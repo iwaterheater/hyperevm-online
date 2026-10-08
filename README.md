@@ -36,11 +36,12 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `W` `A` `S` `D` / arrows | Move, relative to the camera; the cat turns to face where it walks |
 | Right mouse button (drag) | Turn the camera |
 | Mouse wheel | Zoom |
-| Left click on a monster | Select it as the target; a frame at the top shows its name, level and health |
+| Left click on a monster or a cat | Select it as the target; a frame at the top shows its name, level and health |
+| `Ctrl` + click on a cat | **Attack another player** - see [Fighting other cats](#fighting-other-cats). The Attack button under its name in the target frame does the same |
 | `Tab` | Select the next nearest monster |
 | `Esc` | Clear the target |
-| `F`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack) |
-| `1` – `9`, `0` | The ten slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and most have a cast time or a cooldown; the cat stands still while casting. A click on a slot does the same |
+| `1`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack). The attack is the first slot of the [action bar](#action-bar) |
+| `2` – `9`, `0` | The other slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and most have a cast time or a cooldown; the cat stands still while casting. A click on a slot does the same |
 | `I` | Inventory: the character's numbers, the cat with its six equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
 | `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
@@ -59,13 +60,13 @@ The windows also open from the strip of buttons under the minimap: Character, In
 
 ### Action bar
 
-Ten slots in the middle of the lower edge, on the keys `1` – `9` and `0`, with the Attack button (`F`) to their left. A slot holds a skill or an item:
+Ten slots in the middle of the lower edge, on the keys `1` – `9` and `0`, with the experience bar under them from end to end. The first slot holds the **attack**: it can be dragged onto another slot, but not taken off the bar. Any other slot holds a skill or an item:
 
 - **A skill** is cast by its key, exactly as a click on the slot does. The slot shows what it costs, its cooldown, and when the mana does not suffice.
 - **A potion** is drunk; the slot shows how many the bag holds and the cooldown all potions share, and stays - greyed - when the last one is gone.
 - **A piece of gear** is put on. Pressing the key again leaves it on (a second press in a fight must not strip the cat); it is taken off in the inventory. A worn piece is marked.
 
-Drag a learned skill from the skill book (`K`) or an item from the inventory (`I`) onto a slot; drag one slot onto another to swap them; drag a slot off the bar, or right-click it, to clear it. A character without a bar of its own - a new one, or one saved before the bar existed - gets its learned skills from slot 1 on and its health and mana potions on `9` and `0`. A skill learned later goes into the first empty slot. The bar is saved with the character on the server.
+Drag a learned skill from the skill book (`K`) or an item from the inventory (`I`) onto a slot; drag one slot onto another to swap them; drag a slot off the bar, or right-click it, to clear it. A character without a bar of its own - a new one, or one saved before the bar existed - gets the attack on slot 1, its learned skills after it and its health and mana potions on `9` and `0`. A skill learned later goes into the first empty slot. The bar is saved with the character on the server.
 
 ## The world
 
@@ -97,7 +98,7 @@ Not every monster is out for blood. A name written in **red** over a monster's h
 | --- | --- |
 | Skeleton Minion | Shambles at you with a blade |
 | Skeleton Rogue | Small, fast, fragile, dual-wields blades |
-| Skeleton Mage | Keeps its distance and fires orbs from its staff |
+| Skeleton Mage | Keeps its distance, gathers a spell in a ring of fire and throws a fireball that follows its target - jump over it, dash through it or step aside at the last moment |
 | Skeleton Warrior | Slow, tough, hits hard with an axe, drops extra gold |
 | Skeleton King | Boss; fires rings of orbs, respawns after 90 seconds |
 | Imp, Armabee, Skull Wraith, Wild Bunny, Wild Tabby, Angry Chicken, Shadow Ninja, Ninja Blob, Monkroose, Goleling, Glub, Sky Pigeon, Squidle, Chubby Chick, Young Deer, Red Fiend, Hopping Skull, Cave Bat, Marsh Hornet, Grey Wolf, Red Fox, Raptor | Fast and fragile: on you before you have turned round |
@@ -186,6 +187,25 @@ Stand next to the Trader in town and press `T`. He sells the four potions and al
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold and the better what else may lie in them. The King's hoard waits inside his fortress.
 - Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises P. Atk and M. Atk.
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
+
+### Fighting other cats
+
+Cats may fight each other anywhere outside the safe places, by the rules of Lineage II. Nobody attacks by accident: a
+peaceful cat is attacked with `Ctrl` + click, or with the Attack button of its target frame.
+
+- **Purple name - flagged.** Attacking another cat flags the attacker for 30 seconds after its last blow. Anyone may
+  fight a flagged cat; hitting back flags the defender too.
+- **PvP.** Bringing down a flagged cat, or an outlaw, is a fight won: PvP +1. The loser keeps its experience.
+- **PK.** Killing a cat that never fought back is murder: PK +1, and karma - 240 for the first one, 60 more for each
+  after it.
+- **Red name - outlaw.** A cat with karma may be attacked by anyone without that flagging the attacker, and it loses
+  experience when another cat brings it down. In a safe place it is as safe as anyone, and the Trader serves it.
+- **Karma** is worked off by killing monsters (`8 + 2 × the monster's level` each), and 120 of it goes with every death.
+- Area skills never start a fight: among cats they reach only flagged ones and outlaws. Stuns, sleep, slows and
+  bleeding work on cats as they do on monsters; a cat's attack does three quarters of its damage to another cat.
+
+The counts are in the Character window (`C`) and under the name in the Inventory (`I`); the colour of a name is seen by
+everyone, on the cat, in its target frame and on the minimap.
 
 ## Map editor
 
@@ -292,6 +312,7 @@ To try things without touching the real map or the real players: `MAP_FILE=/tmp/
 index.html        Page, HUD and styles
 editor.html       The map editor page
 server.js         HTTP static server + WebSocket game server; loads the map and, in editor mode, saves it
+bots/             The bots: run.mjs (the roster, the runner), bot.mjs (what a bot does), nav.mjs (where it can walk)
 map/world.json    The world: terrain, scenery, regions, monster camps, chests, townsfolk, start point
 map/backups/      The map before each save (created by the server, git-ignored)
 map/library/      The map library: named copies of the map, listed in the editor's Maps menu
@@ -350,10 +371,41 @@ data/             Saved player progress (created at runtime, git-ignored)
 
 The server is a single Node.js process, so any host that can run Node and accept WebSocket connections works (a VPS, Railway, Render, Fly.io, …). Start it with `npm start` and point players at its address. Behind HTTPS the client automatically switches to `wss://`.
 
+## Bots
+
+Ten cats that play on their own, so that the world is never empty:
+
+```bash
+npm run bots                                  # ten bots on http://localhost:8765
+npm run bots -- --url http://localhost:3000 --count 4 --verbose
+```
+
+A bot is a player like any other: it joins through the game's WebSocket and plays by the same rules, and the server
+saves it with its level and gear, so it comes back as it left and grows from day to day. It hunts the camp that fits
+its level, rests, drinks potions, and goes back to town to sell its loot, buy gear and potions, learn skills from the
+Sage and have its weapon upgraded. It walks around water, cliffs and scenery, takes a moment to react, says a line in
+the chat now and then, and takes a break of a few minutes every half hour or so (`--no-breaks` keeps them all in).
+
+The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at, and a role - how it treats other cats:
+
+| Role | Towards other cats |
+| --- | --- |
+| `farmer` | Peaceful; runs for the town when attacked |
+| `veteran` | Peaceful, but fights back |
+| `guard` | Hunts outlaws, and nobody else |
+| `duelist` | Challenges cats of about its level, and lets go of one that will not fight; hunts outlaws |
+| `pk` | Attacks cats from four levels below its own to two above, and kills them: a murderer with a red name, until it has worked its karma off |
+
+A cat a bot has brought down is left alone by that bot for some minutes. Among themselves the bots fight seldom.
+
+The bots have to run on the machine the server runs on: the first time one joins, the server makes it the character of
+its roster line - the level, the skills and gear of that level - which only a program on the same machine may ask for.
+The bots say nothing about being bots, and nothing about being people.
+
 ## Limitations
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
-- No accounts, no PvP, no parties. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
+- No accounts and no parties. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
 - Every piece of armour is one model in four tints, and all tiers of a weapon share one model; a greatsword is the sword drawn larger, and the shield is one shape built in code. Only shields go into the off hand: there is no second weapon for it, and a two-handed weapon attacks as fast as any other.
 - The HUD is laid out for a window at least 1280 pixels wide and 720 high; in a smaller one the windows reach over the chat and the radar.
 - Clerics can only heal and bless players standing near them; there is no targeting of other players yet.

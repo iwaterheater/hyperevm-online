@@ -28,6 +28,15 @@ const V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), Q1 = new THREE.Quatern
 // front) and how it faces - forward, turned a little outwards and leaning back; and how far that paw is held up for it.
 const SHIELD_AT = new THREE.Vector3(-0.05, 0.03, 0.085), SHIELD_FACING = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.14, -0.3, 0, 'YXZ'));
 const SHIELD_ARM = -0.7;
+// The staff, in the frame of the body. Standing, the cat holds it out to the side, planted on the ground: how far the
+// paw is raised for that. Walking, it carries it level at its hip, the crystal ahead. For a spell the crystal is put
+// forward at the target, and thrust out as the spell leaves. For a blow it is swung like a club: that one is told in
+// the frame of the paw, as a blade is.
+const STAFF_ARM = 1.2;
+const AXIS_X = new THREE.Vector3(1, 0, 0), turnX = (a) => new THREE.Quaternion().setFromAxisAngle(AXIS_X, a);
+const STAFF_LEVEL = turnX(Math.PI / 2 - 0.14), STAFF_CAST = turnX(0.95), STAFF_THRUST = turnX(1.3), STAFF_STRIKE = turnX(Math.PI / 2 - 0.5);
+const Q2 = new THREE.Quaternion(), Q3 = new THREE.Quaternion();
+const mix = (a, b, f) => a + (b - a) * f;
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // what leaves the shoulder: the direction the arm was modelled in (x is mirrored for the left arm)
 const ARM_DIR = new THREE.Vector3(0.52, -0.85, 0.06).normalize();
@@ -113,7 +122,7 @@ export function loadCat() {
   return getShared().ready;
 }
 
-// -> { group, update(dt, state), setLook({ hoodie, weapon, armor, weaponTint, shield }) }. The group is there at once,
+// -> { group, update(dt, state), setLook({ hoodie, weapon, armor, weaponTint, shield }), castPoint(out) }. The group is there at once,
 // standing on its origin and facing +Z; the model appears in it when the file has arrived.
 export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, weaponTint = null, shield = null } = {}) {
   const S = getShared();
@@ -158,6 +167,9 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       w.traverse((o) => { if (o.isMesh) { o.userData.mat = o.material.name; o.material = S.mats.get(o.material.name); o.castShadow = true; } });
       weapons[name] = w;
     }
+    // the staff from its foot to its top, along its own length
+    weapons.Staff.updateMatrixWorld(true);
+    const span = new THREE.Box3().setFromObject(weapons.Staff);
     // each piece of armour: the objects to show and hide, and those of their meshes that are plates
     const pieces = {};
     for (const [piece, names] of Object.entries(PIECES)) {
@@ -165,7 +177,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       for (const n of nodes) n.traverse((o) => { if (o.isMesh && o.userData.mat === 'a_steel') plates.push(o); });
       pieces[piece] = { nodes, plates };
     }
-    rig = { model, arms, weapons, pieces, head: node('PHead'), legs: [node('PLegL'), node('PLegR')], tail: node('PTail'), eyes: [node('EyeL'), node('EyeR')], gear: [] };
+    rig = { model, arms, weapons, pieces, head: node('PHead'), legs: [node('PLegL'), node('PLegR')], tail: node('PTail'), eyes: [node('EyeL'), node('EyeR')], gear: [], staffSpan: [span.min.y, span.max.y] };
     inner.add(model);
     setLook(look);
   }, () => {});
@@ -215,10 +227,12 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       rig.gear.push(quiver);
       rig.bow = { bow, string, arrow, inPaw };
     },
-    staff() {
-      const g = hold(1), staff = rig.weapons.Staff.clone(true);
-      staff.position.set(0, 0.2, 0.08);   // held a little below the middle, so its foot is near the ground
+    staff() {   // how it is held changes with what the cat does: see update
+      const g = hold(1), staff = rig.weapons.Staff.clone(true), tip = new THREE.Object3D();
+      tip.position.y = rig.staffSpan[1] - 0.2;   // the crystal in its cage
+      staff.add(tip);
       g.add(staff);
+      rig.staff = { g, staff, tip };
     },
   };
   function hold(i) { const g = new THREE.Group(); rig.arms[i].hand.add(g); rig.gear.push(g); return g; }
@@ -259,7 +273,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     for (const g of rig.gear) g.removeFromParent();
     rig.gear.length = 0;
     rig.bow?.string.geometry.dispose();
-    rig.bow = rig.shield = null;
+    rig.bow = rig.shield = rig.staff = null;
     (GEAR[held] || GEAR.sword)();
     if (typeof guard === 'number') carryShield(guard);
     if (typeof tint === 'number') {
@@ -281,7 +295,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     }
   }
 
-  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0, aim = 0;
+  let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0, aim = 0, strike = 0;
 
   // hurt: 1 at the moment the cat is hit, falling to 0 over the next half second.
   // draw: how far the bow is drawn, 0..1; below 0 = not drawing. shooting: the moment after the arrow has left.
@@ -311,12 +325,20 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       arms[0].rotation.x = SHIELD_ARM - swing * 0.2;
       arms[0].rotation.z = -0.22 - air * 0.5;
     }
-    // casting: both paws held out in front, cupping the charging bolt
+    // A staff is carried, not swung. Standing, the paw is out to the side with the staff planted beside the cat; on
+    // the move - and in the air - it hangs, and the staff lies level in it.
+    const carry = rig.staff ? Math.max(smooth(0.06, 0.55, move), air) : 0;
+    if (rig.staff) {
+      arms[1].rotation.x = mix(-0.12, swing * 0.2 - 0.05, carry) * (1 - shoot) - 1.1 * shoot;
+      arms[1].rotation.z = mix(STAFF_ARM, 0.34, carry) + air * 0.4;
+    }
+    // casting: both paws held out in front, cupping the charging bolt - or the one with the staff putting its crystal forward
     if (cast > 0.01) {
       const tremble = Math.sin(t * 40) * 0.04 * cast;
       for (const [i, s] of [[0, 1], [1, -1]]) {
-        arms[i].rotation.x += (-1.4 + tremble - arms[i].rotation.x) * cast;
-        arms[i].rotation.z += (s * 0.35 - arms[i].rotation.z) * cast;
+        const withStaff = i === 1 && rig.staff;
+        arms[i].rotation.x += ((withStaff ? -1.0 : -1.4) + tremble - arms[i].rotation.x) * cast;
+        arms[i].rotation.z += ((withStaff ? 0.2 : s * 0.35) - arms[i].rotation.z) * cast;
       }
     }
 
@@ -325,7 +347,6 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     arms[1].rotation.y = 0;
     inner.rotation.y = 0;
     if (slash >= 0) {
-      const mix = (a, b, f) => a + (b - a) * f;
       // A swing has three beats: the blade is drawn back and slows at the top, so the wind-up can be read; it comes
       // down gathering speed; and the arm eases back. The wind-up takes the first SWING_WINDUP of it.
       const rise = (f) => 1 - (1 - f) * (1 - f), fall = (f) => f * f, settle = (f) => f * f * (3 - 2 * f);
@@ -409,6 +430,26 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       if (h > 0.3) eyes[0].scale.y = eyes[1].scale.y = 0.14;
     }
 
+    // The staff, whatever its paw has just been told to do: upright on the ground, level on the move, crystal first
+    // for a spell, and with the paw for a blow. It slides through the paw so that the right part of it is held: the
+    // height of the paw above the ground when it is planted, its middle when it is carried.
+    strike += ((slash >= 0 && rig.staff ? 1 : 0) - strike) * Math.min(1, dt * 18);
+    if (rig.staff) {
+      const { g, staff } = rig.staff, [foot, top] = rig.staffSpan, arm = arms[1], length = top - foot;
+      const level = carry * (1 - sit), spell = Math.max(cast, shoot);
+      Q2.identity().slerp(STAFF_LEVEL, level);
+      Q2.slerp(Q3.copy(STAFF_CAST).slerp(STAFF_THRUST, shoot), spell);
+      Q2.slerp(Q3.copy(arm.quaternion).multiply(STAFF_STRIKE), strike);
+      g.quaternion.copy(arm.quaternion).invert().multiply(Q2);
+      const pawUp = arm.position.y + V1.set(0, -PAW, 0).applyQuaternion(arm.quaternion).y + inner.position.y / SCALE;   // above the ground, model units
+      let grip = Math.min(top - 0.3, Math.max(foot + 0.2, foot + pawUp));
+      grip = mix(grip, (foot + top) / 2 - 0.1, level);
+      grip = mix(grip, foot + length * 0.36, spell);
+      grip = mix(grip, foot + length * 0.28, strike);
+      const planted = (1 - level) * (1 - spell) * (1 - strike);   // then it stands a little outside the paw, clear of the head
+      staff.position.set(0.1 * planted + 0.06 * level, -grip, 0.05 * planted);
+    }
+
     // the shield stays upright and faces ahead whatever its paw has just been told to do
     if (rig.shield) {
       Q1.copy(arms[0].quaternion).invert();
@@ -417,5 +458,14 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     }
   }
 
-  return { group, update, setLook };
+  // Where a spell gathers and leaves from, in the frame of `group`: the crystal of the staff. -> false, and `out` as it
+  // was, for a cat that holds none.
+  function castPoint(out) {
+    if (!rig?.staff) return false;
+    rig.staff.tip.getWorldPosition(out);
+    group.worldToLocal(out);
+    return true;
+  }
+
+  return { group, update, setLook, castPoint };
 }

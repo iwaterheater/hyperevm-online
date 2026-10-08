@@ -6,11 +6,11 @@ export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its sw
 // hp, pAtk: at level 1. pDef / mDef: multipliers on the level-based defence (warriors shrug off blades, mages shrug off spells).
 // eva: bonus to evasion.
 export const MOB_TYPES = {
-  chaser:  { name: 'Skeleton Minion',  r: 0.7,  hp: 30,   speed: 3.0, pAtk: 14, pDef: 1,   mDef: 1,   eva: 0, xp: 10,  color: 0xff3b8d },
-  runner:  { name: 'Skeleton Rogue',   r: 0.45, hp: 15,   speed: 5.2, pAtk: 8,  pDef: 0.7, mDef: 0.9, eva: 6, xp: 8,   color: 0xff9a3b },
-  shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 30,   speed: 2.4, pAtk: 11, pDef: 0.7, mDef: 1.6, eva: 0, xp: 16,  color: 0xffe14d, magic: true },
-  tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 140,  speed: 1.8, pAtk: 28, pDef: 1.6, mDef: 0.8, eva: 0, xp: 45,  color: 0xb04dff },
-  boss:    { name: 'Skeleton King',    r: 2.8,  hp: 1600, speed: 2.2, pAtk: 20, pDef: 1.5, mDef: 1.5, eva: 2, xp: 600, color: 0xff2244, magic: true },
+  chaser:  { name: 'Skeleton Minion',  r: 0.7,  hp: 45,   speed: 3.0, pAtk: 16, pDef: 1,   mDef: 1,   eva: 0, xp: 10,  color: 0xff3b8d },
+  runner:  { name: 'Skeleton Rogue',   r: 0.45, hp: 24,   speed: 5.2, pAtk: 9,  pDef: 0.7, mDef: 0.9, eva: 6, xp: 8,   color: 0xff9a3b },
+  shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 45,   speed: 2.4, pAtk: 12, pDef: 0.7, mDef: 1.6, eva: 0, xp: 16,  color: 0xffe14d, magic: true },
+  tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 210,  speed: 1.8, pAtk: 31, pDef: 1.6, mDef: 0.8, eva: 0, xp: 45,  color: 0xb04dff },
+  boss:    { name: 'Skeleton King',    r: 2.8,  hp: 2400, speed: 2.2, pAtk: 22, pDef: 1.5, mDef: 1.5, eva: 2, xp: 600, color: 0xff2244, magic: true },
   // New kinds go at the end: a monster travels as its index in this table.
   // `draw: 'monster'` marks a kind that is not a skeleton: src/monster.js draws it. `fly` lifts a monster off the
   // ground; the server walks it like any other.
@@ -488,25 +488,40 @@ export function lookOf(code) {
 }
 
 // ---- the action bar: BAR_SIZE slots on the keys 1 - 9 and 0. A slot is empty (null) or holds the id of an active skill
-// or of an item; the two tables share no id (a test keeps it that way), so the id alone says which of the two it is.
+// or of an item - the two tables share no id (a test keeps it that way), so the id alone says which of the two it is -
+// or BAR_ATTACK, the plain attack with the weapon. That one is on every bar exactly once: it starts on the key 1, can
+// be moved to another slot and never taken off.
 
 export const BAR_SIZE = 10;
+export const BAR_ATTACK = 'attack';
 // The skill of an id that came from outside, when it is one a slot can hold: a passive skill has nothing to press.
 export const barSkill = (id) => (typeof id === 'string' && Object.hasOwn(SKILLS, id) && SKILLS[id].kind !== 'passive' ? SKILLS[id] : undefined);
-// A bar as a client or a save file gives it, made safe: always BAR_SIZE slots, and whatever is not an active skill or an
-// item is an empty slot. Whether the character has learned the skill or owns the item is not asked: a slot keeps its
-// potion when the last one is drunk, and says "not learned" for a skill the character does not have.
+// A bar as a client or a save file gives it, made safe: always BAR_SIZE slots, and whatever is not the attack, an active
+// skill or an item is an empty slot. Whether the character has learned the skill or owns the item is not asked: a slot
+// keeps its potion when the last one is drunk, and says "not learned" for a skill the character does not have.
+// A bar without the attack - one saved before the attack had a slot - gets it on the key 1: what was there moves one
+// slot to the right, into the first gap; from a bar without a gap the last slot falls off.
 export function cleanBar(raw) {
   const list = Array.isArray(raw) ? raw : [];
-  return Array.from({ length: BAR_SIZE }, (_, i) => (barSkill(list[i]) || itemOf(list[i]) ? list[i] : null));
+  const bar = Array.from({ length: BAR_SIZE }, (_, i) => (list[i] === BAR_ATTACK || barSkill(list[i]) || itemOf(list[i]) ? list[i] : null));
+  const at = bar.indexOf(BAR_ATTACK);
+  if (at < 0) {
+    const gap = bar.indexOf(null);
+    bar.splice(gap < 0 ? BAR_SIZE - 1 : gap, 1);
+    bar.unshift(BAR_ATTACK);
+  } else for (let i = at + 1; i < BAR_SIZE; i++) if (bar[i] === BAR_ATTACK) bar[i] = null;
+  return bar;
 }
-// The bar of a character that has never arranged one: its learned skills from the first slot on, and a health and a
-// mana potion on the last two - the kind it carries, else the lesser one, which is what every new cat starts with.
+// The bar of a character that has never arranged one: the attack on the first slot, its learned skills after it, and a
+// health and a mana potion on the last two - the kind it carries, else the lesser one, which is what every new cat
+// starts with.
 export function defaultBar(cls, learned, inv = []) {
   const bar = cleanBar(activeSkills(cls, learned).slice(0, BAR_SIZE - 2));
-  ['hp', 'mp'].forEach((kind, i) => {
+  // a class with skills enough to reach the last slots keeps its skills there: then only the health potion has room
+  const free = [BAR_SIZE - 2, BAR_SIZE - 1].filter((slot) => !bar[slot]);
+  ['hp', 'mp'].slice(0, free.length).forEach((kind, i) => {
     const carried = inv.find((s) => itemOf(s[0])?.[kind]);
-    bar[BAR_SIZE - 2 + i] = carried ? carried[0] : `${kind}_small`;
+    bar[free[i]] = carried ? carried[0] : `${kind}_small`;
   });
   return bar;
 }
@@ -617,6 +632,26 @@ export const xpNext = (level) => 100 * level * level;
 export const spFor = (xp) => Math.ceil(xp / 8);                  // skill points earned along with experience
 export const DEATH_XP_LOSS = 0.04;                               // share of the current level's experience lost on death
 export const upgradeCost = (weapon) => 40 * weapon;
+
+// ---------------------------------------------------------------- PvP
+
+// Cats may fight each other outside the safe regions - in a safe one nobody is attacked - by the rules of Lineage II:
+//   - a cat that attacks another one is flagged for a while: its name turns purple, and anyone may fight it;
+//   - whoever kills a flagged cat, or an outlaw, has won a fight: PvP +1;
+//   - whoever kills a cat that never fought back has murdered it: PK +1, and karma. A cat with karma is an outlaw: its
+//     name is red, anyone may attack it without being flagged for that, and it loses experience when it falls to
+//     another cat;
+//   - karma is worked off by killing monsters, and a part of it goes with every death.
+export const PVP_FLAG = 30;         // seconds a cat stays flagged after its last attack on another cat
+export const PVP_DAMAGE = 0.75;     // what a cat's attack does to another cat, as a share of what it does to a monster
+export const KARMA_DEATH = 120;     // karma an outlaw is rid of by dying
+export const CAT_R = 0.5;           // the radius of a cat as a target
+export const karmaGain = (pk) => 240 + 60 * Math.min(Math.max(pk, 1) - 1, 16);   // for the murder that made the count `pk`
+export const karmaBurn = (mobLvl) => 8 + 2 * mobLvl;                             // worked off by killing a monster
+// How a cat stands with the others, as a number that travels with it: peaceful, flagged, outlaw.
+export const PVP_PEACE = 0, PVP_FLAGGED = 1, PVP_OUTLAW = 2;
+export const PVP_COLORS = ['#d5f5ee', '#c58bff', '#ff5a6a'];   // the colour of its name
+export const PVP_TITLES = ['Peaceful', 'Flagged', 'Outlaw'];
 
 // ---------------------------------------------------------------- world
 

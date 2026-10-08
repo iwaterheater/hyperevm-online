@@ -1086,7 +1086,8 @@ check('items: wearing and taking off - class and level rules, the swap, the stat
   await w.until('the watcher sees all three', () => lookOf(seen()[12]).weapon === 1);
   assert.deepEqual(lookOf(seen()[12]), { weapon: 1, offhand: -1, head: 1, body: -1, hands: -1, feet: 1, family: 'sword' });
   // what the watcher gets is the look and nothing more: no bag, no item ids
-  assert.equal(seen().length, 13);
+  assert.equal(seen().length, 15);   // after the look: how the cat stands with the others, and what holds it (PvP)
+  assert.deepEqual(seen().slice(13), [0, 0]);
   assert.ok(seen().every((v) => typeof v === 'number'));
 
   // off again; a full bag refuses
@@ -1500,20 +1501,22 @@ check('two paws: a Knight is handed a shield - with the profession, or the first
 
 // ---------------------------------------------------------------- the action bar
 
+// the attack is on every bar, on the first slot unless the player moved it
 const EMPTY_BAR = Array(10).fill(null);
 const barOf = (...head) => [...head, ...EMPTY_BAR].slice(0, 10);
+const DEFAULT_BAR = (skill) => ['attack', skill, null, null, null, null, null, null, 'hp_small', 'mp_small'];
 
 check('action bar: an old save and a new cat get the default one; an arrangement is validated, saved and read back', async () => {
   const veteran = { ...OLD, skills: { power_strike: 2, stun_strike: 1, weapon_mastery: 1 }, inv: [['iron_sword', 1], ['hp_large', 2], ['mp_small', 1]] };
-  const mine = ['stun_strike', 'iron_sword', null, 'hp_large', null, null, null, null, 'power_strike', 'fireball'];
+  const mine = ['stun_strike', 'iron_sword', 'attack', 'hp_large', null, null, null, null, 'power_strike', 'fireball'];   // the attack moved to the key 3
   const first = await withServer({ setup: seed({ old: veteran, bare: OLD }) }, async (s) => {
-    // a save from before the bar: the learned skills from slot 1 on, and the potions it carries on the last two
+    // a save from before the bar: the attack, the learned skills after it, and the potions it carries on the last two
     const old = await enter(s, { token: 'old' });
-    assert.deepEqual(old.bar, ['power_strike', 'stun_strike', null, null, null, null, null, null, 'hp_large', 'mp_small']);
+    assert.deepEqual(old.bar, ['attack', 'power_strike', 'stun_strike', null, null, null, null, null, 'hp_large', 'mp_small']);
     const bare = await enter(s, { token: 'bare' });
-    assert.deepEqual(bare.bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small'], 'the free skill of the class, and the lesser potions');
+    assert.deepEqual(bare.bar, DEFAULT_BAR('power_strike'), 'the free skill of the class, and the lesser potions');
     const fresh = await enter(s, { token: 'fresh', cls: 'mystic' });
-    assert.deepEqual(fresh.bar, ['bolt', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+    assert.deepEqual(fresh.bar, DEFAULT_BAR('bolt'));
     // the bar travels when it changes, not with every snapshot
     const n = old.snaps;
     await old.until('more snapshots', () => old.snaps > n + 3);
@@ -1527,11 +1530,12 @@ check('action bar: an old save and a new cat get the default one; an arrangement
     assert.deepEqual(old.bar, mine);
     await old.send({ t: 'bar', bar: ['weapon_mastery', 'no_such_thing', 7, ['bolt'], { id: 'bolt' }, '__proto__', 'constructor', 'hp_small'] });
     await old.until('the bar back', () => old.bars === 3);
-    assert.deepEqual(old.bar, [null, null, null, null, null, null, null, 'hp_small', null, null]);
+    // ... and a bar that came without the attack gets it back on the first slot
+    assert.deepEqual(old.bar, ['attack', null, null, null, null, null, null, 'hp_small', null, null]);
     for (const junk of [undefined, null, 'bolt', 7, {}, { length: 10 }]) await old.send({ t: 'bar', bar: junk });
-    await old.until('six empty bars back', () => old.bars >= 4 && old.bar.every((slot) => slot === null));
+    await old.until('six empty bars back', () => old.bars >= 4 && old.bar.filter(Boolean).length === 1);
     await old.settled();
-    assert.deepEqual(old.bar, EMPTY_BAR);
+    assert.deepEqual(old.bar, barOf('attack'));
     // nobody else is told, and the two others keep theirs
     assert.equal(bare.bars, 1);
     assert.equal(fresh.bars, 1);
@@ -1541,10 +1545,11 @@ check('action bar: an old save and a new cat get the default one; an arrangement
   });
   const file = savedPlayers(first);
   assert.deepEqual(file.old.bar, mine);
-  assert.deepEqual(file.bare.bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
-  assert.deepEqual(file.fresh.bar, ['bolt', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+  assert.deepEqual(file.bare.bar, DEFAULT_BAR('power_strike'));
+  assert.deepEqual(file.fresh.bar, DEFAULT_BAR('bolt'));
 
-  // the next run of the server reads what this one wrote, and what somebody wrote into the file by hand
+  // the next run of the server reads what this one wrote, and what somebody wrote into the file by hand - or what a
+  // server from before the attack had a slot wrote: there the attack takes the first slot and the rest moves right
   file.junk = { ...OLD, bar: ['power_strike', 'no_such_thing', 'armor_mastery', 5, 'mp_large', null, null, null, null, null, 'bolt', 'bolt'] };
   file.short = { ...OLD, skills: { power_strike: 1 }, bar: ['hp_small'] };
   file.broken = { ...OLD, bar: 'all of it' };
@@ -1552,10 +1557,10 @@ check('action bar: an old save and a new cat get the default one; an arrangement
     const old = await enter(s, { token: 'old' });
     assert.deepEqual(old.bar, mine);
     assert.equal(old.bars, 1);
-    assert.deepEqual((await enter(s, { token: 'junk' })).bar, barOf('power_strike', null, null, null, 'mp_large'));
+    assert.deepEqual((await enter(s, { token: 'junk' })).bar, barOf('attack', 'power_strike', null, null, 'mp_large'));
     // a saved bar is the player's own: a skill it has learned and taken off is not put back; a bar that is no list is replaced
-    assert.deepEqual((await enter(s, { token: 'short' })).bar, barOf('hp_small'));
-    assert.deepEqual((await enter(s, { token: 'broken' })).bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+    assert.deepEqual((await enter(s, { token: 'short' })).bar, barOf('attack', 'hp_small'));
+    assert.deepEqual((await enter(s, { token: 'broken' })).bar, DEFAULT_BAR('power_strike'));
   });
 });
 
@@ -1565,13 +1570,13 @@ check('action bar: a newly learned skill takes the first empty slot - once, and 
   const pupil = { ...OLD, level: 20, xp: 0, sp: 5000, skills: { power_strike: 1 } };
   const run = await withServer({ setup: seed({ pupil, crowded: { ...pupil, bar: Array(10).fill('hp_small') } }) }, async (s) => {
     const p = await enter(s, { token: 'pupil', at });
-    assert.deepEqual(p.bar, barOf('power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small'));
-    await p.send({ t: 'bar', bar: barOf(null, 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small') });
+    assert.deepEqual(p.bar, DEFAULT_BAR('power_strike'));
+    await p.send({ t: 'bar', bar: barOf('attack', null, 'power_strike', null, null, null, null, null, 'hp_small', 'mp_small') });
     await p.until('the bar back', () => p.bars === 2);
     await p.send({ t: 'learn', s: 'stun_strike' });
     await p.event('learned');
     await p.until('the new skill on the bar', () => p.bars === 3);
-    assert.deepEqual(p.bar, barOf('stun_strike', 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small'));
+    assert.deepEqual(p.bar, barOf('attack', 'stun_strike', 'power_strike', null, null, null, null, null, 'hp_small', 'mp_small'));
     // a second rank and a passive skill change nothing on the bar
     await p.send({ t: 'learn', s: 'stun_strike' });
     await p.event('learned');
@@ -1580,17 +1585,17 @@ check('action bar: a newly learned skill takes the first empty slot - once, and 
     await p.settled();
     assert.equal(p.bars, 3);
     // taken off the bar, a skill stays off - whatever is learned next
-    await p.send({ t: 'bar', bar: barOf(null, 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small') });
+    await p.send({ t: 'bar', bar: barOf('attack', null, 'power_strike', null, null, null, null, null, 'hp_small', 'mp_small') });
     await p.until('the bar back', () => p.bars === 4);
     await p.send({ t: 'learn', s: 'war_cry' });
     await p.event('learned');
     await p.until('War Cry on the bar', () => p.bars === 5);
-    assert.deepEqual(p.bar, barOf('war_cry', 'power_strike', null, null, null, null, null, null, 'hp_small', 'mp_small'));
+    assert.deepEqual(p.bar, barOf('attack', 'war_cry', 'power_strike', null, null, null, null, null, 'hp_small', 'mp_small'));
     // a profession brings its free skill onto the bar as well
     await p.send({ t: 'prof', cls: 'knight' });
     await p.until('the knight', () => p.me.cls === 'knight');
     await p.until('Provoke on the bar', () => p.bars === 6);
-    assert.deepEqual(p.bar, barOf('war_cry', 'power_strike', 'provoke', null, null, null, null, null, 'hp_small', 'mp_small'));
+    assert.deepEqual(p.bar, barOf('attack', 'war_cry', 'power_strike', 'provoke', null, null, null, null, 'hp_small', 'mp_small'));
     await p.settled();
 
     // a full bar is left alone: the skill is learned and waits in the skill book
@@ -1599,19 +1604,19 @@ check('action bar: a newly learned skill takes the first empty slot - once, and 
     await c.event('learned');
     await c.settled();
     assert.equal(c.me.skills.stun_strike, 1);
-    assert.deepEqual(c.bar, Array(10).fill('hp_small'));
+    assert.deepEqual(c.bar, ['attack', ...Array(9).fill('hp_small')]);
     assert.equal(c.bars, 1);
   });
-  assert.deepEqual(savedPlayers(run).pupil.bar, barOf('war_cry', 'power_strike', 'provoke', null, null, null, null, null, 'hp_small', 'mp_small'));
+  assert.deepEqual(savedPlayers(run).pupil.bar, barOf('attack', 'war_cry', 'power_strike', 'provoke', null, null, null, null, 'hp_small', 'mp_small'));
 });
 
 check('action bar: a play-test character and a second tab get one too, and neither is saved', () => withServer({ setup: seed({ one: OLD }) }, async (s) => {
   const test = await enter(s, { test: { lvl: 30, cls: 'cleric' } });
-  assert.deepEqual(test.bar, ['bolt', 'mend', 'frost_bolt', 'starfall', 'healing_circle', 'blessing_might', 'blessing_ward', 'resurrection', 'hp_small', 'mp_small']);
+  assert.deepEqual(test.bar, ['attack', 'bolt', 'mend', 'frost_bolt', 'starfall', 'healing_circle', 'blessing_might', 'blessing_ward', 'resurrection', 'hp_small']);
   const tab = await enter(s, { token: 'one' }), guest = await enter(s, { token: 'one' });
   await guest.send({ t: 'bar', bar: ['hp_small'] });
   await guest.until('the bar back', () => guest.bars === 2);
-  assert.deepEqual(guest.bar, barOf('hp_small'));
+  assert.deepEqual(guest.bar, barOf('attack', 'hp_small'));
   await guest.settled();
   assert.equal(tab.bars, 1, 'the first tab of the same browser keeps its own bar');
   await guest.c.close();
@@ -1619,6 +1624,202 @@ check('action bar: a play-test character and a second tab get one too, and neith
   await tab.c.close();
   await sleep(200);
   await s.stop();
-  assert.deepEqual(savedPlayers(s).one.bar, ['power_strike', null, null, null, null, null, null, null, 'hp_small', 'mp_small']);
+  assert.deepEqual(savedPlayers(s).one.bar, DEFAULT_BAR('power_strike'));
   assert.deepEqual(Object.keys(savedPlayers(s)), ['one']);
 }));
+
+
+// ---------------------------------------------------------------- PvP
+
+// Two steps apart on open ground far from the town, on a map without monsters: nothing but the cats decides a fight.
+const FIELD = [100, 100], BESIDE = [101, 100];
+const NO_MONSTERS = edited((file) => { file.spawns = []; });
+const cat = (name, level, more = {}) => ({ ...OLD, name, level, xp: 50, gold: 500, inv: [], ...more });
+// Swings at `id` until done() says so. The server takes one blow per swing of the weapon and drops the rest.
+async function fight(p, id, done, what) {
+  for (let i = 0; i < 400 && !done(); i++) {
+    await p.send({ t: 'a', id });
+    await sleep(100);
+  }
+  assert.ok(done(), what);
+}
+const seen = (p, id) => p.others.find((row) => row[0] === id);   // how p sees the cat `id`: its row of the snapshot
+
+check('pvp: an attack flags the attacker, and beating a cat that fought back is a PvP win that costs the loser nothing', async () => {
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ s: cat('Strong', 30), w: cat('Weak', 3) }) }, async (s) => {
+    const strong = await enter(s, { token: 's', name: 'Strong', at: FIELD }), weak = await enter(s, { token: 'w', name: 'Weak', at: BESIDE });
+    assert.deepEqual([strong.me.pvp, strong.me.pk, strong.me.karma, strong.me.st], [0, 0, 0, 0]);
+    // the weak one starts it: purple at once, to itself and to the other; the one it hit is still peaceful
+    await weak.send({ t: 'a', id: strong.w.id });
+    await weak.until('the flag', () => weak.me.st === 1);
+    await strong.until('the purple name', () => seen(strong, weak.w.id)?.[13] === 1);
+    assert.equal(strong.me.st, 0);
+    // hitting back flags as well, and the kill is a fight won
+    await fight(strong, weak.w.id, () => weak.me.dead, 'the weak cat did not fall');
+    assert.deepEqual(await strong.event('pvp'), { k: 'pvp', n: 'Weak', pk: 0 });
+    await strong.until('the count', () => strong.me.pvp === 1);
+    assert.deepEqual([strong.me.pk, strong.me.karma, strong.me.st], [0, 0, 1]);
+    assert.deepEqual(await weak.event('died'), { k: 'died', xp: 0, by: 'Strong' });
+    await weak.until('the flag gone with the fall', () => weak.me.st === 0);
+    assert.deepEqual([weak.me.xp, weak.me.pvp, weak.me.pk], [50, 0, 0]);
+    await strong.c.take('c', (m) => m.sys && m.m === 'Weak was defeated by Strong');
+    // the one that was hit is told by whom, so that its client can turn to face the attacker
+    assert.ok(weak.events.some((ev) => ev.k === 'hurt' && ev.o === strong.w.id));
+    await strong.settled();
+  });
+  const file = savedPlayers(s);
+  assert.deepEqual([file.s.pvp, file.s.pk, file.s.karma], [1, 0, 0]);
+  assert.deepEqual([file.w.pvp, file.w.pk, file.w.karma, file.w.xp], [0, 0, 0, 50]);
+});
+
+check('pvp: killing a cat that never fought back is murder - PK, karma and a red name', async () => {
+  const { karmaGain } = await import('../src/shared.js');
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ s: cat('Strong', 30), l: cat('Lamb', 3) }) }, async (s) => {
+    const strong = await enter(s, { token: 's', name: 'Strong', at: FIELD }), lamb = await enter(s, { token: 'l', name: 'Lamb', at: BESIDE });
+    await fight(strong, lamb.w.id, () => lamb.me.dead, 'the lamb did not fall');
+    assert.deepEqual(await strong.event('pvp'), { k: 'pvp', n: 'Lamb', pk: 1 });
+    await strong.until('the karma', () => strong.me.karma > 0);
+    assert.deepEqual([strong.me.pvp, strong.me.pk, strong.me.karma, strong.me.st], [0, 1, karmaGain(1), 2]);
+    assert.equal(karmaGain(1), 240);
+    assert.ok(karmaGain(2) > karmaGain(1));
+    assert.deepEqual(await lamb.event('died'), { k: 'died', xp: 0, by: 'Strong' });
+    await lamb.c.take('c', (m) => m.sys && m.m === 'Lamb was murdered by Strong');
+    await strong.settled();
+  });
+  assert.deepEqual([savedPlayers(s).s.pvp, savedPlayers(s).s.pk, savedPlayers(s).s.karma], [0, 1, 240]);
+});
+
+check('pvp: a safe region shelters every cat, outlaws too, and the Trader serves them; in the field anyone may hunt one', async () => {
+  const { xpNext, DEATH_XP_LOSS, KARMA_DEATH } = await import('../src/shared.js');
+  const beside = [AT_TRADER[0] + 1, AT_TRADER[1]];
+  const outlaw = (name) => cat(name, 3, { karma: 300, pk: 1 });
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ h: cat('Hunter', 30), o: outlaw('Outlaw'), b: cat('Bystander', 3), h2: cat('Ranger', 30), o2: outlaw('Bandit') }) }, async (s) => {
+    const hunter = await enter(s, { token: 'h', name: 'Hunter', at: AT_TRADER });
+    const red = await enter(s, { token: 'o', name: 'Outlaw', at: beside }), bystander = await enter(s, { token: 'b', name: 'Bystander', at: beside });
+    assert.deepEqual([red.me.st, red.me.karma, red.me.pk], [2, 300, 1]);
+    await red.send({ t: 'buy', id: 'hp_small', n: 1 });
+    await red.until('the potion', () => red.inv.some((stack) => stack[0] === 'hp_small'));
+    // in the town nobody can be attacked - not the outlaw either - and nobody is flagged for trying
+    for (let i = 0; i < 12; i++) {
+      await hunter.send({ t: 'a', id: bystander.w.id });
+      await hunter.send({ t: 'a', id: red.w.id });
+      await red.send({ t: 'a', id: bystander.w.id });
+      await sleep(100);
+    }
+    await hunter.settled();
+    assert.equal(hunter.me.st, 0);
+    for (const p of [bystander, red]) assert.ok(!p.events.some((ev) => ev.k === 'hurt') && !p.me.dead && p.me.hp === p.me.maxHp);
+    // out in the field the outlaw has no such shelter; hunting it flags nobody, and its fall is a fight won
+    const ranger = await enter(s, { token: 'h2', name: 'Ranger', at: FIELD }), bandit = await enter(s, { token: 'o2', name: 'Bandit', at: BESIDE });
+    await fight(ranger, bandit.w.id, () => bandit.me.dead, 'the outlaw did not fall');
+    const lost = Math.min(50, Math.round(xpNext(3) * DEATH_XP_LOSS));
+    assert.deepEqual(await bandit.event('died'), { k: 'died', xp: lost, by: 'Ranger' });
+    await ranger.until('the count', () => ranger.me.pvp === 1);
+    assert.deepEqual([ranger.me.pk, ranger.me.karma, ranger.me.st], [0, 0, 0]);
+    await bandit.until('less karma', () => bandit.me.karma === 300 - KARMA_DEATH);
+    await ranger.settled();
+  });
+  assert.deepEqual([savedPlayers(s).h2.pvp, savedPlayers(s).o2.karma, savedPlayers(s).o2.pk, savedPlayers(s).o.karma], [1, 180, 1, 300]);
+});
+
+check('pvp: an outlaw works its karma off on monsters', () => withServer({
+  setup: seed({ o: cat('Outlaw', 40, { cls: 'wizard', skills: { fireball: 1 }, weapon: 10, karma: 300, pk: 1 }) }),
+}, async (s) => {
+  const { karmaBurn, SKILLS } = await import('../src/shared.js');
+  const camp = FILE.spawns.find((spawn) => !spawn.types.boss);
+  const p = await enter(s, { token: 'o', name: 'Outlaw', at: [camp.x, camp.z] });
+  const near = () => p.mobs.filter((m) => Math.hypot(m[3] - camp.x, m[4] - camp.z) < SKILLS.fireball.range)[0];
+  for (let i = 0; i < 120 && p.me.karma === 300; i++) {
+    const m = near();
+    if (m) await p.send({ t: 'sk', s: 'fireball', tid: m[0] });
+    await sleep(350);
+  }
+  assert.ok(p.me.karma < 300, 'no monster fell');
+  const burnt = 300 - p.me.karma;
+  assert.ok(burnt >= karmaBurn(camp.lvl[0]) && (burnt - 8) % 2 === 0, `burnt ${burnt}`);
+  assert.equal(p.me.st, 2);
+}));
+
+check('pvp: a cat put to sleep can neither move nor strike until a blow wakes it', () => withServer({
+  map: NO_MONSTERS, setup: seed({ m: cat('Mage', 25, { cls: 'wizard', skills: { slumber: 1 } }), v: cat('Victim', 25) }),
+}, async (s) => {
+  const mage = await enter(s, { token: 'm', name: 'Mage', at: FIELD }), victim = await enter(s, { token: 'v', name: 'Victim', at: BESIDE });
+  await mage.send({ t: 'sk', s: 'slumber', tid: victim.w.id });
+  await victim.until('sleep', () => victim.me.cc & 2);
+  assert.equal(mage.me.st, 1);   // the spell was an attack
+  assert.equal(seen(mage, victim.w.id)[14] & 2, 2);
+  // asleep: a step is not taken and a blow is not struck
+  await victim.send({ t: 'm', x: BESIDE[0] + 2, y: 0, z: BESIDE[1], yaw: 0, s: 1 });
+  for (let i = 0; i < 8; i++) { await victim.send({ t: 'a', id: mage.w.id }); await sleep(100); }
+  await mage.settled();
+  assert.deepEqual(seen(mage, victim.w.id).slice(1, 4), [BESIDE[0], 0, BESIDE[1]]);
+  assert.equal(victim.me.st, 0);
+  assert.ok(!mage.events.some((ev) => ev.k === 'hurt'));
+  // the first blow that lands wakes it, and it walks again
+  await fight(mage, victim.w.id, () => victim.events.some((ev) => ev.k === 'hurt'), 'no blow landed');
+  await victim.until('awake', () => !(victim.me.cc & 2));
+  await victim.send({ t: 'm', x: BESIDE[0] + 2, y: 0, z: BESIDE[1], yaw: 0, s: 1 });
+  await mage.until('the step', () => seen(mage, victim.w.id)[1] === BESIDE[0] + 2);
+}));
+
+
+// ---------------------------------------------------------------- what monsters throw
+
+check('monsters: a Skeleton Mage gathers its fireball in sight of everyone, and the fireball follows the cat - unless the cat jumps over it', () => withServer({
+  map: edited((file) => { file.spawns = [{ ...FILE.spawns[0], types: { shooter: 1 }, lvl: [1, 1], x: 100, z: 100, r: 2, count: 1 }]; }),
+}, async (s) => {
+  // a cat that cannot be hurt, twelve steps from the Mage: a fireball still bursts on it
+  const p = await enter(s, { test: { at: [100, 112], god: true, lvl: 40 } });
+  const mage = await p.until('the Mage', () => p.mobs[0]);
+  const orbsSeen = [];
+  p.c.ws.on('message', (data) => { const m = JSON.parse(data); if (m.t === 's') orbsSeen.push(...m.o); });
+  const cast = await p.event('atk');
+  assert.deepEqual(cast, { k: 'atk', id: mage[0], c: 1 });   // the wind-up, before anything flies
+  const first = await p.event('orb');
+  assert.equal(first.o, mage[0]);
+  assert.ok(Math.abs(Math.hypot(first.vx, first.vz) - 12) < 0.05, 'it leaves at its speed');
+  // the cat steps ten units aside of the line the fireball left on: a straight one would pass far away
+  const len = Math.hypot(first.vx, first.vz), aside = { x: p.w.x - first.vz / len * 10, z: p.w.z + first.vx / len * 10 };
+  await p.send({ t: 'm', x: aside.x, y: 0, z: aside.z, yaw: 0, s: 0 });
+  const end = await p.until('the end of the fireball', () => {
+    const i = p.events.findIndex((ev) => ev.k === 'orbx' && ev.id === first.id);
+    return i >= 0 && p.events.splice(i, 1)[0];
+  });
+  assert.equal(end.h, 1);
+  assert.ok(Math.hypot(end.x - aside.x, end.z - aside.z) < 2, 'it burst where the cat stood');
+  assert.ok(orbsSeen.some((o) => o[0] === first.id && o[3] === 0), 'the snapshots carried it');
+  // the next one finds the cat in the air: it flies through under it and burns out
+  const second = await p.event('orb');
+  const hop = setInterval(() => p.send({ t: 'm', x: aside.x, y: 3, z: aside.z, yaw: 0, s: 0 }), 60);
+  try {
+    const missed = await p.until('the end of the second fireball', () => {
+      const i = p.events.findIndex((ev) => ev.k === 'orbx' && ev.id === second.id);
+      return i >= 0 && p.events.splice(i, 1)[0];
+    });
+    assert.equal(missed.h, 0);
+  } finally {
+    clearInterval(hop);
+  }
+}));
+
+
+// ---------------------------------------------------------------- a save that fails
+
+check('a save of the characters that fails does not take the server down, and never leaves half a file', async () => {
+  // the data folder cannot be made: its place is taken by a file (what a full disk does to a save, as far as the server sees)
+  const blocked = await withServer({ setup: (s) => { fs.writeFileSync(s.dataDir, 'not a folder'); } }, async (s) => {
+    const p = await enter(s, { token: 'saver', name: 'Saver' });
+    await p.settled();
+  });
+  assert.equal(await blocked.closed, 0, `the server fell:\n${blocked.out}`);
+  assert.match(blocked.out, /^The characters could not be saved \(\w+\): /m);
+  // a save that works replaces the file in one step: no temp file is left beside it, and one from a run that was cut
+  // short is cleared away
+  const fine = await withServer({ setup: (s) => { fs.mkdirSync(s.dataDir); fs.writeFileSync(path.join(s.dataDir, 'players.json.tmp'), '{"half":'); } }, async (s) => {
+    assert.ok(!fs.existsSync(path.join(s.dataDir, 'players.json.tmp')));
+    const p = await enter(s, { token: 'saver', name: 'Saver' });
+    await p.settled();
+  });
+  assert.deepEqual(fs.readdirSync(fine.dataDir), ['players.json']);
+  assert.equal(savedPlayers(fine).saver.name, 'Saver');
+});
