@@ -362,12 +362,14 @@ npm run bots -- --url http://localhost:3000 --count 4 --verbose
 ```
 
 A bot is a player like any other: it joins through the game's WebSocket and plays by the same rules, and the server
-saves it with its level and gear, so it comes back as it left and grows from day to day. It hunts the camp that fits
+saves it with its level and gear, so it comes back as it left. It hunts the camp that fits
 its level, rests, drinks potions, and goes back to town to sell its loot, buy gear and potions, learn skills from the
 Sage and have its weapon upgraded. It walks around water, cliffs and scenery, takes a moment to react, says a line in
 the chat now and then, and takes a break of a few minutes every half hour or so (`--no-breaks` keeps them all in).
 
-The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at, and a role - how it treats other cats:
+The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at and the one it stops growing at - three of
+the ten stay beginners for good, and none outgrows its start by more than a few levels - and a role, how it treats
+other cats:
 
 | Role | Towards other cats |
 | --- | --- |

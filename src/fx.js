@@ -446,6 +446,15 @@ export function createFx(scene, { groundY, layOnGround, burst }) {
       circle('CircleFire', v.x, v.z, v.def.r * 1.6 + 1.3, big ? RED : FIRE, dur + 0.3, { who: v, spin: 5 });
       flames(v.x, v.z, v.def.r + 0.4, big ? 6 : 3, dur + 0.25, big ? 1.5 : 0.9);
     },
+    // A monster comes back: a circle opens on the ground where it rises during `dur` seconds, a column of pale light
+    // stands in it, and a flash marks the moment it is out. `big` is the King's.
+    mobRise(x, z, r, dur, big) {
+      const tint = big ? RED : VIOLET;
+      circle('CircleArcane', x, z, r * 2 + 2.2, tint, dur + 0.6, { spin: -2.5 });
+      pillar({ x, z }, r + 0.5, big ? 9 : 4.5, tint, dur + 0.2);
+      impact(x, 0.4, z, tint, 0.9 + r, dur * 0.85);
+      burst(x, 0.3, z, tint, 10, 3);
+    },
     // the blow of a monster's weapon, `delay` seconds from now: an arc as wide as the monster is big
     mobSwing(v, dx, dz, delay) {
       slash(v.x, v.z, dx, dz, { h: v.top * 0.45, size: v.def.r * 1.3 + 1.6, tint: PALE, dur: 0.24, delay });

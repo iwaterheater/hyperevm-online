@@ -10,7 +10,7 @@ import { createFx } from './fx.js';
 import { skillIcon, itemIcon, ATTACK_ICON, ICON_FILES } from './icons.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
-  ATTACK_WINDUP, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
+  ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
@@ -410,11 +410,10 @@ function makeMobView(ti, lvl) {
   label.position.y = top + 0.75;
   root.add(label);
 
-  root.scale.setScalar(0.01);
   scene.add(root);
   return {
     root, skeleton, label, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
-    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flags: 0, flash: 0, age: 0, yaw: 0,
+    x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flags: 0, flash: 0, rise: 0, yaw: 0,
   };
 }
 
@@ -751,6 +750,14 @@ function onEvent(ev) {
     case 'dodge':
       floatText(me.x, 3.3, me.z, 'Dodge', '#a9d8ff');
       break;
+    case 'rise': {   // a monster is back: it comes out of the ground at its home
+      const v = mobViews.get(ev.id);
+      if (!v) break;
+      v.rise = MOB_RISE;
+      fx.mobRise(ev.x, ev.z, v.def.r, MOB_RISE, v.def === MOB_TYPES.boss);
+      if (Math.hypot(ev.x - me.x, ev.z - me.z) < 30) sfx(90, 0.6, 'sawtooth', 0.04, 60);
+      break;
+    }
     case 'atk': {   // a monster starts its blow, or (c) gathers a spell: both land when the wind-up is over
       const v = mobViews.get(ev.id);
       if (!v) break;
@@ -1316,9 +1323,10 @@ function updateViews(dt) {
     const dx = v.tx - v.x, dz = v.tz - v.z;
     if (dx * dx + dz * dz > 0.0004) v.yaw = lerpAngle(v.yaw, Math.atan2(dx, dz), k);
     v.x += dx * k; v.z += dz * k;
-    v.age += dt;
-    v.root.position.set(v.x, groundY(v.x, v.z), v.z);
-    v.root.scale.setScalar(Math.min(1, v.age / 0.4));
+    // a monster that has just come back rises out of the ground, through the circle that opened for it
+    v.rise = Math.max(0, v.rise - dt);
+    const under = v.rise / MOB_RISE;
+    v.root.position.set(v.x, groundY(v.x, v.z) - (v.top + 1.2) * under * under, v.z);
     v.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
     v.skeleton.group.rotation.y = v.yaw - cam.yaw;
     // monsters far outside the camera's view are neither drawn nor animated
@@ -2184,14 +2192,14 @@ function updateHud() {
     $('tgName').textContent = `${tv.name} · ${CLASSES[tv.cls].name} ${tv.level}`;
     $('tgName').style.color = PVP_COLORS[tv.st];
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = `${Math.ceil(tv.hp)} / ${tv.maxHp}`;
+    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
     $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : PVP_TITLES[tv.st];
   } else if (tv) {
     const diff = tv.lvl - stats.level;
     $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
     $('tgName').style.color = diff >= 5 ? '#ff5a6a' : diff >= 3 ? '#ffa24d' : diff >= -2 ? '#fff3b0' : diff >= -5 ? '#8ee68e' : '#aab4b8';
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = `${Math.ceil(tv.hp)} / ${tv.maxHp}`;
+    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
     $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
   }
 

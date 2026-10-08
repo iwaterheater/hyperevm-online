@@ -6,7 +6,8 @@
 // A bot is a player like any other: it joins through the game's WebSocket, is saved by the server with its level and
 // its gear, and comes back as it left. The first time a bot joins, the server gives it the character of its line in
 // the roster (see botCharacter in server.js) - for that the bots have to run on the machine the server runs on.
-// The roster is below: a name, a class, the level it starts at, and a role - how it treats other cats (ROLES in bot.mjs).
+// The roster is below: a name, a class, the level it starts at and the one it stops growing at, and a role - how it
+// treats other cats (ROLES in bot.mjs).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,17 +18,19 @@ import { Bot, LINES } from './bot.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+// cap: the level the bot stops growing at. A world needs its small cats too: three of these stay beginners for good,
+// and nobody outgrows the others by more than a few levels.
 export const ROSTER = [
-  { name: 'Mochi',     cls: 'fighter', lvl: 6,  role: 'farmer' },
-  { name: 'Biscuit',   cls: 'mystic',  lvl: 5,  role: 'farmer' },
-  { name: 'Pixel',     cls: 'mystic',  lvl: 3,  role: 'farmer' },
-  { name: 'Luna',      cls: 'mystic',  lvl: 11, role: 'veteran', prof: 'cleric' },
-  { name: 'SirPounce', cls: 'fighter', lvl: 12, role: 'guard',   prof: 'knight' },
-  { name: 'Tofu',      cls: 'mystic',  lvl: 8,  role: 'duelist', prof: 'wizard' },
-  { name: 'Whisk',     cls: 'fighter', lvl: 7,  role: 'duelist', family: 'bow', prof: 'archer' },
-  { name: 'Nyx',       cls: 'fighter', lvl: 9,  role: 'pk',      family: 'daggers', prof: 'rogue' },
-  { name: 'Grumbles',  cls: 'fighter', lvl: 10, role: 'pk',      family: 'greatsword' },
-  { name: 'Bandit',    cls: 'fighter', lvl: 14, role: 'pk',      prof: 'rogue' },
+  { name: 'Pixel',     cls: 'mystic',  lvl: 2,  cap: 3,  role: 'farmer' },
+  { name: 'Biscuit',   cls: 'mystic',  lvl: 4,  cap: 5,  role: 'farmer' },
+  { name: 'Mochi',     cls: 'fighter', lvl: 5,  cap: 6,  role: 'farmer' },
+  { name: 'Whisk',     cls: 'fighter', lvl: 6,  cap: 8,  role: 'duelist', family: 'bow' },
+  { name: 'Tofu',      cls: 'mystic',  lvl: 7,  cap: 9,  role: 'duelist' },
+  { name: 'Nyx',       cls: 'fighter', lvl: 8,  cap: 10, role: 'pk',      family: 'daggers' },
+  { name: 'Luna',      cls: 'mystic',  lvl: 9,  cap: 11, role: 'veteran' },
+  { name: 'Grumbles',  cls: 'fighter', lvl: 9,  cap: 11, role: 'pk',      family: 'greatsword' },
+  { name: 'SirPounce', cls: 'fighter', lvl: 11, cap: 13, role: 'guard' },
+  { name: 'Bandit',    cls: 'fighter', lvl: 13, cap: 15, role: 'pk' },
 ];
 
 const TICK = 0.1;   // seconds between two thoughts of a bot

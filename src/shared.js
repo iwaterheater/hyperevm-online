@@ -18,6 +18,10 @@ export const AGGRO_R = 13;        // a monster notices a player this close
 export const BOSS_AGGRO_R = 20;   // the same for a boss
 export const LEASH_R = 30;        // it only picks a target while it is this close to its home
 export const WANDER_R = 5;        // an idle monster strolls this far from its home on each axis
+// A monster that fell is away for its camp's respawn time, times this: a camp can be hunted out for a while. (The King
+// comes back as his camp says.) Then it rises from the ground, and for that long it does nothing.
+export const RESPAWN_MULT = 4;
+export const MOB_RISE = 1.4;
 
 // A monster's combat stats at a given level.
 export function mobStats(type, level) {
