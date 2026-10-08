@@ -1626,6 +1626,6 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { keep(); process
 
 server.listen(PORT, () => {
   const { port } = server.address();
-  console.log(`HyperCat MMO: http://localhost:${port}`);
+  console.log(`HyperEVM Online: http://localhost:${port}`);
   if (EDITOR) console.log(`MAP EDITOR ON (${TOKEN_MODE ? 'token' : 'local only'}) http://localhost:${port}/editor.html`);
 });

@@ -60,7 +60,7 @@ function boot({ args = ['--editor'], env = {}, map = BAKED, setup } = {}) {
     child.stdout.on('data', (data) => {
       stdout += data;
       s.out += data;
-      const line = /^HyperCat MMO: http:\/\/localhost:(\d+)$/m.exec(stdout);
+      const line = /^HyperEVM Online: http:\/\/localhost:(\d+)$/m.exec(stdout);
       if (line && !s.port) { s.port = Number(line[1]); resolve(true); }
     });
     s.closed.then(() => resolve(false));
@@ -699,7 +699,7 @@ check('editor mode is on only when asked for by --editor or MAP_EDITOR=1', async
   const on = await withServer({ args: [], env: { MAP_EDITOR: '1' } }, async (s) => {
     assert.deepEqual((await get(s, '/api/editor')).json, { enabled: true, tokenRequired: false, canSave: true, rev: await revOf(s) });
   });
-  assert.match(on.out, new RegExp(`^HyperCat MMO: http://localhost:${on.port}\\nMAP EDITOR ON \\(local only\\) http://localhost:${on.port}/editor\\.html$`, 'm'));
+  assert.match(on.out, new RegExp(`^HyperEVM Online: http://localhost:${on.port}\\nMAP EDITOR ON \\(local only\\) http://localhost:${on.port}/editor\\.html$`, 'm'));
 });
 
 check('token mode: the token decides, wherever the request comes from; wrong tokens are counted, the right one never is', async () => {

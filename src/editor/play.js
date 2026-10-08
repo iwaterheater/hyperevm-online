@@ -142,7 +142,7 @@ export default function mount(el, ctx) {
     if (fresh) {
       // the new tab is in front while the map is saved: say what it is waiting for
       try {
-        w.document.title = 'HyperCat play-test';
+        w.document.title = 'HyperEVM play-test';
         w.document.body.textContent = 'Starting the play-test\u2026 If this takes long, look at the editor tab: the map is being saved, or it is asking a question.';
       } catch { /* a blank tab is fine too */ }
     }

@@ -1,4 +1,4 @@
-/* HyperCat map editor - the base stylesheet.
+/* HyperEVM map editor - the base stylesheet.
  *
  * It owns: the reset, the :root variables, the page grid of editor.html, #menubar, #toolbar, #tooloptions, the children
  * of #viewport, #toasts, #modal, the place of #help - and the .ui-* widget classes that ui/dom.js builds.

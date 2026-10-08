@@ -62,7 +62,7 @@ function fileName(name) {
 
 export default function mount(el, ctx) {
   const { store, ui, net, actions } = ctx;
-  const baseTitle = document.title.replace(/^\u2022\s*/, '') || 'HyperCat Map Editor';
+  const baseTitle = document.title.replace(/^\u2022\s*/, '') || 'HyperEVM Map Editor';
 
   const errorsOf = (map) => validate(map, { models: ctx.modelSet ?? null, strictModels: true }).filter((i) => i.level === 'error');
   const openIssues = () => { if (actions.has('validation.open')) actions.run('validation.open'); };

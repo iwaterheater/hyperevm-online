@@ -29,5 +29,5 @@ It takes about half a minute, and neither `.blend` is changed. To change or add 
 edit its `icon(...)` line in the script and run it again; `--only <id>` builds a few, `--sheet <file>` pastes the set
 into one contact sheet for review. The header of the script says the rest.
 
-This is original art, made for HyperCat Online from the project's own models. Nothing in it is taken from another game
+This is original art, made for HyperEVM Online from the project's own models. Nothing in it is taken from another game
 or from an icon pack.

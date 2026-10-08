@@ -1,4 +1,4 @@
-# HyperCat Online
+# HyperEVM Online
 
 A small open-world browser MMORPG starring a chibi cat in a hoodie, modelled on classic target-based MMORPGs.
 Players share one seamless world, pick a class, hunt slimes, wolves, orcs, demons and skeletons together, level up, learn skills, choose a profession, and find, buy and wear weapons and armour.
