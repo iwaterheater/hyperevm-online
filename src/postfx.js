@@ -9,7 +9,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 export function createComposer(renderer, scene, camera) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  composer.addPass(new UnrealBloomPass(renderer.getSize(new THREE.Vector2()), 0.4, 0.4, 1.0));
+  const bloom = new UnrealBloomPass(renderer.getSize(new THREE.Vector2()), 0.4, 0.4, 1.0);
+  composer.addPass(bloom);
   composer.addPass(new OutputPass());
   return {
     render() { composer.render(); },
@@ -23,6 +24,8 @@ export function createComposer(renderer, scene, camera) {
       renderer.setRenderTarget(target);
       return done;
     },
-    setSize(w, h) { composer.setSize(w, h); },
+    setSize(w, h) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); },
+    // the bloom costs several passes over the whole picture: the lowest quality does without
+    setBloom(on) { bloom.enabled = !!on; },
   };
 }

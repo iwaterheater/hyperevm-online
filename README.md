@@ -45,7 +45,7 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `I` | Inventory: the character's numbers, the cat with its six equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
 | `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
-| `H` / `F1` | Help: every control |
+| `H` / `F1` | Help: every control, and the graphics quality - Auto, Low, Medium or High - with the frame rate |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
 | `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
@@ -331,7 +331,8 @@ data/             Saved player progress (created at runtime, git-ignored)
 
 ## How it works
 
-- The server simulates the world at 15 ticks per second and sends each player a snapshot of everything nearby.
+- The server simulates the world at 20 ticks per second and sends each player a snapshot of everything nearby. The client draws other cats and monsters walking in a straight line from one snapshot to the next, a twentieth of a second behind the server.
+- The graphics quality decides how many pixels are drawn (on a dense screen the full resolution is the dearest thing of all), whether there is bloom, how sharp the shadows are and how far the grass reaches. "Auto" starts in the middle and follows the frame rate: down when the game cannot hold 40 frames a second, up when it has room.
 - Monsters, projectile hits, damage, XP, gold, loot, chests, items and upgrades are decided by the server.
 - Items are one table, `ITEMS` in `src/shared.js`, used by the server, the client and the tests alike; `statsOf()` in the same file turns class, level, skills, buffs and equipment into combat stats, so the server's damage and the client's status window always agree.
 - Every item request — wear, take off, drink, buy, sell, destroy — names the stack by its place in the bag and by its item, and the server checks all of it: the stack is there, the level fits, the paws are free or what holds them fits into the bag (`wearItem()` in `src/shared.js` is the whole rule of one- and two-handed gear), the Trader is in reach, the gold and the room in the bag suffice, the cat is alive. A request that cannot be done is answered with a line the player sees; nothing changes on the client until the server says so.

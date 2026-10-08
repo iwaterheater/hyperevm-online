@@ -208,6 +208,15 @@
   #bagSide { display: flex; flex-direction: column; }
   #bagTop { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
   #bagTabs { display: flex; gap: 3px; }
+  /* the graphics quality, in the Help window; and the frame rate at the top edge, when asked for */
+  #gfx { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 12px; }
+  #gfx b { margin-right: 4px; }
+  #gfx button { padding: 3px 10px; font-size: 11px; font-weight: 700; color: #e8fffa; background: rgba(255, 255, 255, .1); border-radius: 5px; box-shadow: none; }
+  #gfx button:hover { transform: none; filter: brightness(1.3); }
+  #gfx button.on { color: #04211c; background: var(--teal); }
+  #gfx span { opacity: .75; }
+  #gfx label { margin-left: auto; display: flex; align-items: center; gap: 4px; cursor: pointer; pointer-events: auto; }
+  #fps { display: none; position: absolute; top: 1px; left: 50%; transform: translateX(-50%); font-size: 10.5px; font-weight: 700; color: #d5f5ee; text-shadow: 0 1px 2px #000; opacity: .8; }
   #bagTabs button { padding: 3px 9px; font-size: 11px; font-weight: 700; color: #e8fffa; background: rgba(255, 255, 255, .1); border-radius: 5px;
     box-shadow: none; }
   #bagTabs button:hover { transform: none; filter: brightness(1.3); }
@@ -403,6 +412,7 @@
     <div class="label"><span id="tgState"></span><span id="tgHp"></span></div>
     <button id="tgAttack" title="Attack this cat (Ctrl + click on it does the same)">Attack</button>
   </div>
+  <div id="fps"></div>
   <div id="banner"></div>
   <div id="notice"></div>
   <div id="chat"><div id="chatLog"></div><input id="chatInput" maxlength="140" placeholder="Message…"></div>
@@ -445,6 +455,12 @@
   <div class="panel" id="help">
     <h2>Controls</h2>
     <div class="sub">Everything the keyboard and the mouse do. <kbd>H</kbd> or <kbd>F1</kbd> closes this window.</div>
+    <div id="gfx">
+      <b>Graphics</b>
+      <button data-q="auto" title="Follows the frame rate: lower when the game runs slow, higher when it has room">Auto</button><button data-q="low" title="No shadows, no bloom, less grass, plain resolution">Low</button><button data-q="medium">Medium</button><button data-q="high" title="Everything on, at the full resolution of the screen">High</button>
+      <span id="gfxNow"></span><span id="gfxFps"></span>
+      <label><input type="checkbox" id="fpsShow"> show FPS</label>
+    </div>
     <div id="helpList">
       <h3>Moving and looking</h3>
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows</div><span>Move, relative to the camera</span>

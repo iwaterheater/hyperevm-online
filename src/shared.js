@@ -1,6 +1,6 @@
 // Constants, data tables and formulas shared by the server and the client.
 
-export const TICK = 1 / 15;
+export const TICK = 1 / 20;
 export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its swing and the hit landing
 
 // hp, pAtk: at level 1. pDef / mDef: multipliers on the level-based defence (warriors shrug off blades, mages shrug off spells).

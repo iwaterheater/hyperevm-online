@@ -48,5 +48,18 @@ export function createWorld(scene, map, { onProgress = null } = {}) {
   // The height of the ground under a world point: everything that walks adds it to its own height.
   const heightAt = (x, z) => view.heightAt(x, z);
 
-  return { view, ready, update, collide, snapMood, heightAt };
+  // What the picture may cost. shadows: the side of the sun's shadow map in pixels, 0 for no shadows at all.
+  // grass: how many rings of blades are drawn around the player (see grass.js).
+  function setQuality({ shadows, grass }) {
+    const shadow = lighting.sun.shadow;
+    lighting.setShadows(shadows > 0);
+    if (shadows > 0 && shadow.mapSize.x !== shadows) {
+      shadow.mapSize.set(shadows, shadows);
+      shadow.map?.dispose();   // made anew, in the new size, by the next frame
+      shadow.map = null;
+    }
+    view.grass.setDetail(grass);
+  }
+
+  return { view, ready, update, collide, snapMood, heightAt, setQuality };
 }

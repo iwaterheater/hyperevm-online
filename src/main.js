@@ -10,7 +10,7 @@ import { createFx } from './fx.js';
 import { skillIcon, itemIcon, ATTACK_ICON, ICON_FILES } from './icons.js';
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
-  ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
+  TICK, ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
@@ -599,6 +599,21 @@ function onMessage(msg) {
   }
 }
 
+// Another cat or a monster is drawn walking in a straight line from where it was shown when a snapshot came to where
+// that snapshot has it, in the time one snapshot takes: an even pace a twentieth of a second behind the server,
+// instead of a rubber band that is always catching up. tween() notes the two ends; glide() says where it is now.
+function tween(v, x, y, z) {
+  // a little longer than a tick, so that a snapshot that is a frame late finds it still walking; after a real gap,
+  // as long as the gap was
+  const since = time - (v.seenAt ?? time - TICK), span = since > TICK * 1.6 ? Math.min(0.25, since) : TICK * 1.15;
+  Object.assign(v, { fx: v.x, fy: v.y ?? 0, fz: v.z, tx: x, ty: y, tz: z, t0: time, seenAt: time, span });
+}
+function glide(v) {
+  const u = Math.min(1, (time - v.t0) / v.span);
+  v.x = v.fx + (v.tx - v.fx) * u; v.z = v.fz + (v.tz - v.fz) * u;
+  return u;
+}
+
 function syncViews(views, list, create, update, remove) {
   const seen = new Set();
   for (const row of list) {
@@ -622,7 +637,8 @@ function onSnapshot(s) {
   syncViews(others, s.p,
     ([, x, y, z, yaw, , , , , , , cls]) => Object.assign(makeAvatar(CLASS_KEYS[cls]), { x, y, z, yaw }),
     (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit, cls, look, st = 0, flags = 0]) => {
-      Object.assign(a, { tx: x, ty: y, tz: z, tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
+      tween(a, x, y, z);
+      Object.assign(a, { tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
       setLook(a, CLASS_KEYS[cls], look);
       setLabel(a, `${a.name} · ${CLASSES[a.cls].name} ${level}`, PVP_COLORS[st]);   // purple while it is flagged, red for an outlaw
     },
@@ -632,7 +648,7 @@ function onSnapshot(s) {
   for (const ev of s.e) if (ev.k === 'kill' && mobViews.has(ev.id)) mobViews.get(ev.id).killed = true;
   syncViews(mobViews, s.m,
     ([, ti, lvl, x, z]) => Object.assign(makeMobView(ti, lvl), { x, z }),
-    (v, [, , , x, z, hp, maxHp, flags]) => Object.assign(v, { tx: x, tz: z, hp, maxHp, flags }),
+    (v, [, , , x, z, hp, maxHp, flags]) => { tween(v, x, 0, z); Object.assign(v, { hp, maxHp, flags }); },
     (v) => {
       if (!v.killed) { removeMobView(v); return; }
       v.skeleton.die();
@@ -1288,9 +1304,8 @@ function updateLocal(dt) {
 
 function updateAvatar(a, dt, isMe) {
   if (!isMe) {
-    const k = 1 - Math.exp(-12 * dt);
-    a.x += (a.tx - a.x) * k; a.y += (a.ty - a.y) * k; a.z += (a.tz - a.z) * k;
-    a.yaw = lerpAngle(a.yaw, a.tyaw, k);
+    a.y = a.fy + (a.ty - a.fy) * glide(a);
+    a.yaw = lerpAngle(a.yaw, a.tyaw, 1 - Math.exp(-12 * dt));
     a.shootPose -= dt;
     if (a.castT >= 0 && (a.castT += dt) >= a.castDur) a.castT = -1;
     a.bar.set(a.hp / a.maxHp, !a.dead && a.hp < a.maxHp);
@@ -1320,9 +1335,9 @@ function updateViews(dt) {
 
   const k = 1 - Math.exp(-10 * dt);
   for (const v of mobViews.values()) {
-    const dx = v.tx - v.x, dz = v.tz - v.z;
+    const dx = v.tx - v.fx, dz = v.tz - v.fz;   // the step of this snapshot: where it is heading, and whether it walks
     if (dx * dx + dz * dz > 0.0004) v.yaw = lerpAngle(v.yaw, Math.atan2(dx, dz), k);
-    v.x += dx * k; v.z += dz * k;
+    glide(v);
     // a monster that has just come back rises out of the ground, through the circle that opened for it
     v.rise = Math.max(0, v.rise - dt);
     const under = v.rise / MOB_RISE;
@@ -1332,7 +1347,7 @@ function updateViews(dt) {
     // monsters far outside the camera's view are neither drawn nor animated
     v.root.visible = (v.x - me.x) ** 2 + (v.z - me.z) ** 2 < 55 * 55;
     // a stunned or sleeping monster freezes mid-pose
-    if (v.root.visible && !(v.flags & 3)) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.01);
+    if (v.root.visible && !(v.flags & 3)) v.skeleton.update(dt, time, dx * dx + dz * dz > 0.002);
     v.flash = Math.max(0, v.flash - dt * 6);
     v.skeleton.flash(v.flash);
     v.bar.set(v.hp / v.maxHp, v.hp < v.maxHp);
@@ -2120,6 +2135,15 @@ function renderSheet() {
   );
 }
 
+// The two bars that fill while the cat casts or draws its bow: every frame, or they would stutter. The rest of the
+// HUD (updateHud) is brought up to date twenty times a second, which the eye does not tell from sixty.
+function updateBars() {
+  $('draw').style.display = me.drawT >= 0 ? 'block' : 'none';
+  $('drawFill').style.width = `${Math.max(0, me.drawT) / me.drawDur * 100}%`;
+  $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
+  $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
+}
+
 let xpSeen = null;   // the level and the experience the bar showed last, to tell when more has come in
 function updateHud() {
   $('who').textContent = `${names.get(myId) || 'Cat'} · ${CLASSES[stats.cls].name} ${stats.level}`;
@@ -2138,10 +2162,6 @@ function updateHud() {
     xpSeen = { level: stats.level, xp: stats.xp };
     if (tipAnchor === xpBar) $('tip').lastChild.textContent = xpLine();   // the tooltip is open: it counts along
   }
-  $('draw').style.display = me.drawT >= 0 ? 'block' : 'none';
-  $('drawFill').style.width = `${Math.max(0, me.drawT) / me.drawDur * 100}%`;
-  $('cast').style.display = me.castT >= 0 ? 'block' : 'none';
-  $('castFill').style.width = `${Math.max(0, me.castT) / me.castDur * 100}%`;
   if (helpOpen) $('online').textContent = `${online} ${online === 1 ? 'cat' : 'cats'} in the world right now`;
   $('buffs').replaceChildren(
     ...['Stunned', 'Asleep', 'Slowed'].filter((_, i) => stats.cc & (1 << i)).map((text) => el('span', 'bad', text)),
@@ -2307,7 +2327,75 @@ function updateCamera(dt) {
 }
 
 const clock = new THREE.Clock();
-let mapT = 0;
+
+// ---------------------------------------------------------------- graphics quality
+// What the picture costs, in three steps: how many pixels are drawn (on a dense screen the picture is drawn larger
+// than the window and scaled down - the dearest thing of all), the bloom, the shadows and how far the grass reaches.
+// "Auto" - the choice until the player makes one - starts in the middle and follows the frame rate: down when the game
+// cannot hold 40 frames a second, up again when it runs at the screen's own rate for a while; a step that proved too
+// much is not tried twice.
+const QUALITY = {
+  low:    { dpr: 1,   bloom: false, shadows: 0,    grass: 2 },
+  medium: { dpr: 1.5, bloom: true,  shadows: 1024, grass: 3 },
+  high:   { dpr: 2,   bloom: true,  shadows: 2048, grass: 4 },
+};
+const LEVELS = Object.keys(QUALITY);
+const gfx = { choice: 'auto', level: 'medium', fps: 0, frames: 0, span: 0, slow: 0, fast: 0, wait: 6, tooMuch: LEVELS.length, showFps: readStore('localStorage', 'hypercat-fps') === '1' };
+function applyQuality(level) {
+  const q = QUALITY[level];
+  gfx.level = level;
+  renderer.setPixelRatio(Math.min(devicePixelRatio, q.dpr));
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  composer.setBloom(q.bloom);
+  world.setQuality(q);
+  showQuality();
+}
+function chooseQuality(choice) {
+  gfx.choice = choice === 'auto' || QUALITY[choice] ? choice : 'auto';
+  writeStore('localStorage', 'hypercat-gfx', gfx.choice);
+  Object.assign(gfx, { slow: 0, fast: 0, wait: 6, tooMuch: LEVELS.length });
+  applyQuality(gfx.choice === 'auto' ? 'medium' : gfx.choice);
+}
+function showQuality() {
+  for (const b of $('gfx').querySelectorAll('button')) b.classList.toggle('on', b.dataset.q === gfx.choice);
+  $('gfxNow').textContent = gfx.choice === 'auto' ? `now ${gfx.level}` : '';
+  $('fpsShow').checked = gfx.showFps;
+  $('fps').style.display = gfx.showFps ? 'block' : 'none';
+}
+// Called with the real length of every frame: counts the frames of each half second, shows the rate, and lets "Auto"
+// judge. A tab nobody looks at gets no frames to speak of: it is not judged.
+function measure(dt) {
+  gfx.frames++; gfx.span += dt;
+  if (gfx.span < 0.5) return;
+  gfx.fps = gfx.frames / gfx.span;
+  const span = gfx.span;
+  gfx.frames = 0; gfx.span = 0;
+  const text = `${Math.round(gfx.fps)} FPS`;
+  if (gfx.showFps) $('fps').textContent = text;
+  if (helpOpen) $('gfxFps').textContent = text;
+  if (gfx.choice !== 'auto' || state !== 'playing' || document.visibilityState !== 'visible') { gfx.slow = gfx.fast = 0; return; }
+  if ((gfx.wait -= span) > 0) return;   // just joined, or just changed: the shaders are still settling
+  const at = LEVELS.indexOf(gfx.level);
+  gfx.slow = gfx.fps < 40 ? gfx.slow + span : 0;
+  gfx.fast = gfx.fps > 57 ? gfx.fast + span : 0;
+  if (gfx.slow >= 3 && at > 0) {
+    gfx.tooMuch = at;
+    Object.assign(gfx, { slow: 0, fast: 0, wait: 5 });
+    applyQuality(LEVELS[at - 1]);
+  } else if (gfx.fast >= 20 && at + 1 < gfx.tooMuch) {
+    Object.assign(gfx, { slow: 0, fast: 0, wait: 5 });
+    applyQuality(LEVELS[at + 1]);
+  }
+}
+for (const b of $('gfx').querySelectorAll('button')) b.addEventListener('click', () => { chooseQuality(b.dataset.q); b.blur(); });
+$('fpsShow').addEventListener('change', () => {
+  gfx.showFps = $('fpsShow').checked;
+  writeStore('localStorage', 'hypercat-fps', gfx.showFps ? '1' : '0');
+  showQuality();
+});
+chooseQuality(readStore('localStorage', 'hypercat-gfx'));
+let mapT = 0, hudT = 0;
 // One step of the client: simulation, HUD and rendering. Kept separate from the animation-frame loop so tests can drive it.
 function tick(dt) {
   time += dt;
@@ -2317,7 +2405,8 @@ function tick(dt) {
   if (state === 'playing') {
     updateLocal(dt);
     updateViews(dt);
-    updateHud();
+    updateBars();
+    if ((hudT -= dt) <= 0) { hudT = 0.05; updateHud(); }
     if ((mapT -= dt) <= 0) { mapT = 0.15; drawMinimap(); }
   } else {
     me.yaw = Math.sin(time * 0.6) * 0.7;
@@ -2333,7 +2422,9 @@ function tick(dt) {
   composer.render();
 }
 function frame() {
-  tick(Math.min(clock.getDelta(), 0.05));
+  const real = clock.getDelta();
+  measure(real);
+  tick(Math.min(real, 0.05));
   requestAnimationFrame(frame);
 }
 frame();
