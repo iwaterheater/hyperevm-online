@@ -1242,6 +1242,27 @@ check('items: death keeps the bag and the equipment, and the dead neither drink 
   await p.until('dressed after the respawn', () => p.eq.body === 'leather_body');
 }));
 
+check('a calm monster leaves a cat alone until it is hurt, and then fights back', () => withServer({
+  // every camp but the King's holds bulls, and the first one holds many of them close together
+  map: edited((f) => { for (const spawn of f.spawns) if (!spawn.types.boss) spawn.types = { bull: 1 }; Object.assign(f.spawns[0], { r: 2, count: 12 }); }),
+}, async (s) => {
+  const { MOB_KEYS } = await import('../src/shared.js');
+  const camp = FILE.spawns[0];
+  const p = await enter(s, { test: { at: [camp.x, camp.z], lvl: 6 } });
+  const bulls = () => p.mobs.filter((m) => MOB_KEYS[m[1]] === 'bull');
+  await p.until('the bulls in view', () => bulls().length > 0);
+  await sleep(6000);
+  assert.equal(p.me.hp, p.me.maxHp, 'a bull went for a cat that had not touched it');
+  // whichever bull strolls within reach is hit, again and again, until one of them answers
+  const poke = setInterval(() => {
+    const nearest = bulls().sort((a, b) => Math.hypot(a[3] - camp.x, a[4] - camp.z) - Math.hypot(b[3] - camp.x, b[4] - camp.z))[0];
+    if (nearest) p.send({ t: 'a', id: nearest[0], c: 0 });
+  }, 250);
+  try {
+    await p.until('a bull to hit back', () => p.me.hp < p.me.maxHp, 90000);
+  } finally { clearInterval(poke); }
+}));
+
 check('items: a wounded cat drinks a health potion', () => withServer({
   setup: seed({ brave: { name: 'Brave', cls: 'fighter', level: 3, xp: 0, sp: 0, skills: {}, gold: 0, weapon: 1, inv: [['hp_small', 3]] } }),
 }, async (s) => {

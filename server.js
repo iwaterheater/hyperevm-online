@@ -862,7 +862,8 @@ function updateMob(m, dt) {
   if (t && (t.dead || t.safe || Math.hypot(t.x - m.x, t.z - m.z) > 26 || leash > LEASH_R + 4)) t = null;
   if (!t) {
     m.target = 0;
-    let bestD = m.type === 'boss' ? BOSS_AGGRO_R : AGGRO_R;
+    // a calm monster looks for nobody: it fights whoever hurt it (damageMob gives it that target) and then forgets
+    let bestD = m.def.calm ? 0 : m.type === 'boss' ? BOSS_AGGRO_R : AGGRO_R;
     for (const p of players.values()) {
       if (p.dead || p.safe) continue;
       const d = Math.hypot(p.x - m.x, p.z - m.z);
@@ -939,7 +940,7 @@ function updateMob(m, dt) {
         damageMob(m, physical(p, 3, m), -dx / dist, -dz / dist, 14, p);
         if (m.dead) return;
       }
-    } else if (now >= m.hitAt && !m.swing) {
+    } else if (now >= m.hitAt && !m.swing && (m.target || !m.def.calm)) {   // a calm monster lets a cat walk right past it
       m.hitAt = now + 1.2;
       m.swing = { at: now + ATTACK_WINDUP, pid: p.id };
       emit({ k: 'atk', id: m.id }, m.x, m.z);

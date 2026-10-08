@@ -397,6 +397,7 @@ function lerpAngle(a, b, k) {
 // ---------------------------------------------------------------- mobs
 
 const lvlLabels = new Map();
+const MOB_ANGRY = '#ff7a8a', MOB_CALM = '#f4f1ea';   // the colour of a monster's name: it attacks on sight, or it does not
 
 const corpses = [];
 function removeMobView(v) {
@@ -416,10 +417,11 @@ function makeMobView(ti, lvl) {
   root.add(skeleton.group);
   const top = def.draw ? skeleton.height : SKELETON_HEIGHT * skeleton.group.scale.y + (type === 'shooter' ? 0.4 : 0);
 
-  const text = type === 'boss' ? `Skeleton King · Lv ${lvl}` : `Lv ${lvl}`;   // the full name is shown in the target frame
-  if (!lvlLabels.has(text)) lvlLabels.set(text, textSprite(text, type === 'boss' ? '#ff8095' : '#f0e6d8', type === 'boss' ? 0.8 : 0.4));
+  // its name and level: red for a monster that attacks on sight, white for one that leaves a cat alone
+  const text = `${def.name} · Lv ${lvl}`;
+  if (!lvlLabels.has(text)) lvlLabels.set(text, textSprite(text, def.calm ? MOB_CALM : MOB_ANGRY, type === 'boss' ? 0.8 : 0.4));
   const proto = lvlLabels.get(text);
-  const label = new THREE.Sprite(proto.material);   // material shared between mobs of the same level
+  const label = new THREE.Sprite(proto.material);   // material shared between mobs of the same kind and level
   label.scale.copy(proto.scale);
   label.position.y = top + 0.75;
   root.add(label);
