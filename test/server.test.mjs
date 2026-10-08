@@ -277,7 +277,7 @@ check('GET /api/assets lists the model files of every pack', () => withServer({}
   assert.equal(res.status, 200);
   assert.equal(res.headers['cache-control'], 'no-store');
   const onDisk = (pack, ext) => fs.readdirSync(path.join(ROOT, 'assets', pack)).filter((f) => f.endsWith(`.${ext}`)).map((f) => f.slice(0, -ext.length - 1)).sort();
-  assert.deepEqual(res.json, { packs: { medieval: onDisk('medieval', 'gltf'), halloween: onDisk('halloween', 'gltf'), dungeon: onDisk('dungeon', 'glb') } });
+  assert.deepEqual(res.json, { packs: { medieval: onDisk('medieval', 'gltf'), halloween: onDisk('halloween', 'gltf'), dungeon: onDisk('dungeon', 'glb'), forest: onDisk('forest', 'gltf') } });
   assert.ok(res.json.packs.medieval.includes('barrel') && res.json.packs.dungeon.includes('chest'));
 }));
 

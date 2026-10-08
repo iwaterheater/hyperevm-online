@@ -957,7 +957,8 @@ P × s for world units. Models are grouped where every column is equal. Defaults
 | `lair_ring` | special | 0 | `cast: false`; radius 13 at s = 1 |
 | `grass_tuft`, `flower_white`, `flower_yellow`, `flower_pink`, `flower_violet` | foliage | 0 | `cast: false`; the meshes of automatic foliage, exposed so the Scatter brush can paint a flower bed |
 
-`listModels` therefore returns 57 + 44 + 18 + 12 = **131** ids by default (134 with `{ hidden: true }`).
+`listModels` therefore returns 57 + 44 + 18 + 93 + 12 = **224** ids by default (227 with `{ hidden: true }`); the 93 are
+the `forest` pack (KayKit Forest Nature Pack, the free part: trees, bushes, rocks and grass at pack scale 1).
 
 ---
 

@@ -7,6 +7,7 @@ export const PACKS = {
   medieval:  { dir: 'assets/medieval/',  ext: 'gltf', scale: 5, label: 'Medieval' },    // modelled for small hex tiles
   halloween: { dir: 'assets/halloween/', ext: 'gltf', scale: 1, label: 'Graveyard' },
   dungeon:   { dir: 'assets/dungeon/',   ext: 'glb',  scale: 1, label: 'Dungeon' },
+  forest:    { dir: 'assets/forest/',    ext: 'gltf', scale: 1, label: 'Forest' },
   builtin:   { dir: null, ext: null, scale: 1, label: 'Built-in' },                      // procedural geometry from src/map/builtin.js
 };
 export const BUILTIN = ['fountain', 'crystal', 'lamp_post', 'bush', 'spike', 'red_crystal', 'lair_ring',
@@ -89,6 +90,20 @@ add('dungeon', 'props', 0, ['banner_red', 'sword_shield', 'sword_shield_broken',
   'coin_stack_large', 'coin_stack_medium', 'coin_stack_small']);
 // the game uses these for real treasure chests and coin drops; placed as scenery they would be chests that never open
 add('dungeon', 'special', 0, ['chest', 'chest_gold', 'coin'], { hidden: true });
+
+// ---- forest (P = 1): KayKit Forest Nature Pack (the free part): trees, bushes, rocks and grass
+add('forest', 'trees', 0.14, ['tree_1_a', 'tree_1_b', 'tree_1_c', 'tree_2_a', 'tree_2_b', 'tree_2_c', 'tree_2_d', 'tree_2_e', 'tree_3_a',
+  'tree_3_b', 'tree_3_c', 'tree_4_a', 'tree_4_b', 'tree_4_c']);   // wide crowns: only the trunk blocks
+add('forest', 'trees', 0.2, ['tree_bare_1_a', 'tree_bare_1_b', 'tree_bare_1_c', 'tree_bare_2_a', 'tree_bare_2_b', 'tree_bare_2_c']);
+add('forest', 'foliage', 0, ['bush_1_a', 'bush_1_b', 'bush_1_c', 'bush_1_d', 'bush_1_e', 'bush_1_f', 'bush_1_g', 'bush_2_a', 'bush_2_b',
+  'bush_2_c', 'bush_2_d', 'bush_2_e', 'bush_2_f', 'bush_3_a', 'bush_3_b', 'bush_3_c', 'bush_4_a', 'bush_4_b',
+  'bush_4_c', 'bush_4_d', 'bush_4_e', 'bush_4_f']);
+add('forest', 'rocks', 0.75, ['rock_1_a', 'rock_1_b', 'rock_1_c', 'rock_1_d', 'rock_1_e', 'rock_1_f', 'rock_1_g', 'rock_1_h', 'rock_1_i',
+  'rock_1_j', 'rock_1_k', 'rock_1_l', 'rock_1_m', 'rock_1_n', 'rock_1_o', 'rock_1_p', 'rock_1_q', 'rock_2_a',
+  'rock_2_b', 'rock_2_c', 'rock_2_d', 'rock_2_e', 'rock_2_f', 'rock_2_g', 'rock_2_h', 'rock_3_a', 'rock_3_b',
+  'rock_3_c', 'rock_3_d', 'rock_3_e', 'rock_3_f', 'rock_3_g', 'rock_3_h', 'rock_3_i', 'rock_3_j', 'rock_3_k',
+  'rock_3_l', 'rock_3_m', 'rock_3_n', 'rock_3_o', 'rock_3_p', 'rock_3_q', 'rock_3_r']);
+add('forest', 'foliage', 0, ['grass_1_a', 'grass_1_b', 'grass_1_c', 'grass_1_d', 'grass_2_a', 'grass_2_b', 'grass_2_c', 'grass_2_d'], { cast: false });
 
 // ---- builtin (P = 1): procedural pieces, origin on the ground
 add('builtin', 'special', row(2.6, 0), ['fountain']);
