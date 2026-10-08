@@ -375,7 +375,7 @@ The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at, a
 | `veteran` | Peaceful, but fights back |
 | `guard` | Hunts outlaws, and nobody else |
 | `duelist` | Challenges cats of about its level, and lets go of one that will not fight; hunts outlaws |
-| `pk` | Attacks cats up to two levels above its own and kills them: a murderer with a red name, until it has worked its karma off |
+| `pk` | Attacks cats from four levels below its own to two above, and kills them: a murderer with a red name, until it has worked its karma off |
 
 A cat a bot has brought down is left alone by that bot for some minutes. Among themselves the bots fight seldom.
 

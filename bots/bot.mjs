@@ -266,8 +266,10 @@ export class Bot {
       if (c.dead || this.safe(c) || dist(c, this.pos) > 24 || this.t < (this.grudges.get(c.id) ?? 0)) continue;
       if (c.level > me.level + this.role.reach) continue;
       let wanted = c.st === PVP_OUTLAW && aggro !== 'pk';   // every fighter hunts an outlaw; outlaws leave each other be
-      if (aggro === 'pk') wanted = c.st !== PVP_OUTLAW && c.level >= 2;
-      if (aggro === 'duel' && !wanted) wanted = Math.abs(c.level - me.level) <= 3 && c.level >= 3;
+      // a murderer wants a cat that can at least try to fight back, not one far below it; a duelist one of its own
+      // level that is on its feet - a duel with the half dead is no duel
+      if (aggro === 'pk') wanted = c.st !== PVP_OUTLAW && c.level >= Math.max(2, me.level - 4);
+      if (aggro === 'duel' && !wanted) wanted = Math.abs(c.level - me.level) <= 3 && c.level >= 3 && c.hp / c.maxHp > 0.7;
       if (!wanted) continue;
       // Among themselves the bots fight seldom - an outlaw aside - so that the world is not one long brawl: a bot that
       // is passed over is left alone for some minutes.

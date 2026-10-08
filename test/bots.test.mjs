@@ -146,14 +146,14 @@ test('bots at large: both walk out to the camp and hunt, and the murderer brings
   listen.on('message', (data) => { const m = JSON.parse(data); if (m.t === 'c' && m.sys) lines.push(m.m); });
   listen.on('open', async () => listen.send(JSON.stringify({ t: 'join', name: 'Watcher', cls: 'fighter', rev: (await fetch(`${s.url}/api/map`)).headers.get('x-map-rev') })));
   const lambs = await createWorld(quiet, [{ name: 'Lamb', cls: 'fighter', lvl: 2, role: 'farmer' }]);
-  const wolves = await createWorld(quiet, [{ name: 'Fang', cls: 'fighter', lvl: 12, role: 'pk' }]);
+  const wolves = await createWorld(quiet, [{ name: 'Fang', cls: 'fighter', lvl: 6, role: 'pk' }]);
   for (const world of [lambs, wolves]) { world.log = () => {}; stops.push(async () => world.stop()); }
   const lamb = lambs.list[0], fang = wolves.list[0], map = lambs.map;
   const until = async (what, fn, ms) => {
     for (const end = Date.now() + ms; !fn();) { assert.ok(Date.now() < end, `${what}: not within ${ms} ms`); await sleep(100); }
   };
   await until('both in the world', () => lamb.me && fang.me, 20000);
-  assert.deepEqual([lamb.me.level, fang.me.level, fang.eq.weapon], [2, 12, 'steel_sword']);
+  assert.deepEqual([lamb.me.level, fang.me.level, fang.eq.weapon], [2, 6, 'iron_sword']);
   // on the way they never stand where a player could not
   let strayed = 0;
   const watch = setInterval(() => { for (const b of [lamb, fang]) if (b.me && !b.me.dead && isBlocked(map, b.pos.x, b.pos.z)) strayed++; }, 200);
@@ -162,7 +162,7 @@ test('bots at large: both walk out to the camp and hunt, and the murderer brings
   assert.equal(strayed, 0);
   await until('the count', () => fang.me.pk === 1 && fang.me.karma > 0, 5000);
   assert.ok(!isSafe(map, fang.pos.x, fang.pos.z), 'out in the field');
-  assert.ok(fang.me.xp > 0 || lamb.me.xp > 0 || fang.me.gold !== 480, 'somebody found a monster first');
+  assert.ok(fang.me.xp > 0 || lamb.me.xp > 0 || fang.me.gold !== 240, 'somebody found a monster first');
   listen.close();
   lambs.stop(); wolves.stop();
 });
