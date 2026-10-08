@@ -36,7 +36,7 @@ collaborative editing, in-place map swap in the game client (clients reload, §8
 2. No build step, no new npm dependencies. three.js r170 only through the import map
    (`three@0.170.0`, copied verbatim from `index.html` into `editor.html`; `npm run check` fails when the two maps differ).
 3. Node.js 18 or newer (developed on 22.13). Pure modules use no `Buffer`, no DOM, no three.
-4. Work happens in the git worktree `/Users/evgeniy/My Docs/hyperevm-game/.worktrees/map-editor`, branch `map-editor`.
+4. Work happens in the git worktree `<repo>/.worktrees/map-editor`, branch `map-editor`.
    The path contains a space: quote it in every shell command.
 5. A dev server for the main checkout runs on port **8765** and MUST never be stopped, restarted or connected to with a
    write. Nobody runs a server on 8765 or with the default `MAP_FILE` / `DATA_DIR`; see §14.2.
@@ -3529,7 +3529,7 @@ Not part of the repository. Save as `"$D/stub.mjs"`; it serves the worktree's st
 `$D` itself under `/_dev/`. It has no WebSocket, so the game cannot join — it is for `view.js` work only.
 
 ```js
-// run:  ROOT="/Users/evgeniy/My Docs/hyperevm-game/.worktrees/map-editor" PORT=8802 node "$D/stub.mjs"     (needs "$D/world.json")
+// run:  ROOT="<repo>/.worktrees/map-editor" PORT=8802 node "$D/stub.mjs"     (needs "$D/world.json")
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(process.env.ROOT), D = path.dirname(fileURLToPath(import.meta.url)), PORT = Number(process.env.PORT);
