@@ -1597,10 +1597,10 @@ test('typesPatch: the boss respawn rule', () => {
 test('the spawn Stats field: HP, P.Atk and XP at the lowest and the highest level', () => {
   const stats = FIELDS.spawn.find((f) => f.type === 'computed');
   assert.equal(stats.label, 'Stats');
-  assert.equal(stats.text(cmd.make('spawn')), 'Skeleton Minion: HP 30 · P.Atk 14 · XP 10');
+  assert.equal(stats.text(cmd.make('spawn')), 'Skeleton Minion: HP 45 · P.Atk 16 · XP 10');
   assert.equal(stats.text(cmd.make('spawn', { types: { runner: 1, chaser: 3 }, lvl: [1, 2] })),
-    'Skeleton Minion: HP 30–44 · P.Atk 14–16 · XP 10–20\nSkeleton Rogue: HP 15–22 · P.Atk 8–9 · XP 8–16');
-  assert.equal(stats.text(cmd.make('spawn', { types: { boss: 1 }, lvl: [18, 18] })), 'Skeleton King: HP 13,840 · P.Atk 71 · XP 10,800');
+    'Skeleton Minion: HP 45–66 · P.Atk 16–18 · XP 10–20\nSkeleton Rogue: HP 24–35 · P.Atk 9–10 · XP 8–16');
+  assert.equal(stats.text(cmd.make('spawn', { types: { boss: 1 }, lvl: [18, 18] })), 'Skeleton King: HP 20,760 · P.Atk 78 · XP 10,800');
   assert.equal(stats.text(cmd.make('spawn', { types: {} })), '—');
   assert.equal(stats.text(cmd.make('spawn', { lvl: [5, 2] })), '—', 'levels that validate rejects show nothing, and nothing throws');
   assert.equal(stats.text(cmd.make('spawn', { lvl: [1.5, 2] })), '—');

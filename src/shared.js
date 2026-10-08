@@ -6,11 +6,11 @@ export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its sw
 // hp, pAtk: at level 1. pDef / mDef: multipliers on the level-based defence (warriors shrug off blades, mages shrug off spells).
 // eva: bonus to evasion.
 export const MOB_TYPES = {
-  chaser:  { name: 'Skeleton Minion',  r: 0.7,  hp: 30,   speed: 3.0, pAtk: 14, pDef: 1,   mDef: 1,   eva: 0, xp: 10,  color: 0xff3b8d },
-  runner:  { name: 'Skeleton Rogue',   r: 0.45, hp: 15,   speed: 5.2, pAtk: 8,  pDef: 0.7, mDef: 0.9, eva: 6, xp: 8,   color: 0xff9a3b },
-  shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 30,   speed: 2.4, pAtk: 11, pDef: 0.7, mDef: 1.6, eva: 0, xp: 16,  color: 0xffe14d, magic: true },
-  tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 140,  speed: 1.8, pAtk: 28, pDef: 1.6, mDef: 0.8, eva: 0, xp: 45,  color: 0xb04dff },
-  boss:    { name: 'Skeleton King',    r: 2.8,  hp: 1600, speed: 2.2, pAtk: 20, pDef: 1.5, mDef: 1.5, eva: 2, xp: 600, color: 0xff2244, magic: true },
+  chaser:  { name: 'Skeleton Minion',  r: 0.7,  hp: 45,   speed: 3.0, pAtk: 16, pDef: 1,   mDef: 1,   eva: 0, xp: 10,  color: 0xff3b8d },
+  runner:  { name: 'Skeleton Rogue',   r: 0.45, hp: 24,   speed: 5.2, pAtk: 9,  pDef: 0.7, mDef: 0.9, eva: 6, xp: 8,   color: 0xff9a3b },
+  shooter: { name: 'Skeleton Mage',    r: 0.6,  hp: 45,   speed: 2.4, pAtk: 12, pDef: 0.7, mDef: 1.6, eva: 0, xp: 16,  color: 0xffe14d, magic: true },
+  tank:    { name: 'Skeleton Warrior', r: 1.3,  hp: 210,  speed: 1.8, pAtk: 31, pDef: 1.6, mDef: 0.8, eva: 0, xp: 45,  color: 0xb04dff },
+  boss:    { name: 'Skeleton King',    r: 2.8,  hp: 2400, speed: 2.2, pAtk: 22, pDef: 1.5, mDef: 1.5, eva: 2, xp: 600, color: 0xff2244, magic: true },
 };
 export const MOB_KEYS = Object.keys(MOB_TYPES);
 // How far monsters sense and roam, in world units; the map editor draws its threat rings from the same numbers.
@@ -518,12 +518,12 @@ export const upgradeCost = (weapon) => 40 * weapon;
 
 // ---------------------------------------------------------------- PvP
 
-// Cats may fight each other outside the safe regions, by the rules of Lineage II:
+// Cats may fight each other outside the safe regions - in a safe one nobody is attacked - by the rules of Lineage II:
 //   - a cat that attacks another one is flagged for a while: its name turns purple, and anyone may fight it;
 //   - whoever kills a flagged cat, or an outlaw, has won a fight: PvP +1;
 //   - whoever kills a cat that never fought back has murdered it: PK +1, and karma. A cat with karma is an outlaw: its
-//     name is red, it may be attacked by anyone and anywhere - the town is no shelter - without that flagging the
-//     attacker, the Trader does not deal with it, and it loses experience when it falls to another cat;
+//     name is red, anyone may attack it without being flagged for that, and it loses experience when it falls to
+//     another cat;
 //   - karma is worked off by killing monsters, and a part of it goes with every death.
 export const PVP_FLAG = 30;         // seconds a cat stays flagged after its last attack on another cat
 export const PVP_DAMAGE = 0.75;     // what a cat's attack does to another cat, as a share of what it does to a monster

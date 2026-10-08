@@ -183,8 +183,8 @@ peaceful cat is attacked with `Ctrl` + click, or with the Attack button of its t
 - **PvP.** Bringing down a flagged cat, or an outlaw, is a fight won: PvP +1. The loser keeps its experience.
 - **PK.** Killing a cat that never fought back is murder: PK +1, and karma - 240 for the first one, 60 more for each
   after it.
-- **Red name - outlaw.** A cat with karma may be attacked by anyone and anywhere, the town included, without that
-  flagging the attacker. It loses experience when another cat brings it down, and the Trader does not deal with it.
+- **Red name - outlaw.** A cat with karma may be attacked by anyone without that flagging the attacker, and it loses
+  experience when another cat brings it down. In a safe place it is as safe as anyone, and the Trader serves it.
 - **Karma** is worked off by killing monsters (`8 + 2 × the monster's level` each), and 120 of it goes with every death.
 - Area skills never start a fight: among cats they reach only flagged ones and outlaws. Stuns, sleep, slows and
   bleeding work on cats as they do on monsters; a cat's attack does three quarters of its damage to another cat.

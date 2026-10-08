@@ -847,11 +847,11 @@ const pvpState = (p) => (p.karma > 0 ? PVP_OUTLAW : now < p.flagUntil ? PVP_FLAG
 const held = (p) => now < p.stunUntil || now < p.sleepUntil;  // stunned or asleep: it can neither move nor act
 const ccFlags = (o) => (now < o.stunUntil ? 1 : 0) | (now < o.sleepUntil ? 2 : 0) | (now < o.slowUntil ? 4 : 0);
 
-// May p attack the cat q right now? A safe region shelters everyone in it but an outlaw, and nobody fights out of one -
-// except against an outlaw. (A play-test cat that cannot be hurt cannot be fought either.)
+// May p attack the cat q right now? A safe region shelters everyone in it, outlaws too, and nobody fights out of one.
+// (A play-test cat that cannot be hurt cannot be fought either.)
 function canFight(p, q) {
   if (q === p || p.dead || q.dead || q.god) return false;
-  return q.karma > 0 || !(regions.isSafe(p.x, p.z) || regions.isSafe(q.x, q.z));
+  return !(regions.isSafe(p.x, p.z) || regions.isSafe(q.x, q.z));
 }
 // whether the monster or cat p names is nothing it may strike
 const noFoe = (p, m) => !m || m.dead || (isCat(m) && !canFight(p, m));
@@ -1246,7 +1246,6 @@ const SKILL_EFFECTS = {
 };
 
 const DEAD = 'You cannot do that while dead';
-const OUTLAW = 'The Trader does not deal with outlaws';
 // The stack an item request means. It names the stack by its place in the bag AND by its item, so that a click which
 // crossed another change of the bag on the wire can never sell, drink or destroy a different item. A request for a
 // stack that is not there is dropped without an answer: the client's bag is simply a snapshot behind.
@@ -1377,7 +1376,6 @@ const handlers = {
     if (!itemOf(id) || !SHOP.includes(id) || !Number.isInteger(n) || n < 1 || n > stackMax(id)) return;
     if (p.dead) { refuse(p, DEAD); return; }
     if (!nearNpc(map, p, 'trader', SHOP_RANGE)) { refuse(p, 'The Trader is too far away'); return; }
-    if (p.karma > 0) { refuse(p, OUTLAW); return; }
     const cost = ITEMS[id].price * n;
     if (p.gold < cost) { refuse(p, 'Not enough gold'); return; }
     if (roomFor(p.inv, id, n) < n) { refuse(p, 'Your bag is full'); return; }
@@ -1391,7 +1389,6 @@ const handlers = {
     if (!stack || !Number.isInteger(n) || n < 1 || n > stack[1]) return;
     if (p.dead) { refuse(p, DEAD); return; }
     if (!nearNpc(map, p, 'trader', SHOP_RANGE)) { refuse(p, 'The Trader is too far away'); return; }
-    if (p.karma > 0) { refuse(p, OUTLAW); return; }
     const id = stack[0], gold = sellPrice(id) * n;
     takeItem(p.inv, msg.i, n);
     p.gold += gold;

@@ -1664,34 +1664,37 @@ check('pvp: killing a cat that never fought back is murder - PK, karma and a red
   assert.deepEqual([savedPlayers(s).s.pvp, savedPlayers(s).s.pk, savedPlayers(s).s.karma], [0, 1, 240]);
 });
 
-check('pvp: a safe region shelters every cat but an outlaw, whom the Trader turns away and anyone may hunt', async () => {
+check('pvp: a safe region shelters every cat, outlaws too, and the Trader serves them; in the field anyone may hunt one', async () => {
   const { xpNext, DEATH_XP_LOSS, KARMA_DEATH } = await import('../src/shared.js');
   const beside = [AT_TRADER[0] + 1, AT_TRADER[1]];
-  const s = await withServer({ map: NO_MONSTERS, setup: seed({ h: cat('Hunter', 30), o: cat('Outlaw', 3, { karma: 300, pk: 1 }), b: cat('Bystander', 3) }) }, async (s) => {
+  const outlaw = (name) => cat(name, 3, { karma: 300, pk: 1 });
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ h: cat('Hunter', 30), o: outlaw('Outlaw'), b: cat('Bystander', 3), h2: cat('Ranger', 30), o2: outlaw('Bandit') }) }, async (s) => {
     const hunter = await enter(s, { token: 'h', name: 'Hunter', at: AT_TRADER });
-    const outlaw = await enter(s, { token: 'o', name: 'Outlaw', at: beside }), bystander = await enter(s, { token: 'b', name: 'Bystander', at: beside });
-    assert.deepEqual([outlaw.me.st, outlaw.me.karma, outlaw.me.pk], [2, 300, 1]);
-    await outlaw.send({ t: 'buy', id: 'hp_small', n: 1 });
-    assert.equal((await outlaw.event('err')).m, 'The Trader does not deal with outlaws');
-    // in the town nobody can be attacked, and nobody is flagged for trying - not even by the outlaw
+    const red = await enter(s, { token: 'o', name: 'Outlaw', at: beside }), bystander = await enter(s, { token: 'b', name: 'Bystander', at: beside });
+    assert.deepEqual([red.me.st, red.me.karma, red.me.pk], [2, 300, 1]);
+    await red.send({ t: 'buy', id: 'hp_small', n: 1 });
+    await red.until('the potion', () => red.inv.some((stack) => stack[0] === 'hp_small'));
+    // in the town nobody can be attacked - not the outlaw either - and nobody is flagged for trying
     for (let i = 0; i < 12; i++) {
       await hunter.send({ t: 'a', id: bystander.w.id });
-      await outlaw.send({ t: 'a', id: bystander.w.id });
+      await hunter.send({ t: 'a', id: red.w.id });
+      await red.send({ t: 'a', id: bystander.w.id });
       await sleep(100);
     }
     await hunter.settled();
     assert.equal(hunter.me.st, 0);
-    assert.ok(!bystander.events.some((ev) => ev.k === 'hurt') && !bystander.me.dead);
-    // the outlaw has no such shelter; hunting it flags nobody, and its fall is a fight won
-    await fight(hunter, outlaw.w.id, () => outlaw.me.dead, 'the outlaw did not fall');
+    for (const p of [bystander, red]) assert.ok(!p.events.some((ev) => ev.k === 'hurt') && !p.me.dead && p.me.hp === p.me.maxHp);
+    // out in the field the outlaw has no such shelter; hunting it flags nobody, and its fall is a fight won
+    const ranger = await enter(s, { token: 'h2', name: 'Ranger', at: FIELD }), bandit = await enter(s, { token: 'o2', name: 'Bandit', at: BESIDE });
+    await fight(ranger, bandit.w.id, () => bandit.me.dead, 'the outlaw did not fall');
     const lost = Math.min(50, Math.round(xpNext(3) * DEATH_XP_LOSS));
-    assert.deepEqual(await outlaw.event('died'), { k: 'died', xp: lost, by: 'Hunter' });
-    await hunter.until('the count', () => hunter.me.pvp === 1);
-    assert.deepEqual([hunter.me.pk, hunter.me.karma, hunter.me.st], [0, 0, 0]);
-    await outlaw.until('less karma', () => outlaw.me.karma === 300 - KARMA_DEATH);
-    await hunter.settled();
+    assert.deepEqual(await bandit.event('died'), { k: 'died', xp: lost, by: 'Ranger' });
+    await ranger.until('the count', () => ranger.me.pvp === 1);
+    assert.deepEqual([ranger.me.pk, ranger.me.karma, ranger.me.st], [0, 0, 0]);
+    await bandit.until('less karma', () => bandit.me.karma === 300 - KARMA_DEATH);
+    await ranger.settled();
   });
-  assert.deepEqual([savedPlayers(s).h.pvp, savedPlayers(s).o.karma, savedPlayers(s).o.pk], [1, 180, 1]);
+  assert.deepEqual([savedPlayers(s).h2.pvp, savedPlayers(s).o2.karma, savedPlayers(s).o2.pk, savedPlayers(s).o.karma], [1, 180, 1, 300]);
 });
 
 check('pvp: an outlaw works its karma off on monsters', () => withServer({

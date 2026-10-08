@@ -14,7 +14,7 @@ import {
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, ATTR_NAMES, xpNext, upgradeCost,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
-  CAT_R, PVP_PEACE, PVP_OUTLAW, PVP_COLORS, PVP_TITLES,
+  CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES,
 } from './shared.js';
 
 const TEAL = 0x7fe8d6;
@@ -886,12 +886,11 @@ function pickTarget(clientX, clientY) {
   return best;
 }
 
-// Whether the cat `a` may be attacked now; `say` tells the player why not. An outlaw always may. Anyone else not in a
-// safe place, and a peaceful cat only once the player has forced the attack (a flagged one is fair game).
+// Whether the cat `a` may be attacked now; `say` tells the player why not. Nobody in a safe place, and a peaceful cat
+// only once the player has forced the attack (a flagged one and an outlaw are fair game).
 function catFoe(a, id, say) {
   let why = '';
-  if (a.st === PVP_OUTLAW) why = '';
-  else if (isSafe(map, me.x, me.z) || isSafe(map, a.x, a.z)) why = 'No fighting in a safe place';
+  if (isSafe(map, me.x, me.z) || isSafe(map, a.x, a.z)) why = 'No fighting in a safe place';
   else if (a.st === PVP_PEACE && forced !== id) why = 'Ctrl + click to attack a peaceful cat';
   if (why && say) notice(why);
   return !why;
