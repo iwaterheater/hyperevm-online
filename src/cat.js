@@ -103,6 +103,11 @@ function getShared() {
   return shared;
 }
 
+// The beats of a sword swing, as shares of its length: the wind-up ends at SWING_WINDUP, the blade has gone through
+// by SWING_HIT, the rest is the recovery. swingTime() is how long a swing lasts for a given pause between attacks.
+export const SWING_WINDUP = 0.34, SWING_HIT = 0.6;
+export const swingTime = (atkCd) => Math.min(0.8, Math.max(0.34, atkCd * 0.92));
+
 // -> a promise of the model file, for whoever wants to wait for it (the loading screen); it rejects when it is missing
 export function loadCat() {
   return getShared().ready;
@@ -321,17 +326,21 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     inner.rotation.y = 0;
     if (slash >= 0) {
       const mix = (a, b, f) => a + (b - a) * f;
+      // A swing has three beats: the blade is drawn back and slows at the top, so the wind-up can be read; it comes
+      // down gathering speed; and the arm eases back. The wind-up takes the first SWING_WINDUP of it.
+      const rise = (f) => 1 - (1 - f) * (1 - f), fall = (f) => f * f, settle = (f) => f * f * (3 - 2 * f);
+      const W = SWING_WINDUP, H = SWING_HIT;
       if (slashKind === 2) {
-        arms[1].rotation.x = slash < 0.3 ? mix(-1.0, -2.8, slash / 0.3)
-          : slash < 0.6 ? mix(-2.8, -0.3, (slash - 0.3) / 0.3)
-          : mix(-0.3, arms[1].rotation.x, (slash - 0.6) / 0.4);
+        arms[1].rotation.x = slash < W ? mix(-1.0, -2.8, rise(slash / W))
+          : slash < H ? mix(-2.8, -0.3, fall((slash - W) / (H - W)))
+          : mix(-0.3, arms[1].rotation.x, settle((slash - H) / (1 - H)));
         arms[1].rotation.z = 0.12;
         inner.rotation.y = Math.sin(slash * Math.PI) * -0.25;
       } else {
         // wind up to one side, sweep the blade across to the other, then recover
         const dir = slashKind === 1 ? -1 : 1;
-        const sweep = slash < 0.2 ? mix(0, -1, slash / 0.2) : slash < 0.55 ? mix(-1, 1, (slash - 0.2) / 0.35) : mix(1, 0, (slash - 0.55) / 0.45);
-        const grip = slash < 0.2 ? slash / 0.2 : slash < 0.55 ? 1 : 1 - (slash - 0.55) / 0.45;
+        const sweep = slash < W ? mix(0, -1, rise(slash / W)) : slash < H ? mix(-1, 1, fall((slash - W) / (H - W))) : mix(1, 0, settle((slash - H) / (1 - H)));
+        const grip = slash < W ? rise(slash / W) : slash < H ? 1 : 1 - settle((slash - H) / (1 - H));
         arms[1].rotation.x = mix(arms[1].rotation.x, -0.55, grip);
         arms[1].rotation.z = mix(arms[1].rotation.z, 0.1, grip);
         arms[1].rotation.y = sweep * dir * 1.1;

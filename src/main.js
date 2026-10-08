@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { createCat, loadCat } from './cat.js';
+import { createCat, loadCat, swingTime, SWING_WINDUP } from './cat.js';
 import { createSkeleton, loadSkeletons, SKELETON_FILES, SKELETON_HEIGHT, BONE } from './skeleton.js';
 import { createWorld } from './world.js';
 import { createNpcs, npcModels } from './npc.js';
@@ -16,6 +16,9 @@ import {
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
 } from './shared.js';
+
+// how long a swing lasts when the attack speed behind it is not known: another player's blow, a skill
+const SWING_DEFAULT = 0.46;
 
 const TEAL = 0x7fe8d6;
 const FIRE = 0xffa040;
@@ -345,7 +348,7 @@ function makeAvatar(cls = 'fighter') {
   cat.group.add(orb);
   scene.add(root);
   return {
-    root, cat, cls, look: 0, orb, swingT: -1, swingKind: 0, castT: -1, castDur: 1, castSkill: '', bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
+    root, cat, cls, look: 0, orb, swingT: -1, swingDur: SWING_DEFAULT, swingKind: 0, castT: -1, castDur: 1, castSkill: '', bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
     speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0, drawT: -1, drawDur: 1,
   };
@@ -684,14 +687,14 @@ function onEvent(ev) {
       break;
     case 'swing':
       if (ev.o === myId || !others.has(ev.o)) break;
-      Object.assign(others.get(ev.o), { swingT: 0, swingKind: ev.c });
-      if (!fightStyle(others.get(ev.o).cls, others.get(ev.o).family).ranged) fx.swing(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c);
+      Object.assign(others.get(ev.o), { swingT: 0, swingDur: SWING_DEFAULT, swingKind: ev.c });
+      if (!fightStyle(others.get(ev.o).cls, others.get(ev.o).family).ranged) fx.swing(others.get(ev.o).x, others.get(ev.o).z, ev.dx, ev.dz, ev.c, SWING_DEFAULT * SWING_WINDUP);
       break;
     case 'skill': {   // the server accepted a skill: show what it does
       const k = SKILLS[ev.s], a = ev.o === myId ? me : others.get(ev.o), tv = mobViews.get(ev.tid);
       if (!k || !a) break;
       if (k.kind === 'strike') {
-        if (ev.o !== myId) Object.assign(a, { swingT: 0, swingKind: 2 });
+        if (ev.o !== myId) Object.assign(a, { swingT: 0, swingDur: SWING_DEFAULT, swingKind: 2 });
         sfx(240, 0.14, 'sawtooth', 0.05, 300);
       } else if (k.kind === 'shot' || k.kind === 'bolt') {
         spawnBolt(a.x, a.z, ev.tid, k.fx, ev.s);
@@ -1038,7 +1041,7 @@ function useSkill(id, tdx, tdz) {
   local.cds[id] = time + Math.max(k.cd, 0.3);
   const msg = { t: 'sk', s: id, tid: targetId };
   if (k.kind === 'ground') [msg.x, msg.z] = groundPoint(k.range);
-  if (k.kind === 'strike') Object.assign(me, { swingT: 0, swingKind: 2 });   // the blow itself is drawn when the server confirms it
+  if (k.kind === 'strike') Object.assign(me, { swingT: 0, swingDur: SWING_DEFAULT, swingKind: 2 });   // the blow itself is drawn when the server confirms it
   if (k.kind === 'dash') startDash();
   if (k.kind === 'strike' || k.kind === 'shot' || k.kind === 'bolt') attacking = true;   // an attack skill also starts the auto-attack
   me.sitting = false;
@@ -1127,9 +1130,10 @@ function updateLocal(dt) {
       sfx(180, 0.1, 'triangle', 0.03, 320);
     } else {
       me.swingT = 0;
+      me.swingDur = swingTime(sheet.atkCd);   // a slow weapon swings slowly: the swing fills the pause between blows
       me.swingKind = local.combo;          // combo: left-to-right, right-to-left, overhead chop
       local.combo = (local.combo + 1) % 3;
-      fx.swing(me.x, me.z, tdx, tdz, me.swingKind);
+      fx.swing(me.x, me.z, tdx, tdz, me.swingKind, me.swingDur * SWING_WINDUP);   // the smear waits for the blade
       send({ t: 'a', id: targetId, c: me.swingKind });
       sfx(300, 0.12, 'sawtooth', 0.04, 500);
     }
@@ -1226,7 +1230,7 @@ function updateAvatar(a, dt, isMe) {
   a.cat.group.position.y = a.y;                       // the jump: the height above that ground
   a.root.rotation.y = cam.yaw;   // keeps the health bar parallel to the screen
   a.cat.group.rotation.y = a.yaw - cam.yaw;
-  if (a.swingT >= 0 && (a.swingT += dt / 0.4) >= 1) a.swingT = -1;
+  if (a.swingT >= 0 && (a.swingT += dt / a.swingDur) >= 1) a.swingT = -1;
   const charge = a.castT >= 0 ? a.castT / a.castDur : 0;
   a.orb.visible = a.castT >= 0;
   a.orb.material = orbMat(a.castSkill);
