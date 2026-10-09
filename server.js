@@ -1158,6 +1158,7 @@ function tick() {
       if (!p.dead && Math.hypot(p.x - g.x, p.z - g.z) < 1.6) {
         p.gold += g.gold;
         p.events.push({ k: 'gem', gold: g.gold });
+        emit({ k: 'pick', o: p.id }, p.x, p.z);   // everyone near sees the cat stoop for it
         return false;
       }
     }
@@ -1173,7 +1174,7 @@ function tick() {
       p.gold += gold;
       p.events.push({ k: 'chest', gold });
       for (const [id, n] of chestLoot(c.gold, c.big)) giveItem(p, id, n, c.x, c.z);
-      emit({ k: 'open', i: c.i }, c.x, c.z);
+      emit({ k: 'open', i: c.i, o: p.id }, c.x, c.z);
       c.openUntil = now + c.respawn;
       break;
     }

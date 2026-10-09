@@ -191,6 +191,7 @@ Stand next to the Trader in town and press `T`. He sells the four potions and al
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold and the better what else may lie in them. The King's hoard waits inside his fortress.
 - Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises P. Atk and M. Atk.
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
+- The cat is a puppet of rigid parts with elbows, knees, a tail of four segments and ears that turn, and it shows what happens to it: it winds a blow up before it lets it go and steps into it, stoops for a coin and bends down to a chest, gives at the knees when it lands, falls on its back when it is struck down and gets up when it lives again - and with nothing to do it looks about, licks a paw or has a stretch. An archer takes its arrows from a quiver at the hip.
 
 ### Fighting other cats
 
@@ -321,7 +322,7 @@ map/world.json    The world: terrain, scenery, regions, monster camps, chests, t
 map/backups/      The map before each save (created by the server, git-ignored)
 map/library/      The map library: named copies of the map, listed in the editor's Maps menu
 src/main.js       Client: rendering, input, networking, HUD
-src/cat.js        The cat: a Blender model of rigid parts (assets/cat/hypercat.glb), animated in code; weapons, armour and the shield, tinted by tier
+src/cat.js        The cat: a Blender model of rigid parts on joints (assets/cat/hypercat.glb), animated in code; weapons, armour and the shield, tinted by tier
 art/              The Blender sources: the cat, its weapons and its armour (hypercat.blend), the skill effects (fx.blend)
 src/fx.js         What skills look like: Blender-made shapes (assets/fx/fx.glb) - bolts, ground circles, glyphs, flames, light - animated in code
 src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations

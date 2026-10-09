@@ -373,7 +373,7 @@ function makeAvatar(cls = 'fighter') {
   return {
     root, cat, cls, look: 0, orb, swingT: -1, swingDur: SWING_DEFAULT, swingKind: 0, castT: -1, castDur: 1, castSkill: '', bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
-    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0, drawT: -1, drawDur: 1,
+    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0, drawT: -1, drawDur: 1, pickT: -1, pickDur: 0.6,
     name: 'Cat', top: CAT_TOP, def: CAT_DEF, st: PVP_PEACE, flags: 0, status: null,
   };
 }
@@ -692,6 +692,7 @@ function onSnapshot(s) {
     ([, x, y, z, yaw, , , , , , , cls]) => Object.assign(makeAvatar(CLASS_KEYS[cls]), { x, y, z, yaw }),
     (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit, cls, look, st = 0, flags = 0]) => {
       tween(a, x, y, z);
+      if (a.dead && !dead) Object.assign(a, { x, z, fx: x, fz: z });   // back to life somewhere else: it gets up there, it does not slide there
       Object.assign(a, { tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
       setLook(a, CLASS_KEYS[cls], look);
       setLabel(a, `${a.name} · ${CLASSES[a.cls].name} ${level}`, PVP_COLORS[st]);   // purple while it is flagged, red for an outlaw
@@ -877,9 +878,16 @@ function onEvent(ev) {
       sfx(ev.pk ? 110 : 523, 0.5, ev.pk ? 'sawtooth' : 'triangle', 0.08, ev.pk ? -50 : 400);
       break;
     }
+    case 'pick': {   // a cat stoops for a coin
+      const a = ev.o === myId ? me : others.get(ev.o);
+      if (a && a.pickT < 0) Object.assign(a, { pickT: 0, pickDur: 0.55 });
+      break;
+    }
     case 'open': {
       const c = map.chests[ev.i];
       if (!c) break;
+      const a = ev.o === myId ? me : others.get(ev.o);   // whoever opened it bends down to it
+      if (a) Object.assign(a, { pickT: 0, pickDur: 0.8 });
       burst(c.x, 1.2, c.z, 0xffd76a, c.big ? 60 : 24, 7);
       sfx(520, 0.25, 'triangle', 0.07, 520);
       break;
@@ -1378,14 +1386,13 @@ function updateAvatar(a, dt, isMe) {
   if (a.orb.visible && !a.cat.castPoint(a.orb.position)) a.orb.position.set(0, 1.0, 0.85);   // at the crystal of a staff, else between the paws
   a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: spell, windup: a.castT >= 0 && !spell ? a.castT / a.castDur : -1, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
+  if (a.pickT >= 0 && (a.pickT += dt / a.pickDur) >= 1) a.pickT = -1;
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: spell, windup: a.castT >= 0 && !spell ? a.castT / a.castDur : -1, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind,
+    pick: a.pickT, dead: isMe ? !!stats.dead : a.dead });
 }
 
 function updateViews(dt) {
-  for (const a of others.values()) {
-    updateAvatar(a, dt, false);
-    a.root.visible = !a.dead;
-  }
+  for (const a of others.values()) updateAvatar(a, dt, false);   // a dead cat stays in sight: it lies where it fell
 
   const k = 1 - Math.exp(-10 * dt);
   for (const v of mobViews.values()) {
@@ -2610,7 +2617,6 @@ function tick(dt) {
   fx.update(dt);
   updateAvatar(me, dt, true);
   me.bar.set(0, false);
-  me.root.visible = !stats.dead;   // a hit shows as a flinch of the cat (cat.js), not as blinking in and out
   updateCamera(dt);
   if (bagOpen && state === 'playing') drawDoll(dt);
 
