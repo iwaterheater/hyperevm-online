@@ -9,7 +9,7 @@ import {
   ITEMS, ITEM_KEYS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_KEYS, BONUS_NAMES, WEAPON_FAMILIES, heldFamily, fightStyle, MELEE_REACH, BOW_REACH, BAG_SIZE, STACK_MAX, SELL_RATE, SHOP, SHOP_TIER,
   STARTER_KIT, KNIGHT_SHIELD, itemOf, stackMax, sellPrice, weaponFamily, basicFamily, handsOf, equipError, equipBonus, roomFor, addItem, takeItem, cleanBag, cleanEquip,
   pushedOff, comesOff, equipWith, wearError, wearItem,
-  lookCode, lookOf, gearChance, tierForLevel, rollLoot, chestLoot, POTION_CHANCE,
+  lookCode, lookOf, gearChance, tierForLevel, rollLoot, lootTable, coinsOf, coinGold, chestLoot, POTION_CHANCE,
   SKILLS, SKILL_KEYS, activeSkills, BAR_SIZE, barSkill, cleanBar, defaultBar, barAdd,
 } from '../src/shared.js';
 
@@ -504,6 +504,49 @@ test('loot: the chance grows with the level, the tier follows it, and most kills
   }
   const expected = 4000 * gearChance('shooter', 12);
   assert.ok(gear > expected * 0.7 && gear < expected * 1.3, `${gear} pieces in 4000 kills, about ${Math.round(expected)} expected`);
+});
+
+test('loot: the table a player is shown tells what the dice do', () => {
+  // a plain monster of the lowest tier: one tier of gear, the two small potions, a coin worth 1 to 3 times its level
+  const low = lootTable('chaser', 3);
+  assert.deepEqual(low.gold, [3, 9]);
+  assert.deepEqual(low.items.map((it) => it.gear ?? it.id), ['hp_small', 0, 'mp_small'], 'the likeliest first');
+  assert.ok(low.items.every((it, i, all) => !i || all[i - 1].chance >= it.chance));
+  // a tier up, one piece in four is of the tier below, and from level 8 the potions are the large ones
+  const mid = lootTable('tank', 12);
+  assert.deepEqual(mid.gold, [3 * 12, 3 * 3 * 12], 'a Warrior scatters three coins');
+  const tier = (t) => mid.items.find((it) => it.gear === t).chance;
+  assert.ok(Math.abs(tier(2) + tier(1) - gearChance('tank', 12)) < 1e-9 && Math.abs(tier(1) / tier(2) - 1 / 3) < 1e-9);
+  assert.ok(mid.items.some((it) => it.id === 'hp_large') && mid.items.some((it) => it.id === 'mp_large'));
+  // the King: a piece of the top tier and three potions, every time
+  const king = lootTable('boss', 18);
+  assert.deepEqual(king.items.filter((it) => it.gear !== undefined), [{ gear: TIERS.length - 1, chance: 1 }]);
+  assert.ok(king.items.filter((it) => it.id).every((it) => it.n === 3));
+  assert.ok(Math.abs(king.items.filter((it) => it.id).reduce((sum, it) => sum + it.chance, 0) - 1) < 1e-9);
+  for (const type of MOB_KEYS) {
+    const { gold, items } = lootTable(type, 7);
+    assert.deepEqual(gold, [coinsOf(type) * 7, coinsOf(type) * 21], type);
+    for (const it of items) assert.ok(it.chance > 0 && it.chance <= 1 && (it.gear !== undefined ? TIERS[it.gear] : itemOf(it.id)), type);
+  }
+  // a coin is worth what the table says, at both ends of the dice
+  assert.equal(coinGold(7, () => 0), 7);
+  assert.equal(coinGold(7, () => 0.999999), 21);
+
+  // against the dice themselves: a seeded run of kills gives every line of the table at about its rate
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const KILLS = 60000, seen = new Map(), table = lootTable('tank', 12);
+  for (let i = 0; i < KILLS; i++) {
+    for (const [id] of rollLoot('tank', 12, rnd)) {
+      const key = ITEMS[id].kind === 'potion' ? id : ITEMS[id].tier;
+      seen.set(key, (seen.get(key) || 0) + 1);
+    }
+  }
+  for (const it of table.items) {
+    const got = (seen.get(it.gear ?? it.id) || 0) / KILLS;
+    assert.ok(Math.abs(got - it.chance) < it.chance * 0.1 + 0.002, `${it.gear ?? it.id}: ${got} of the kills, ${it.chance} promised`);
+  }
+  assert.equal(seen.size, table.items.length, 'nothing dropped that the table does not list');
 });
 
 test('loot: the King always leaves a piece of the top tier and potions; every piece of a tier can drop', () => {

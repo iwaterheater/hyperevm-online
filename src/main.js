@@ -15,7 +15,7 @@ import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf,
 import {
   TICK, ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, isSpell, ATTR_NAMES, xpNext, upgradeCost,
-  ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
+  ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor, lootTable,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
   CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK,
 } from './shared.js';
@@ -449,7 +449,7 @@ function makeMobView(ti, lvl) {
 
   scene.add(root);
   return {
-    root, skeleton, label, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
+    root, skeleton, label, type, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
     x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flags: 0, flash: 0, rise: 0, yaw: 0,
   };
 }
@@ -2285,6 +2285,48 @@ function updateBars() {
 }
 
 let xpSeen = null;   // the level and the experience the bar showed last, to tell when more has come in
+// What a monster leaves, as chips in its frame: the coins, the gear by tier, the potions - each with how often
+// (lootTable in src/shared.js has the odds the server plays by). Built when the target or its level changes.
+const percent = (chance) => { const p = chance * 100; return `${p >= 10 ? Math.round(p) : Number(p.toFixed(1))}%`; };
+// the same in the little room of a chip: whole percents, where there is at least one (the tooltip has the exact number)
+const roughly = (chance) => (chance >= 0.01 ? `${Math.round(chance * 100)}%` : percent(chance));
+// "Iron gear" - or, where the armour and the weapons of a tier are named differently, "Leather armour or Bronze weapon"
+function gearName(t) {
+  const tier = TIERS[t], arms = tier.arms[0].toUpperCase() + tier.arms.slice(1);
+  return arms === tier.name ? `${tier.name} gear` : `${tier.name} armour or ${arms} weapon`;
+}
+let dropsKey = '';
+function renderDrops(tv) {
+  const key = tv && !tv.cat ? `${tv.type}|${tv.lvl}` : '';
+  if (key === dropsKey) return;
+  dropsKey = key;
+  if (tipAnchor && $('tgDrops').contains(tipAnchor)) hideTip();   // the chip it described is about to go
+  if (!key) { $('tgDrops').replaceChildren(); return; }
+  const { gold, items } = lootTable(tv.type, tv.lvl), boss = tv.type === 'boss';
+  const whose = boss ? 'To every cat that wounded him' : 'To whoever strikes the last blow';
+  const chip = (icon, text, tip) => {
+    const node = el('span', 'loot');
+    node.append(icon, text);
+    tipOn(node, tip);
+    return node;
+  };
+  $('tgDrops').replaceChildren(
+    chip(el('i', 'coin'), `${gold[0]}–${gold[1]}`, () => [el('b', 'name', 'Gold'), el('div', 'kind', 'Every kill'),
+      el('div', '', `Coins worth ${gold[0]} to ${gold[1]} gold in all, left on the ground for whoever picks them up`)]),
+    ...items.map((it) => {
+      const often = `${percent(it.chance)} of kills`;
+      if (it.id) {
+        return chip(picture(itemIcon(it.id)), roughly(it.chance), () => [el('b', 'name', stackText(it.id, it.n)), el('div', 'kind', often), el('div', 'dim', whose)]);
+      }
+      const tier = TIERS[it.gear];
+      const node = chip(picture(itemIcon(`${tier.id}_body`)), roughly(it.chance), () => [el('b', 'name', gearName(it.gear)), el('div', 'kind', often),
+        el('div', '', 'One piece: a helmet, a body armour, gloves, boots, a shield or a weapon'), el('div', 'dim', whose)]);
+      node.classList.add('gear');
+      node.style.setProperty('--tint', css(tier.color));
+      return node;
+    }));
+}
+
 function updateHud() {
   const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
   say($('who'), names.get(myId) || 'Cat');
@@ -2352,22 +2394,21 @@ function updateHud() {
     skills.note = `${stats.sp} skill points: the Sage has ${n} ${n === 1 ? 'skill' : 'skills'} you can afford`;
   }
 
-  // target frame: name and level tinted by how dangerous the monster is for this player; a cat's by how it stands
+  // The target's frame: the level on a badge, the name - both tinted by how dangerous a monster is for this player, or
+  // by how a cat stands - what it is doing, and its health. How much health another has is shown by the bar alone,
+  // never in numbers. A monster's frame also tells what it leaves (renderDrops).
   const tv = mobViews.get(targetId) || others.get(targetId);
   $('target').style.display = tv ? 'block' : 'none';
   $('tgAttack').style.display = tv?.cat && !attacking ? 'inline-block' : 'none';
-  if (tv?.cat) {
-    $('tgName').textContent = `${tv.name} · ${CLASSES[tv.cls].name} ${tv.level}`;
-    $('tgName').style.color = PVP_COLORS[tv.st];
+  renderDrops(tv);
+  if (tv) {
+    const tint = tv.cat ? PVP_COLORS[tv.st] : threat(tv.lvl), ailing = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : '';
+    say($('tgLevel'), String(tv.cat ? tv.level : tv.lvl));
+    $('tgLevel').style.setProperty('--tint', tint);
+    say($('tgName'), tv.cat ? `${tv.name} · ${CLASSES[tv.cls].name}` : tv.def.name);
+    $('tgName').style.color = tint;
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
-    $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : PVP_TITLES[tv.st];
-  } else if (tv) {
-    $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
-    $('tgName').style.color = threat(tv.lvl);
-    $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
-    $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
+    say($('tgState'), ailing || (tv.cat ? PVP_TITLES[tv.st] : tv.def.calm ? 'Calm' : 'Hostile'));
   }
 
   const atSage = nearNpc(map, me, 'sage'), atTrader = nearNpc(map, me, 'trader');
