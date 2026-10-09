@@ -374,6 +374,10 @@
   #chatLog .sys { color: var(--teal); opacity: .85; }
   #chatLog b { color: var(--gold); }
   #chat.sys #chatLog div:not(.sys) { display: none; }   /* the System tab: what the game itself said */
+  /* the combat log - what this cat dealt and what it took - is the System tab's alone */
+  #chat:not(.sys) #chatLog .fight { display: none; }
+  #chatLog .fight.out { color: #ffe9a6; }
+  #chatLog .fight.in { color: #ffb3c4; }
   #chatRow { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); pointer-events: auto; }
   #chatRow svg { flex: none; width: 20px; height: 20px; fill: #e8fffa; }
   #chatInput { flex: 1; min-width: 0; padding: 4px 0; font: inherit; color: #fff; background: none; border: 0; outline: none; }

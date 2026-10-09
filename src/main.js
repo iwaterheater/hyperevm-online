@@ -251,6 +251,14 @@ function sfx(freq, dur = 0.1, type = 'square', vol = 0.06, slide = 0) {
   o.start(t); o.stop(t + dur);
 }
 
+// A sound of something that happens at a place in the world: as loud as it is near. Beside the cat it is as loud as
+// it is made; it fades with the distance and is gone HEAR_FAR units away - nobody hears a fight across the island.
+const HEAR_NEAR = 5, HEAR_FAR = 30;
+function sfxAt(x, z, freq, dur, type, vol = 0.06, slide = 0) {
+  const near = 1 - (Math.hypot(x - me.x, z - me.z) - HEAR_NEAR) / (HEAR_FAR - HEAR_NEAR);
+  if (near > 0) sfx(freq, dur, type, vol * Math.min(1, near) ** 2, slide);
+}
+
 // ---------------------------------------------------------------- pools & particles
 
 function makePool(create) {
@@ -509,9 +517,11 @@ function banner(text) {
   bannerTimer = setTimeout(() => $('banner').classList.remove('on'), 2000);
 }
 
-function chatLine(name, text, sys) {
+// sys: said by the game, not by a player. kind: 'out' and 'in' are the lines of the combat log - what this cat dealt and
+// what it took - which only the System tab shows.
+function chatLine(name, text, sys, kind = '') {
   const div = document.createElement('div');
-  if (sys) div.className = 'sys';
+  if (sys) div.className = kind ? `sys fight ${kind}` : 'sys';
   if (name) {
     const b = document.createElement('b');
     b.textContent = `${name}: `;
@@ -520,7 +530,10 @@ function chatLine(name, text, sys) {
   div.append(text);
   const log = $('chatLog');
   log.append(div);
-  while (log.children.length > 40) log.firstChild.remove();   // more than both tabs can show
+  // Each kind keeps its own last lines, more than a tab can show: a fight writes many, and must not push what the
+  // players said, or what was looted, out of the log.
+  const same = log.querySelectorAll(kind ? '.fight' : sys ? '.sys:not(.fight)' : 'div:not(.sys)');
+  for (let i = 0; i < same.length - 30; i++) same[i].remove();
 }
 
 // What is written on the chat's line goes out; either way the keyboard is the game's again.
@@ -684,6 +697,8 @@ function onSnapshot(s) {
   online = s.n;
   const wasDead = stats.dead;
   Object.assign(stats, s.me, { dead: !!s.me.dead });
+  // this cat's own name stands over its head as everyone else's does, in the colour the others see it in
+  setLabel(me, `${names.get(myId) || 'Cat'} · ${CLASSES[s.me.cls]?.name ?? ''} ${s.me.level}`, PVP_COLORS[s.me.st] ?? PVP_COLORS[0]);
   setLook(me, stats.cls, lookCode(stats.eq));
   sheet = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, Object.fromEntries(stats.buffs.map(([stat, , mult]) => [stat, mult])), stats.eq);
   if (stats.dead !== wasDead) $('dead').classList.toggle('hidden', !stats.dead);
@@ -749,6 +764,11 @@ function spawnBolt(x, z, id, kind, skill, h = 1.1) {
   bullets.push(b);
 }
 
+// The combat log: a line in the System tab for every blow this cat deals (out) and takes (in), monsters and cats alike.
+const fightLine = (kind, text) => chatLine('', text, true, kind);
+const amount = (ev) => `${Math.max(1, Math.round(ev.d))}${ev.c ? ' (critical)' : ''}`;
+const nameOf = (v) => (!v ? 'it' : v.skeleton ? v.def.name : v.name);   // a monster's view, or another cat's
+
 function onEvent(ev) {
   switch (ev.k) {
     case 'shot':   // an archer's arrow from an auto-attack
@@ -768,7 +788,7 @@ function onEvent(ev) {
       if (!k || !a) break;
       if (k.kind === 'strike') {
         if (ev.o !== myId) Object.assign(a, { swingT: 0, swingDur: SWING_DEFAULT, swingKind: 2 });
-        sfx(240, 0.14, 'sawtooth', 0.05, 300);
+        sfxAt(a.x, a.z, 240, 0.14, 'sawtooth', 0.05, 300);
       } else if (k.kind === 'shot' || k.kind === 'bolt') {
         // a spell leaves the crystal of the staff, when the cat holds one
         if (a.cat.castPoint(boltFrom)) {
@@ -776,11 +796,11 @@ function onEvent(ev) {
           spawnBolt(boltFrom.x, boltFrom.z, ev.tid, k.fx, ev.s, boltFrom.y - groundY(boltFrom.x, boltFrom.z));
         } else spawnBolt(a.x, a.z, ev.tid, k.fx, ev.s);
         a.shootPose = 0.25;
-        sfx(660, 0.12, 'square', 0.04, -400);
+        sfxAt(a.x, a.z, 660, 0.12, 'square', 0.04, -400);
       } else if (k.kind === 'ground') {
-        sfx(900, k.delay, 'sawtooth', 0.04, -700);
+        sfxAt(a.x, a.z, 900, k.delay, 'sawtooth', 0.04, -700);
       } else if (k.kind === 'heal' || k.kind === 'buff' || k.kind === 'taunt' || k.kind === 'revive') {
-        sfx(k.kind === 'taunt' ? 150 : 520, 0.35, 'triangle', 0.07, 300);
+        sfxAt(a.x, a.z, k.kind === 'taunt' ? 150 : 520, 0.35, 'triangle', 0.07, 300);
       } else if (k.kind === 'dash' && ev.o !== myId) {
         burst(a.x, 1, a.z, TEAL, 14, 6);
       }
@@ -791,41 +811,46 @@ function onEvent(ev) {
       fx.boom(ev.x, ev.z, ev.r);
       burst(ev.x, 0.5, ev.z, FIRE, 45, 12);
       if (Math.hypot(ev.x - me.x, ev.z - me.z) < 25) shake = Math.max(shake, 0.5);
-      sfx(70, 0.5, 'sawtooth', 0.12, -40);
+      sfxAt(ev.x, ev.z, 70, 0.5, 'sawtooth', 0.12, -40);
       break;
     case 'orb': {   // a monster lets its spell go; the snapshot that brought this has put the fireball into the world
       const v = orbViews.get(ev.id);
       if (v) { v.vx = ev.vx; v.vz = ev.vz; }
       burst(ev.x, 1.1, ev.z, FIRE, 6, 4);
-      if (Math.hypot(ev.x - me.x, ev.z - me.z) < 30) sfx(300, 0.18, 'sawtooth', 0.03, -160);
+      sfxAt(ev.x, ev.z, 300, 0.18, 'sawtooth', 0.03, -160);
       break;
     }
     case 'orbx':    // it burst on a cat, or burnt out
       fx.hit('fire', ev.x, 1, ev.z, ev.h ? 1 : 0.3);
-      if (ev.h && Math.hypot(ev.x - me.x, ev.z - me.z) < 30) sfx(110, 0.25, 'sawtooth', 0.06, -50);
+      if (ev.h) sfxAt(ev.x, ev.z, 110, 0.25, 'sawtooth', 0.06, -50);
       break;
     case 'hit': {   // a blow that landed, on a monster or on a cat
       const v = viewOf(ev.id);
       if (v?.skeleton) { v.flash = 1; v.skeleton.hit(); burst(ev.x, v.top * 0.6, ev.z, v.def.draw ? v.def.color : BONE, 4, 5); }
       else if (v && v !== me) burst(ev.x, v.y + 1, ev.z, 0xff4d7a, 8, 5);   // this cat's own wounds are shown by 'hurt'
-      if (ev.o === myId) floatText(ev.x, (v ? v.top : 2) + 0.5, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
-      sfx(520, 0.05, 'square', 0.025);
+      if (ev.o === myId) {
+        floatText(ev.x, (v ? v.top : 2) + 0.5, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
+        fightLine('out', `You hit ${nameOf(v)} for ${amount(ev)}`);
+      }
+      sfxAt(ev.x, ev.z, 520, 0.05, 'square', 0.025);
       break;
     }
     case 'miss': {   // this player's attack missed (Accuracy against the target's Evasion)
       const v = viewOf(ev.id);
-      if (v && ev.o === myId) floatText(v.x, v.top + 0.5, v.z, 'Miss', '#aab4b8');
+      if (v && ev.o === myId) { floatText(v.x, v.top + 0.5, v.z, 'Miss', '#aab4b8'); fightLine('out', `You miss ${nameOf(v)}`); }
+      else if (ev.id === myId) fightLine('in', `${names.get(ev.o) || 'A cat'} misses you`);
       break;
     }
     case 'dodge':
       floatText(me.x, 3.3, me.z, 'Dodge', '#a9d8ff');
+      fightLine('in', `You dodge ${MOB_TYPES[MOB_KEYS[ev.ti]]?.name ?? 'a monster'}`);
       break;
     case 'rise': {   // a monster is back: it comes out of the ground at its home
       const v = mobViews.get(ev.id);
       if (!v) break;
       v.rise = MOB_RISE;
       fx.mobRise(ev.x, ev.z, v.def.r, MOB_RISE, v.def === MOB_TYPES.boss);
-      if (Math.hypot(ev.x - me.x, ev.z - me.z) < 30) sfx(90, 0.6, 'sawtooth', 0.04, 60);
+      sfxAt(ev.x, ev.z, 90, 0.6, 'sawtooth', 0.04, 60);
       break;
     }
     case 'atk': {   // a monster starts its blow, or (c) gathers a spell: both land when the wind-up is over
@@ -839,8 +864,12 @@ function onEvent(ev) {
     case 'kill': {
       const r = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].r : 0.7;
       burst(ev.x, r * 1.5, ev.z, ev.ti < 0 ? 0xffffff : MOB_TYPES[MOB_KEYS[ev.ti]].draw ? MOB_TYPES[MOB_KEYS[ev.ti]].color : BONE, 16 + r * 14, 8);
-      if (ev.o === myId && ev.d) floatText(ev.x, r * 3 + 1.2, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
-      sfx(180, 0.18, 'sawtooth', 0.05, -120);
+      if (ev.o === myId && ev.d) {   // the last blow was this cat's
+        floatText(ev.x, r * 3 + 1.2, ev.z, String(Math.max(1, Math.round(ev.d))), ev.c ? '#ffd76a' : '#ffffff', ev.c);
+        const who = ev.ti >= 0 ? MOB_TYPES[MOB_KEYS[ev.ti]].name : names.get(ev.v) || 'a cat';
+        fightLine('out', `You hit ${who} for ${amount(ev)} and bring it down`);
+      }
+      sfxAt(ev.x, ev.z, 180, 0.18, 'sawtooth', 0.05, -120);
       break;
     }
     case 'lvlfx':
@@ -881,7 +910,7 @@ function onEvent(ev) {
       const c = map.chests[ev.i];
       if (!c) break;
       burst(c.x, 1.2, c.z, 0xffd76a, c.big ? 60 : 24, 7);
-      sfx(520, 0.25, 'triangle', 0.07, 520);
+      sfxAt(c.x, c.z, 520, 0.25, 'triangle', 0.07, 520);
       break;
     }
     case 'chest':
@@ -919,6 +948,8 @@ function onEvent(ev) {
       sfx(1200, 0.08, 'sine', 0.05, 600);
       break;
     case 'hurt':
+      // by a monster (ti says which kind) or by another cat (o); a play-tester's old server says neither
+      if (ev.d) fightLine('in', `${ev.o ? names.get(ev.o) || 'A cat' : MOB_TYPES[MOB_KEYS[ev.ti]]?.name ?? 'A monster'} hits you for ${amount(ev)}`);
       if (!targetId) setTarget(others.has(ev.o) ? ev.o : nearbyMobs(6)[0] || 0, false);   // being hit selects the attacker
       me.sitting = false;
       local.invuln = 0.5;
@@ -1015,12 +1046,13 @@ function nextTarget() {
   if (list.length) setTarget(list[(list.indexOf(targetId) + 1) % list.length], false);
 }
 
+// The attack slot of the bar: starts and stops the attack on the target the player has chosen. It never chooses one -
+// that is what a click and Tab are for.
 function attackKey() {
-  if (!targetId) setTarget(nearbyMobs(26)[0] || 0, true);
-  else if (attacking) attacking = false;
+  if (!targetId) { notice('Select a target first'); return; }
+  if (attacking) attacking = false;
   else setTarget(targetId, true, keys.has('ControlLeft') || keys.has('ControlRight'));
-  if (!targetId) notice('No monsters nearby');
-  else if (attacking) me.sitting = false;
+  if (attacking) me.sitting = false;
 }
 
 addEventListener('keydown', (e) => {

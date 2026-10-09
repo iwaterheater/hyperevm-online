@@ -810,13 +810,15 @@ function applyEffects(m, fx, p) {
 // A monster's attack on a player: physical blows can be dodged and are reduced by P.Def, spells by M.Def.
 function hurtPlayer(p, m, magic) {
   if (p.god || p.dead || now < p.dashUntil || now < p.invulnUntil) return;
-  if (!magic && Math.random() > hitChance(m.acc, p.st.eva)) { p.events.push({ k: 'dodge' }); return; }
-  p.hp -= mitigate(m.pAtk, magic ? p.st.mDef : p.st.pDef);
+  // ti: which kind of monster it was, for the line in the player's combat log
+  if (!magic && Math.random() > hitChance(m.acc, p.st.eva)) { p.events.push({ k: 'dodge', ti: m.ti }); return; }
+  const dmg = mitigate(m.pAtk, magic ? p.st.mDef : p.st.pDef);
+  p.hp -= dmg;
   p.hurtAt = now;
   p.sit = false;
   p.sleepUntil = 0;   // any damage wakes a sleeping cat
   p.invulnUntil = now + 0.5;
-  p.events.push({ k: 'hurt' });
+  p.events.push({ k: 'hurt', ti: m.ti, d: r2(dmg) });
   if (p.hp <= 0) die(p);
 }
 
@@ -834,7 +836,7 @@ function die(q, by = null, ev = {}) {
   Object.assign(q, { flagUntil: 0, stunUntil: 0, sleepUntil: 0, slowUntil: 0, dot: null });
   if (state === PVP_OUTLAW) q.karma = Math.max(0, q.karma - KARMA_DEATH);
   q.events.push(by ? { k: 'died', xp: lost, by: by.name } : { k: 'died', xp: lost });
-  emit({ k: 'kill', ...ev, id: 0, x: r2(q.x), z: r2(q.z), ti: -1 }, q.x, q.z);
+  emit({ k: 'kill', ...ev, id: 0, v: q.id, x: r2(q.x), z: r2(q.z), ti: -1 }, q.x, q.z);   // v: the cat that fell
   if (!by) { broadcast({ t: 'c', sys: 1, m: `${q.name} was slain` }); return; }
   const murder = state === PVP_PEACE;
   if (murder) {
@@ -880,7 +882,7 @@ function strikePlayer(q, hit, p) {
   q.hurtAt = now;
   q.sit = false;
   q.sleepUntil = 0;
-  q.events.push({ k: 'hurt', o: p.id });
+  q.events.push({ k: 'hurt', o: p.id, d: r2(dmg), c: hit.crit ? 1 : 0 });
   const ev = { x: r2(q.x), z: r2(q.z), o: p.id, d: r2(dmg), c: hit.crit ? 1 : 0 };
   if (q.hp > 0) emit({ k: 'hit', id: q.id, ...ev }, q.x, q.z);
   else die(q, p, ev);

@@ -156,17 +156,21 @@ test('bots at large: both walk out to the camp and hunt, and the murderer brings
   await until('both in the world', () => lamb.me && fang.me, 20000);
   assert.deepEqual([lamb.me.level, fang.me.level, fang.eq.weapon], [2, 6, 'iron_sword']);
   // on the way they never stand where a player could not
-  let strayed = 0;
-  const watch = setInterval(() => { for (const b of [lamb, fang]) if (b.me && !b.me.dead && isBlocked(map, b.pos.x, b.pos.z)) strayed++; }, 200);
-  await until('the murder', () => lines.includes('Lamb was murdered by Fang'), 150000);
-  clearInterval(watch);
-  assert.equal(strayed, 0);
-  await until('the count', () => fang.me.pk === 1 && fang.me.karma > 0, 5000);
-  assert.ok(!isSafe(map, fang.pos.x, fang.pos.z), 'out in the field');
-  assert.ok(fang.me.xp > 0 || lamb.me.xp > 0 || fang.me.gold !== 240, 'somebody found a monster first');
-  // the murderer goes on hunting, and stays the size its roster line says: what it kills teaches it, but it does not grow
-  await until('a monster down', () => fang.me.sp > 0, 90000);
-  assert.deepEqual([fang.me.level, fang.me.xp], [6, 0]);
-  listen.close();
-  lambs.stop(); wolves.stop();
+  let strayed = 0, watch = null;
+  try {
+    watch = setInterval(() => { for (const b of [lamb, fang]) if (b.me && !b.me.dead && isBlocked(map, b.pos.x, b.pos.z)) strayed++; }, 200);
+    // murdered if it fell before it could raise a paw, defeated if it got a blow in: it does not run either way
+    await until('the fall of the lamb', () => lines.some((line) => /^Lamb was (murdered|defeated) by Fang$/.test(line)), 150000);
+    assert.equal(strayed, 0);
+    await until('the count', () => fang.me.pk + fang.me.pvp === 1 && (fang.me.pk === 1) === (fang.me.karma > 0), 5000);
+    assert.ok(!isSafe(map, fang.pos.x, fang.pos.z), 'out in the field');
+    assert.ok(fang.me.xp > 0 || lamb.me.xp > 0 || fang.me.gold !== 240, 'somebody found a monster first');
+    // the murderer goes on hunting, and stays the size its roster line says: what it kills teaches it, but it does not grow
+    await until('a monster down', () => fang.me.sp > 0, 90000);
+    assert.deepEqual([fang.me.level, fang.me.xp], [6, 0]);
+  } finally {   // whatever happened, nothing of this test keeps the process alive
+    clearInterval(watch);
+    listen.close();
+    lambs.stop(); wolves.stop();
+  }
 });

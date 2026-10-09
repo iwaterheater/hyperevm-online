@@ -19,7 +19,9 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 //   aggro  'pk'    attacks cats that have done nothing to it, and kills them: a murderer, soon an outlaw
 //          'duel'  challenges cats of about its level and lets go of one that will not fight; hunts outlaws
 //          'guard' attacks outlaws only
-//   brave  fights back when another cat attacks it (the others run for the town)
+//   brave  how it fights back when another cat attacks it: a brave one at once, whoever it is; the others too - nobody
+//          runs from a fight, and a weak cat that is attacked goes down fighting - but those take a moment longer to
+//          believe it
 //   reach  how many levels above its own a cat may be and still be attacked
 export const ROLES = {
   farmer:   { aggro: null,    brave: false, reach: 0 },
@@ -221,8 +223,9 @@ export class Bot {
     // 1. another cat has attacked
     const by = this.hurtBy && this.t - this.hurtBy.at < 12 ? this.cats.get(this.hurtBy.id) : null;
     if (by && !by.dead && !safe && this.foe !== by.id) {
-      if ((this.role.brave || by.level <= me.level - 3) && this.hp > 0.3) this.startFight(by.id, false);
-      else return this.flee();
+      // Nobody runs from another cat: the weak ones hit back too, and lose. That is what makes a fight of it.
+      this.startFight(by.id, false);
+      if (!this.role.brave && by.level > me.level) this.pause += rand(0.3, 0.8);
     }
     // 2. the fight it is in
     if (this.foe) {
@@ -232,7 +235,6 @@ export class Bot {
       const spared = c && this.duel && !this.foeHitBack && c.st === PVP_PEACE && c.hp / c.maxHp < 0.4;
       if (spared) this.world.say(this, 'spare', 0.8);
       if (over || spared) { this.grudges.set(this.foe, this.t + rand(240, 420)); this.endFight(); }
-      else if (this.hp < 0.2 && !this.count('hp')) return this.flee();
       else return { fight: this.foe };
     }
     // 3. too hurt to go on: back to safety

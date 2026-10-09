@@ -396,8 +396,8 @@ other cats:
 
 | Role | Towards other cats |
 | --- | --- |
-| `farmer` | Peaceful; runs for the town when attacked |
-| `veteran` | Peaceful, but fights back |
+| `farmer` | Peaceful; fights back when attacked, to the end - and, small as it is, mostly loses |
+| `veteran` | Peaceful, and quick to fight back |
 | `guard` | Hunts outlaws, and nobody else |
 | `duelist` | Challenges cats of about its level, and lets go of one that will not fight; hunts outlaws |
 | `pk` | Attacks cats from four levels below its own to two above, and kills them: a murderer with a red name, until it has worked its karma off |

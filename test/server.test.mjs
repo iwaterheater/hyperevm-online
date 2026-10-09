@@ -1664,7 +1664,7 @@ check('pvp: an attack flags the attacker, and beating a cat that fought back is 
     assert.deepEqual([weak.me.xp, weak.me.pvp, weak.me.pk], [50, 0, 0]);
     await strong.c.take('c', (m) => m.sys && m.m === 'Weak was defeated by Strong');
     // the one that was hit is told by whom, so that its client can turn to face the attacker
-    assert.ok(weak.events.some((ev) => ev.k === 'hurt' && ev.o === strong.w.id));
+    assert.ok(weak.events.some((ev) => ev.k === 'hurt' && ev.o === strong.w.id && ev.d > 0), 'and how hard: a line for its combat log');
     await strong.settled();
   });
   const file = savedPlayers(s);
