@@ -8,7 +8,8 @@ import { WebSocketServer } from 'ws';
 import {
   TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R, RESPAWN_MULT, MOB_RISE,
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
-  mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS, upgradeCost,
+  mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS,
+  ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, enchant, smithFee, takeOff, wornPlus, plusOf, itemName,
   PVP_FLAG, PVP_DAMAGE, KARMA_DEATH, CAT_R, karmaGain, karmaBurn, PVP_PEACE, PVP_FLAGGED, PVP_OUTLAW,
   TIERS, WEAPON_FAMILIES, weaponFamily, tierForLevel,
   ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, KNIGHT_SHIELD, stackMax, sellPrice, heldFamily, fightStyle, equipError, wearItem, roomFor, addItem, takeItem,
@@ -1383,13 +1384,26 @@ const handlers = {
     emit({ k: 'lvlfx', x: r2(p.x), z: r2(p.z) }, p.x, p.z);
     broadcast({ t: 'c', sys: 1, m: `${p.name} is now a ${c.name}` });
   },
-  b(p) {        // buy a weapon upgrade from a blacksmith
-    const cost = upgradeCost(p.weapon);
-    if (p.dead || !nearNpc(map, p, 'blacksmith', SHOP_RANGE) || p.gold < cost) return;
-    p.gold -= cost;
-    p.weapon++;
-    refresh(p);
-    p.events.push({ k: 'up', weapon: p.weapon });
+  // Enchant the weapon in the paw with a Scroll: Enchant Weapon from the bag (the rules are told in shared.js). With
+  // `smith` the Blacksmith does it: he has to be near, and takes his fee - the scroll is needed all the same.
+  ench(p, msg) {
+    const stack = stackOf(p, msg), smith = !!msg.smith, plus = wornPlus(p.equip), fee = smith ? smithFee(plus) : 0;
+    if (!stack || stack[0] !== ENCHANT_SCROLL) return;
+    if (p.dead) { refuse(p, DEAD); return; }
+    if (ITEMS[p.equip.weapon]?.slot !== 'weapon') { refuse(p, 'Hold the weapon you want to enchant'); return; }
+    if (plus >= ENCHANT_MAX) { refuse(p, `${itemName(p.equip.weapon, plus)} cannot be enchanted any further`); return; }
+    if (smith && !nearNpc(map, p, 'blacksmith', SHOP_RANGE)) { refuse(p, 'The Blacksmith is too far away'); return; }
+    if (p.gold < fee) { refuse(p, `The Blacksmith asks ${fee} gold`); return; }
+    takeItem(p.inv, msg.i, 1);
+    p.gold -= fee;
+    const done = enchant(p.equip, Math.random(), smith);
+    bagChanged(p);
+    p.events.push({ k: 'ench', ok: done.ok ? 1 : 0, id: done.id, plus: done.plus });
+    emit({ k: 'enchfx', ok: done.ok ? 1 : 0, x: r2(p.x), z: r2(p.z) }, p.x, p.z);
+    // what is worth telling the world: a weapon past the easy steps, made or lost
+    if (done.plus >= ENCHANT_SAFE + 4) {
+      broadcast({ t: 'c', sys: 1, m: done.ok ? `${p.name}'s ${ITEMS[done.id].name} shines at +${done.plus}` : `${p.name}'s ${itemName(done.id, done.plus)} has shattered` });
+    }
   },
   eq(p, msg) {   // wear an item from the bag; what was in its slot, and what it pushes off the other paw, goes into the bag
     const stack = stackOf(p, msg);
@@ -1402,8 +1416,7 @@ const handlers = {
     const slot = EQUIP_SLOTS.includes(msg.slot) ? msg.slot : '', id = slot && p.equip[slot];
     if (!id) return;
     if (p.dead) { refuse(p, DEAD); return; }
-    if (!addItem(p.inv, id, 1)) { refuse(p, 'Your bag is full'); return; }
-    p.equip[slot] = null;
+    if (!takeOff(p.inv, p.equip, slot)) { refuse(p, 'Your bag is full'); return; }
     bagChanged(p);
   },
   use(p, msg) {   // drink a potion
@@ -1493,9 +1506,24 @@ function botCharacter(start) {
   const equip = { weapon: `${tier.arms}_${family}`, head: `${tier.id}_head`, body: `${tier.id}_body` };
   if (below) Object.assign(equip, { hands: `${below.id}_hands`, feet: `${below.id}_feet` });
   return {
-    cls, level, xp: 0, sp: 0, skills, gold: 40 * level, weapon: 1 + Math.floor(level / 5), equip,
+    cls, level, xp: 0, sp: 0, skills, gold: 40 * level, weapon: 1, equip: { ...equip, plus: Math.min(ENCHANT_SAFE, Math.floor(level / 5)) },
     inv: [[level >= 10 ? 'hp_large' : 'hp_small', 5], ['mp_small', 3]],
   };
+}
+
+// A character from the time before enchanting brings the Blacksmith's upgrades it paid for along, as the enchantment
+// of its weapon: five steps for an upgrade, which is what one was worth. The weapon in its paw gets them, else the
+// first one in its bag; a cat that owns no weapon keeps the upgrade until it comes back with one.
+function forgeToEnchant(p) {
+  if (!(p.weapon > 1)) return;
+  const plus = Math.min(ENCHANT_MAX, 5 * (p.weapon - 1));
+  if (ITEMS[p.equip.weapon]?.slot === 'weapon') p.equip.plus = Math.max(wornPlus(p.equip), plus);
+  else {
+    const stack = p.inv.find((s) => ITEMS[s[0]].slot === 'weapon');
+    if (!stack) return;
+    stack[2] = Math.max(plusOf(stack), plus);
+  }
+  p.weapon = 1;
 }
 
 // Where a joining player appears: the point a trusted client names, else somewhere in the start disc.
@@ -1582,6 +1610,7 @@ function join(ws, msg, conn) {
     cap: conn.local && msg.bot && typeof msg.bot === 'object' ? Math.max(0, Math.min(40, Math.round(num(msg.bot.cap)))) : 0,
     lastMoveAt: now, graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
   };
+  if (!test) forgeToEnchant(p);
   grantFree(p);
   // A character without a saved bar - a new one, or one from before the game had the bar - gets its skills and potions
   // laid out as the keys 1 - 8 and Q / E used to have them.

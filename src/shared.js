@@ -300,7 +300,7 @@ export const BONUS_KEYS = ['pAtk', 'mAtk', 'pDef', 'mDef', 'acc', 'crit', 'speed
 export const BONUS_NAMES = { pAtk: 'P. Atk', mAtk: 'M. Atk', pDef: 'P. Def', mDef: 'M. Def', acc: 'Accuracy', crit: 'Critical', speed: 'Speed' };
 
 // Every item of the game, by id.
-//   kind: weapon | shield | armor | potion     slot: where it is worn (gear only)     family, hands: the weapon family and
+//   kind: weapon | shield | armor | potion | scroll     slot: where it is worn (gear only)     family, hands: the weapon family and
 //   tier: index into TIERS (gear)              lvl: level needed to wear it           how many paws it takes (weapons only)
 //   bonus: what it adds while worn             hp / mp: what a potion restores        price: what the Trader asks for it
 export const ITEMS = {
@@ -308,6 +308,7 @@ export const ITEMS = {
   hp_large: { name: 'Health Potion',        kind: 'potion', hp: 250, price: 40 },
   mp_small: { name: 'Lesser Mana Potion',   kind: 'potion', mp: 50,  price: 12 },
   mp_large: { name: 'Mana Potion',          kind: 'potion', mp: 160, price: 40 },
+  scroll_weapon: { name: 'Scroll: Enchant Weapon', kind: 'scroll', price: 150 },
 };
 TIERS.forEach((tier, t) => {
   const bonusOf = (row) => Object.fromEntries(BONUS_KEYS.filter((k) => row[k]).map((k) => [k, row[k][t]]));
@@ -324,16 +325,35 @@ export const ITEM_KEYS = Object.keys(ITEMS);
 export const itemOf = (id) => (typeof id === 'string' && Object.hasOwn(ITEMS, id) ? ITEMS[id] : undefined);
 
 export const BAG_SIZE = 30;       // stacks a bag holds
-export const STACK_MAX = 99;      // potions in one stack; gear does not stack
+export const STACK_MAX = 99;      // potions or scrolls in one stack; gear does not stack
 export const POTION_CD = 6;       // seconds before the next potion of any kind
 export const SELL_RATE = 0.3;     // the share of its price the Trader pays for an item
 export const SHOP_TIER = 1;       // the best tier the Trader sells; better gear is only found
 export const STARTER_KIT = [['hp_small', 5]];   // what a new character has in its bag
 export const KNIGHT_SHIELD = `${TIERS[0].id}_shield`;   // what a Knight is handed with his profession, once
-export const stackMax = (id) => (ITEMS[id].kind === 'potion' ? STACK_MAX : 1);
+export const stackMax = (id) => (ITEMS[id].slot ? 1 : STACK_MAX);   // gear does not stack; potions and scrolls do
 export const sellPrice = (id) => Math.max(1, Math.floor(ITEMS[id].price * SELL_RATE));
 // What the Trader sells, in the order of his list.
-export const SHOP = ITEM_KEYS.filter((id) => ITEMS[id].kind === 'potion' || ITEMS[id].tier <= SHOP_TIER);
+export const SHOP = ITEM_KEYS.filter((id) => ITEMS[id].kind === 'potion' || ITEMS[id].kind === 'scroll' || ITEMS[id].tier <= SHOP_TIER);
+
+// ---- enchanting, by the rules of Lineage II. A Scroll: Enchant Weapon raises the weapon in the paw by one, up to
+// +ENCHANT_MAX. The first ENCHANT_SAFE steps always succeed. Every step after them succeeds two times in three - and
+// when it fails, the weapon breaks and is gone. The scroll is spent either way. The Blacksmith does it with a steadier
+// hand, for a fee: SMITH_BONUS more chance; he needs the scroll too.
+// The enchantment belongs to the weapon, not to the cat: a weapon in the bag is the stack [id, 1, plus], the one in
+// the paw has its number in equip.plus. Every step adds ENCHANT_POWER of the weapon's attack (see statsOf).
+export const ENCHANT_SCROLL = 'scroll_weapon';
+export const ENCHANT_MAX = 30, ENCHANT_SAFE = 3, ENCHANT_POWER = 0.08, SMITH_BONUS = 0.1;
+export const enchantChance = (plus, atSmith = false) => (plus < ENCHANT_SAFE ? 1 : Math.min(1, 2 / 3 + (atSmith ? SMITH_BONUS : 0)));
+export const smithFee = (plus) => 20 * (plus + 1);
+// the enchantment of a stack of the bag, and of what is worn; 0 for what has none or cannot have one
+const cleanPlus = (id, plus) => (ITEMS[id]?.slot === 'weapon' && Number.isInteger(plus) && plus > 0 ? Math.min(plus, ENCHANT_MAX) : 0);
+export const plusOf = (stack) => (stack ? cleanPlus(stack[0], stack[2]) : 0);
+export const wornPlus = (equip) => cleanPlus(equip?.weapon, equip?.plus);
+// a stack of one piece of gear, with its enchantment when it has one
+const gearStack = (id, plus = 0) => (cleanPlus(id, plus) ? [id, 1, cleanPlus(id, plus)] : [id, 1]);
+// "+5 Iron Sword"
+export const itemName = (id, plus = 0) => `${cleanPlus(id, plus) ? `+${cleanPlus(id, plus)} ` : ''}${ITEMS[id].name}`;
 
 // The weapon a class starts with and holds while its weapon slot is empty.
 export const weaponFamily = (cls) => CLASSES[cls].weapon;
@@ -377,10 +397,17 @@ export function pushedOff(equip, id) {
 // What goes back into the bag when the item is put on: what is in its slot first, then what it pushes off.
 export const comesOff = (equip, id) => [ITEMS[id].slot, ...pushedOff(equip, id)].map((slot) => equip[slot]).filter(Boolean);
 // The equipment as it would be with the item on: a copy, for comparing the numbers before and after.
-export function equipWith(equip, id) {
+// `plus` is the enchantment of the item, when it is a weapon.
+export function equipWith(equip, id, plus = 0) {
   const next = { ...equip, [ITEMS[id].slot]: id };
   for (const slot of pushedOff(equip, id)) next[slot] = null;
+  setPlus(next, ITEMS[id].slot === 'weapon' ? plus : next.weapon ? wornPlus(equip) : 0);
   return next;
+}
+// equip.plus is there only while the weapon in the paw is enchanted
+function setPlus(equip, plus) {
+  if (cleanPlus(equip.weapon, plus)) equip.plus = cleanPlus(equip.weapon, plus);
+  else delete equip.plus;
 }
 // Why a piece of gear from the bag cannot be put on for want of room, as a line for the player; '' when it can. The
 // piece leaves its place to what comes off; only when two things come off (a two-handed weapon instead of a sword
@@ -393,14 +420,38 @@ export function wearError(inv, equip, id) {
 // Puts on the piece of gear that is the stack at index i of the bag: what was in its slot takes its place there, and
 // what it pushes off goes into the bag too. Nothing happens at all when that does not fit. -> '' when done, else
 // the reason.
+// A weapon keeps its enchantment on the way: from the bag into the paw, and from the paw back into the bag.
 export function wearItem(inv, equip, i) {
-  const id = inv[i][0], back = comesOff(equip, id), err = wearError(inv, equip, id);
+  const id = inv[i][0], plus = plusOf(inv[i]), back = comesOff(equip, id), err = wearError(inv, equip, id);
   if (err) return err;
+  const was = wornPlus(equip), stack = (item) => gearStack(item, was);   // only a weapon can have one: gearStack sees to that
+  const keeps = ITEMS[id].slot !== 'weapon' && !pushedOff(equip, id).includes('weapon');   // the weapon stays in the paw
   for (const slot of pushedOff(equip, id)) equip[slot] = null;
   equip[ITEMS[id].slot] = id;
-  inv.splice(i, 1, ...back.slice(0, 1).map((item) => [item, 1]));
-  for (const item of back.slice(1)) inv.push([item, 1]);
+  setPlus(equip, keeps ? was : plus);
+  inv.splice(i, 1, ...back.slice(0, 1).map(stack));
+  for (const item of back.slice(1)) inv.push(stack(item));
   return '';
+}
+// Takes what is worn in a slot off, into the bag; a weapon keeps its enchantment. -> false when the bag is full.
+export function takeOff(inv, equip, slot) {
+  const id = equip[slot];
+  if (!id || inv.length >= BAG_SIZE) return false;
+  inv.push(gearStack(id, slot === 'weapon' ? wornPlus(equip) : 0));
+  equip[slot] = null;
+  if (slot === 'weapon') delete equip.plus;
+  return true;
+}
+// One try with a scroll on the weapon in the paw: `luck` is a number from 0 to 1 (Math.random()). The weapon gains a
+// step, or breaks and leaves the paw empty. -> { ok, id, plus }: whether it held, which weapon, and the number it has
+// now (or had, when it broke); null when there is no weapon to enchant or it is at the top already.
+export function enchant(equip, luck, atSmith = false) {
+  const id = equip.weapon, plus = wornPlus(equip);
+  if (ITEMS[id]?.slot !== 'weapon' || plus >= ENCHANT_MAX) return null;
+  if (luck < enchantChance(plus, atSmith)) { equip.plus = plus + 1; return { ok: true, id, plus: plus + 1 }; }
+  equip.weapon = null;
+  delete equip.plus;
+  return { ok: false, id, plus };
 }
 
 // The sum of what the equipment adds, by bonus key. `equip` maps a slot to an item id (or null).
@@ -422,9 +473,15 @@ export function roomFor(inv, id, n = 1) {
   return Math.min(n, room);
 }
 // Puts up to `n` of an item into the bag - onto the stacks of its kind first - and returns how many went in.
-export function addItem(inv, id, n = 1) {
+// `plus`: the enchantment of a weapon that comes with one.
+export function addItem(inv, id, n = 1, plus = 0) {
   const max = stackMax(id);
   let left = n;
+  if (cleanPlus(id, plus)) {
+    if (inv.length >= BAG_SIZE) return 0;
+    inv.push(gearStack(id, plus));
+    return 1;
+  }
   for (const s of inv) {
     if (left <= 0) break;
     if (s[0] !== id || s[1] >= max) continue;
@@ -452,7 +509,7 @@ export function cleanBag(raw) {
   if (!Array.isArray(raw)) return inv;
   for (const s of raw) {
     if (!Array.isArray(s) || !itemOf(s[0]) || !Number.isInteger(s[1]) || s[1] < 1) continue;
-    addItem(inv, s[0], Math.min(s[1], STACK_MAX * BAG_SIZE));
+    addItem(inv, s[0], Math.min(s[1], STACK_MAX * BAG_SIZE), cleanPlus(s[0], s[2]));
   }
   return inv;
 }
@@ -460,6 +517,7 @@ export function cleanEquip(raw) {
   const equip = {};
   for (const slot of EQUIP_SLOTS) equip[slot] = raw && typeof raw === 'object' && worn(raw, slot) ? raw[slot] : null;
   if (ITEMS[equip.weapon]?.hands === 2) equip.offhand = null;   // no game puts a shield beside a two-handed weapon
+  setPlus(equip, raw?.plus);
   return equip;
 }
 
@@ -547,6 +605,7 @@ for (const [kind, def] of Object.entries(MOB_TYPES)) {
   GEAR_CHANCE[kind] ??= def.drops ? 0.2 : def.ai === 'shooter' ? 0.08 : def.speed > 4 ? 0.05 : 0.06;
 }
 export const POTION_CHANCE = 0.12;
+export const SCROLL_CHANCE = 0.03;   // that a monster leaves a Scroll: Enchant Weapon
 export const gearChance = (type, lvl) => Math.min(1, GEAR_CHANCE[type] * (1 + 0.04 * (lvl - 1)));
 // The best tier a character - or the loot of a monster - of this level can be.
 export const tierForLevel = (lvl) => TIERS.reduce((best, tier, t) => (lvl >= tier.lvl ? t : best), 0);
@@ -569,6 +628,7 @@ export function rollLoot(type, lvl, rnd = Math.random) {
     out.push([pickGear(t, rnd()), 1]);
   }
   if (boss || rnd() < POTION_CHANCE) out.push([pickPotion(lvl >= 8, rnd()), boss ? 3 : 1]);
+  if (boss || rnd() < SCROLL_CHANCE) out.push([ENCHANT_SCROLL, boss ? 2 : 1]);   // drawn last: what was rolled before it is as it was
   return out;
 }
 // What a treasure chest holds besides its gold: the richer the chest, the better. `big` is the King's hoard.
@@ -576,6 +636,7 @@ export function chestLoot(gold, big, rnd = Math.random) {
   const out = [], t = big ? TIERS.length - 1 : gold >= 80 ? 2 : gold >= 30 ? 1 : 0;
   if (rnd() < 0.4) out.push([pickPotion(t > 0, rnd()), rnd() < 0.3 ? 2 : 1]);
   if (rnd() < (big ? 0.5 : 0.1)) out.push([pickGear(t, rnd()), 1]);
+  if (rnd() < (big ? 1 : 0.08)) out.push([ENCHANT_SCROLL, 1]);
   return out;
 }
 
@@ -583,7 +644,7 @@ export function chestLoot(gold, big, rnd = Math.random) {
 
 // Every combat stat of a character, derived from its class attributes, level, weapon upgrade level, passive skills,
 // active buffs (`buffs` maps a stat name to a multiplier) and what it wears (`equip` maps a slot to an item id).
-// A weapon item adds to what the class's basic weapon gives, so the Blacksmith's upgrades multiply both.
+// A weapon item adds to what the class's basic weapon gives, so its enchantment multiplies both.
 //   STR -> P.Atk      DEX -> Atk.Spd (with the level and the weapon's tier), Accuracy, Evasion, Critical, Speed      CON -> HP
 //   INT -> M.Atk      WIT -> Casting Spd, M.Critical                         MEN -> M.Def, MP
 export const ATK_SPD_START = 0.6, ATK_SPD_TIER = 0.05;
@@ -599,7 +660,9 @@ export function statsOf(cls, level, learned = {}, weapon = 1, buffs = {}, equip 
     return v;
   };
   const buff = (stat) => buffs[stat] || 1;
-  const grade = 1 + 0.4 * (weapon - 1);          // the Blacksmith's upgrades
+  // `weapon` is the upgrade level of the time before enchanting - 1 for every character since; what makes a weapon
+  // stronger now is its enchantment
+  const grade = (1 + 0.4 * (weapon - 1)) * (1 + ENCHANT_POWER * wornPlus(equip));
   const atkLevel = 1 + 0.1 * (level - 1), defLevel = 1 + 0.05 * (level - 1);
   // How fast it attacks grows as the cat does: a beginner swings at ATK_SPD_START of the speed its class has at level
   // 40. And a better weapon is a quicker one: ATK_SPD_TIER more for every tier above the first.

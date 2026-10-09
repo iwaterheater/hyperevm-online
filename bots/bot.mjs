@@ -6,8 +6,8 @@
 // character over the grid of bots/nav.mjs, and never walks through what blocks a player.
 import {
   MOB_KEYS, MOB_TYPES, CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, activeSkills, statsOf, castTime, professionsOf,
-  ITEMS, itemOf, SHOP, SHOP_RANGE, BAG_SIZE, POTION_CD, upgradeCost, equipError, heldFamily, fightStyle, handsOf,
-  CAT_R, PVP_PEACE, PVP_OUTLAW,
+  ITEMS, itemOf, SHOP, SHOP_RANGE, BAG_SIZE, POTION_CD, equipError, heldFamily, fightStyle, handsOf,
+  CAT_R, PVP_PEACE, PVP_OUTLAW, ENCHANT_SCROLL, ENCHANT_SAFE, wornPlus,
 } from '../src/shared.js';
 import { isSafe } from '../src/map/format.js';
 
@@ -209,6 +209,12 @@ export class Bot {
       const i = want ? this.inv.findIndex(([id]) => ITEMS[id]?.[want]) : -1;
       if (i >= 0) { this.send({ t: 'use', i, id: this.inv[i][0] }); this.potionAt = this.t + POTION_CD + rand(0.2, 0.8); }
     }
+    // A scroll it has found goes onto its weapon at once, as long as nothing can go wrong; a murderer risks more.
+    const scroll = this.inv.findIndex(([id]) => id === ENCHANT_SCROLL), dare = this.role.aggro === 'pk' ? ENCHANT_SAFE + 3 : ENCHANT_SAFE;
+    if (scroll >= 0 && !this.foe && itemOf(this.eq.weapon) && wornPlus(this.eq) < dare && this.t >= (this.enchantAt ?? 0)) {
+      this.send({ t: 'ench', i: scroll, id: ENCHANT_SCROLL });
+      this.enchantAt = this.t + rand(3, 8);
+    }
     if (this.bagChanged && !this.foe) {
       this.bagChanged = false;
       const i = this.inv.findIndex(([id]) => this.better(id));
@@ -405,9 +411,6 @@ export class Bot {
     const gear = this.affordable().length > 0, potions = this.count('hp') < 2 && me.gold >= 40, full = this.inv.length >= BAG_SIZE - 5;
     if (gear || potions || full) visits.push('trader');
     if (this.learnable().length || (me.level >= PROFESSION_LEVEL && !CLASSES[me.cls].base)) visits.push('sage');
-    // the Blacksmith: on the way when it is in town anyway, and a trip of its own once the purse is heavy
-    const spare = me.gold - upgradeCost(me.weapon);
-    if (me.weapon < 2 + Math.floor(me.level / 3) && (spare >= 250 || (spare >= 80 && visits.length))) visits.push('blacksmith');
     if (!visits.length) return false;
     this.errand = { visits: visits.filter((kind) => this.npc(kind)), at: null };
     this.world.log(this, `goes to town: ${this.errand.visits.join(', ')}`, true);
@@ -442,7 +445,6 @@ export class Bot {
     this.todoAt = this.t + rand(0.8, 2);
     if (kind === 'trader') this.atTrader();
     else if (kind === 'sage') this.atSage();
-    else this.todo.push(() => { if (this.me.gold >= upgradeCost(this.me.weapon)) this.send({ t: 'b' }); });
     return {};
   }
 

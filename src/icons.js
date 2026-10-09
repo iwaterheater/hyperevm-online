@@ -5,8 +5,8 @@ import { SKILL_KEYS, itemOf } from './shared.js';
 // weapon family shares one picture; whoever draws the slot adds the colour of the tier.
 
 const BASE = './assets/icons';
-// the pictures of assets/icons/items: weapon families, armour slots, potions, and the basic attack
-const ITEM_ICONS = ['sword', 'greatsword', 'daggers', 'bow', 'staff', 'shield', 'head', 'body', 'hands', 'feet', 'hp_small', 'hp_large', 'mp_small', 'mp_large', 'attack'];
+// the pictures of assets/icons/items: weapon families, armour slots, potions, the enchant scroll, and the basic attack
+const ITEM_ICONS = ['sword', 'greatsword', 'daggers', 'bow', 'staff', 'shield', 'head', 'body', 'hands', 'feet', 'hp_small', 'hp_large', 'mp_small', 'mp_large', 'scroll', 'attack'];
 const SKILLS_WITH_ICON = new Set(SKILL_KEYS), ITEMS_WITH_ICON = new Set(ITEM_ICONS);
 
 // The picture of a skill; undefined for what is not a skill.

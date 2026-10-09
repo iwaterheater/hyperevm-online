@@ -14,7 +14,8 @@ import { SETTINGS_KEY, DEFAULT_SETTINGS, AUTO_STEPS, cleanSettings, lowered, pix
 import { normalize, regionAt, regionLabel, regionColor, isSafe, nearNpc, npcsOf, hasBoss, rayGround } from './map/format.js';
 import {
   TICK, ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
-  professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, isSpell, ATTR_NAMES, xpNext, upgradeCost,
+  professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, isSpell, ATTR_NAMES, xpNext,
+  ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, ENCHANT_POWER, enchantChance, smithFee, plusOf, wornPlus, itemName,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
   CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK,
@@ -880,7 +881,19 @@ function onEvent(ev) {
       banner(`Level ${ev.level}!`);
       sfx(523, 0.5, 'triangle', 0.09, 520);
       break;
-    case 'up':
+    case 'ench': {   // this cat's scroll has been used: the weapon holds its new number, or is gone
+      const text = ev.ok ? `${ITEMS[ev.id].name} is now +${ev.plus}` : `${itemName(ev.id, ev.plus)} has broken`;
+      banner(ev.ok ? `+${ev.plus} ${ITEMS[ev.id].name}` : 'The weapon broke!');
+      chatLine('', ev.ok ? `Enchanted: ${text}` : `The enchantment failed: ${text}`, true);
+      sfx(ev.ok ? 784 : 98, ev.ok ? 0.4 : 0.6, ev.ok ? 'triangle' : 'sawtooth', 0.09, ev.ok ? 600 : -40);
+      break;
+    }
+    case 'enchfx':   // somebody near has enchanted a weapon: light when it held, a burst when it broke
+      if (ev.ok) fx.levelUp(ev);
+      burst(ev.x, 1.4, ev.z, ev.ok ? 0xffd76a : 0xff5a5a, ev.ok ? 26 : 40, ev.ok ? 7 : 11);
+      sfxAt(ev.x, ev.z, ev.ok ? 1040 : 70, 0.25, ev.ok ? 'sine' : 'sawtooth', 0.04, ev.ok ? 400 : -30);
+      break;
+    case 'up':   // a server from before enchanting
       banner(`Weapon upgraded · Lv ${ev.weapon}`);
       sfx(660, 0.3, 'triangle', 0.08, 400);
       break;
@@ -1075,14 +1088,14 @@ addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); jump(); }
   if (e.code === 'Tab') nextTarget();
   if (e.code === 'Escape') {
-    if (settingsOpen) toggleSettings(false); else if (mapOpen) toggleMap(false); else if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
+    if (enchantOpen) toggleEnchant(false); else if (settingsOpen) toggleSettings(false); else if (mapOpen) toggleMap(false); else if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
     else if (bookOpen) toggleBook(false); else if (sheetOpen) toggleSheet(false);
     else setTarget(0, false);
   }
   if (e.code === 'KeyX' && !stats.dead && me.castT < 0) { me.sitting = !me.sitting; if (me.sitting) attacking = false; }
   if (e.code === 'KeyK') toggleBook();
   if (e.code === 'KeyC') toggleSheet();
-  if (e.code === 'KeyB') send({ t: 'b' });
+  if (e.code === 'KeyB') enchantKey();
   if (e.code === 'KeyI') toggleBag();
   if (e.code === 'KeyT') tradeKey();
   if (e.code === 'KeyH' || e.code === 'F1') toggleHelp();
@@ -1624,6 +1637,7 @@ function slotTip(i) {
   if (SKILLS[id]) return skillTip(id, [`Key ${key} or click to use it`, arrange]);
   const worn = !!it.slot && stats.eq[it.slot] === id;
   const use = it.kind === 'potion' ? `Key ${key} or click to drink one · ${bagCount(id)} in the bag`
+    : it.kind === 'scroll' ? `Key ${key} or click to enchant the weapon you hold · ${bagCount(id)} in the bag`
     : `Key ${key} or click to wear it; pressed again, it stays on`;
   return itemTip(id, [use, arrange], worn);
 }
@@ -1740,6 +1754,65 @@ $('mapLegend').append('Camps', ...[...THREAT].reverse().map(([, color, word]) =>
   item.style.setProperty('--tint', color);
   return item;
 }));
+// ---- enchanting: the window of a Scroll: Enchant Weapon. It opens from a scroll in the bag, or with B beside the
+// Blacksmith, and stays open: a click, a scroll, a step - or a broken weapon. The rules are told in shared.js.
+let enchantOpen = false, enchantShown = null;
+function toggleEnchant(open = !enchantOpen) {
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); toggleSettings(false); }
+  enchantOpen = open;
+  enchantShown = null;
+  $('enchant').classList.toggle('on', open);
+  if (open) renderEnchant();
+}
+function enchantKey() {
+  if (enchantOpen) toggleEnchant(false);
+  else if (nearNpc(map, me, 'blacksmith')) toggleEnchant(true);
+  else notice('The Blacksmith is not here: use a scroll from your bag');
+}
+function renderEnchant() {
+  // any other window takes its place
+  if (bagOpen || bookOpen || helpOpen || storeOpen || sheetOpen || settingsOpen || mapOpen) { toggleEnchant(false); return; }
+  const id = ITEMS[stats.eq.weapon] ? stats.eq.weapon : null, plus = wornPlus(stats.eq), scrolls = bagCount(ENCHANT_SCROLL);
+  const atSmith = nearNpc(map, me, 'blacksmith'), fee = smithFee(plus);
+  const key = [id, plus, scrolls, atSmith, stats.gold >= fee, stats.dead, sheet.pAtk, sheet.mAtk].join('|');
+  if (key === enchantShown) return;
+  enchantShown = key;
+  const line = (text, cls = '') => el('div', `line ${cls}`, text), percent = (chance) => `${Math.round(chance * 100)}%`;
+  const button = (label, enabled, onClick) => {
+    const b = el('button', '', label);
+    b.disabled = !enabled;
+    b.addEventListener('click', () => { onClick(); b.blur(); });
+    return b;
+  };
+  const close = button('Close', true, () => toggleEnchant(false)), out = [];
+  if (!id) out.push(line('Hold the weapon you want to enchant: put it on from your bag.'));
+  else {
+    const top = plus >= ENCHANT_MAX, chance = enchantChance(plus);
+    const what = el('div', 'what');
+    what.append(tile(id, 1, '', plus), el('span', '', top ? itemName(id, plus) : `${itemName(id, plus)}  →  +${plus + 1}`));
+    out.push(what);
+    if (top) out.push(line(`It cannot be enchanted any further: +${ENCHANT_MAX} is as far as a weapon goes.`, 'good'));
+    else {
+      const next = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), { ...stats.eq, plus: plus + 1 });
+      out.push(line(`P. Atk ${sheet.pAtk} → ${next.pAtk} · M. Atk ${sheet.mAtk} → ${next.mAtk}`));
+      out.push(chance >= 1 ? line(`Safe: up to +${ENCHANT_SAFE} it cannot fail.`, 'good')
+        : line(`Success ${percent(chance)}. If it fails, the weapon breaks and is lost.`, 'bad'));
+    }
+    out.push(line(scrolls ? `Scrolls in your bag: ${scrolls}` : 'You have no Scroll: Enchant Weapon. The Trader sells them, and monsters carry them.', scrolls ? 'dim' : 'bad'));
+    const use = (smith) => {
+      const i = stats.inv.findIndex((stack) => stack[0] === ENCHANT_SCROLL);
+      if (i >= 0) send({ t: 'ench', i, id: ENCHANT_SCROLL, smith: smith ? 1 : 0 });
+    };
+    const acts = el('div', 'acts'), can = scrolls > 0 && !top && !stats.dead;
+    acts.append(button('Enchant', can, () => use(false)));
+    // the Blacksmith's hand only matters where a step can fail
+    if (atSmith && !top && chance < 1) acts.append(button(`Blacksmith · ${percent(enchantChance(plus, true))} · ${fee} g`, can && stats.gold >= fee, () => use(true)));
+    out.push(acts);
+  }
+  out.push(close);
+  $('enchantBody').replaceChildren(...out);
+}
+
 // ---- settings: sound and graphics. A change is at work at once and is kept in the browser; the controls give the
 // keyboard back as soon as they have been used, or the arrows that walk the cat would also move the volume.
 let settingsOpen = false;
@@ -1856,8 +1929,10 @@ const FAMILY_NAMES = { sword: 'Sword', daggers: 'Daggers', bow: 'Bow', staff: 'S
 const gearKind = (it) => (it.kind === 'weapon' ? `${FAMILY_NAMES[it.family]} · ${it.hands === 2 ? 'Two-handed' : 'One-handed'}`
   : it.kind === 'shield' ? `Shield · ${SLOT_NAMES[it.slot]}` : `Armour · ${SLOT_NAMES[it.slot]}`);
 const listOf = (names) => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]);
-const itemTint = (id) => { const it = ITEMS[id]; return it.kind === 'potion' ? POTION_TINT[it.hp ? 'hp' : 'mp'] : css(TIERS[it.tier].color); };
-const stackText = (id, n) => (n > 1 ? `${ITEMS[id].name} ×${n}` : ITEMS[id].name);
+const SCROLL_TINT = '#e9d9a6';
+const itemTint = (id) => { const it = ITEMS[id]; return it.kind === 'potion' ? POTION_TINT[it.hp ? 'hp' : 'mp'] : it.kind === 'scroll' ? SCROLL_TINT : css(TIERS[it.tier].color); };
+// "Health Potion ×3", "+5 Iron Sword"
+const stackText = (id, n, plus = 0) => (n > 1 ? `${ITEMS[id].name} ×${n}` : itemName(id, plus));
 
 // A glyph as an element; it takes the colour of the text around it.
 function glyph(paths) {
@@ -1867,11 +1942,12 @@ function glyph(paths) {
   return svg;
 }
 // an item's icon; the flat glyph only for an item the icon set does not know
-const itemGlyph = (id) => (itemIcon(id) ? picture(itemIcon(id)) : glyph(ICONS[ITEMS[id].kind === 'potion' ? 'potion' : ITEMS[id].family || ITEMS[id].slot]));
+const itemGlyph = (id) => (itemIcon(id) ? picture(itemIcon(id)) : glyph(ICONS[ITEMS[id].slot ? ITEMS[id].family || ITEMS[id].slot : 'potion']));
 
 // A square tile: an empty slot (with the faint outline of a `shape`, when one is named), or an item with its icon
 // and, for a stack, its count.
-function tile(id, n = 1, shape = '') {
+// `plus`: the enchantment of a weapon, written in its corner.
+function tile(id, n = 1, shape = '', plus = 0) {
   const t = el('div', 'slot');
   if (!id) {
     if (shape) { t.classList.add('hollow'); t.append(glyph(ICONS[shape])); }
@@ -1881,6 +1957,7 @@ function tile(id, n = 1, shape = '') {
   t.style.setProperty('--tint', itemTint(id));
   t.append(itemGlyph(id));
   if (n > 1) t.append(el('span', 'n', String(n)));
+  if (plus > 0) t.append(el('span', 'plus', `+${plus}`));
   return t;
 }
 
@@ -1913,24 +1990,31 @@ const bareSheet = () => statsOf(stats.cls, stats.level, stats.skills, stats.weap
 
 // What the tooltip says about an item. `hint` is the line - or the lines - about what can be done with it here;
 // `worn`: the item is the one in its slot.
-function itemTip(id, hint, worn = false) {
+// `plus`: the enchantment of this very weapon.
+function itemTip(id, hint, worn = false, plus = 0) {
   const it = ITEMS[id], out = [];
   const line = (text, cls = '') => out.push(el('div', cls, text));
-  const name = el('b', 'name', it.name);
+  const name = el('b', 'name', itemName(id, plus));
   name.style.color = itemTint(id);
   out.push(name);
   if (it.kind === 'potion') {
     line('Potion', 'kind');
     line(`Restores ${it.hp || it.mp} ${it.hp ? 'health' : 'mana'}`);
     line(`${POTION_CD} s before the next potion`, 'dim');
+  } else if (it.kind === 'scroll') {
+    line('Scroll', 'kind');
+    line(`Raises the weapon you hold by one, up to +${ENCHANT_MAX}. Each step adds ${Math.round(ENCHANT_POWER * 100)}% of its attack.`);
+    line(`Safe up to +${ENCHANT_SAFE}. After that it works two times in three - and when it fails, the weapon breaks.`, 'bad');
+    line('The Blacksmith does it with a steadier hand, for a fee', 'dim');
   } else {
     line(`${gearKind(it)} · ${TIERS[it.tier].name} tier`, 'kind');
     for (const [k, v] of Object.entries(it.bonus)) line(`+${v} ${BONUS_NAMES[k]}`);
+    if (plus > 0) line(`Enchanted +${plus}: ${Math.round(ENCHANT_POWER * plus * 100)}% more attack`, 'good');
     line(`Requires level ${it.lvl}`, stats.level < it.lvl ? 'bad' : 'dim');
     // What wearing it would change, in the numbers of the status window - with all that comes off for it: a weapon
     // for both paws takes the shield off too, and a shield such a weapon.
     if (!worn && !equipError(stats.cls, stats.level, id)) {
-      const old = stats.eq[it.slot], off = comesOff(stats.eq, id), after = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), equipWith(stats.eq, id));
+      const old = stats.eq[it.slot], off = comesOff(stats.eq, id), after = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), equipWith(stats.eq, id, plus));
       const changes = SHEET_ROWS.flat().filter((r) => r && after[r[1]] !== sheet[r[1]]);
       if (changes.length || off.length) line(old === id ? 'The same as what you wear' : off.length ? `Instead of ${listOf(off.map((item) => ITEMS[item].name))}:` : 'If you wear it:', 'kind');
       for (const [label, k] of changes) line(`${label} ${sheet[k]} → ${after[k]} (${after[k] > sheet[k] ? '+' : ''}${after[k] - sheet[k]})`, after[k] > sheet[k] ? 'good' : 'bad');
@@ -1963,6 +2047,7 @@ function useStack(i) {
   const [id] = stats.inv[i] || [], it = ITEMS[id];
   if (!it || stats.dead) return;
   if (it.kind === 'potion') { drink(i); return; }
+  if (it.kind === 'scroll') { toggleEnchant(true); return; }
   const err = equipError(stats.cls, stats.level, id) || wearError(stats.inv, stats.eq, id);
   if (err) { notice(err); return; }
   send({ t: 'eq', i, id });
@@ -2013,7 +2098,8 @@ function renderBag() {
   const both = ITEMS[stats.eq.weapon]?.hands === 2 ? stats.eq.weapon : null;
   const worn = (slot) => {
     const id = ITEMS[stats.eq[slot]] ? stats.eq[slot] : null, taken = slot === 'offhand' && !id && both;
-    const t = tile(id, 1, taken ? ITEMS[both].family : slot === 'weapon' ? basicFamily(stats.cls, !!stats.eq.offhand) : slot);
+    const plus = slot === 'weapon' ? wornPlus(stats.eq) : 0;
+    const t = tile(id, 1, taken ? ITEMS[both].family : slot === 'weapon' ? basicFamily(stats.cls, !!stats.eq.offhand) : slot, plus);
     t.dataset.slot = slot;
     if (taken) {
       t.classList.add('taken');
@@ -2029,29 +2115,31 @@ function renderBag() {
     }
     t.addEventListener('click', () => takeOff(slot));
     dragFrom(t, () => ({ id }));
-    tipOn(t, () => itemTip(id, 'Click to take it off · drag onto the action bar', true));
+    tipOn(t, () => itemTip(id, 'Click to take it off · drag onto the action bar', true, plus));
     return t;
   };
   $('dollLeft').replaceChildren(...EQUIP_SLOTS.filter((slot) => !HANDS.includes(slot)).map(worn));
   $('dollRight').replaceChildren(...HANDS.map(worn));
   // The grid shows the stacks the tab lets through, then empty cells; a stack keeps its place in the bag (i), which
   // is what the server is told.
-  const shown = stats.inv.map(([id, n], i) => ({ id, n, i }))
-    .filter(({ id }) => ITEMS[id] && (bagTab === 'all' || (bagTab === 'potion') === (ITEMS[id].kind === 'potion')));
+  const shown = stats.inv.map((stack, i) => ({ id: stack[0], n: stack[1], plus: plusOf(stack), i }))
+    .filter(({ id }) => ITEMS[id] && (bagTab === 'all' || (bagTab === 'potion') === !ITEMS[id].slot));   // potions and scrolls on one tab
   bagCds = [];
   $('bagGrid').replaceChildren(...Array.from({ length: BAG_SIZE }, (_, cell) => {
     if (!shown[cell]) return tile(null);
-    const { id, n, i } = shown[cell], it = ITEMS[id], t = tile(id, n);
+    const { id, n, plus, i } = shown[cell], it = ITEMS[id], t = tile(id, n, '', plus);
     t.dataset.item = id;
+    t.dataset.plus = plus;
     if (it.kind === 'potion') {
       const cd = el('i', 'cd');
       t.append(cd);
       bagCds.push(cd);
-    } else if (equipError(stats.cls, stats.level, id)) t.classList.add('bad');
+    } else if (it.slot && equipError(stats.cls, stats.level, id)) t.classList.add('bad');
     t.addEventListener('click', () => useStack(i));
     t.addEventListener('contextmenu', () => destroyStack(i));
     dragFrom(t, () => ({ id }));
-    tipOn(t, () => itemTip(id, [`Click to ${it.kind === 'potion' ? 'drink' : 'wear'} it · drag onto the action bar`, 'Right-click twice to destroy']));
+    const use = it.kind === 'potion' ? 'drink it' : it.kind === 'scroll' ? 'enchant the weapon you hold' : 'wear it';
+    tipOn(t, () => itemTip(id, [`Click to ${use} · drag onto the action bar`, 'Right-click twice to destroy'], false, plus));
     return t;
   }));
 }
@@ -2088,7 +2176,7 @@ function renderBagStats() {
   if (key === statsKey) return;
   statsKey = key;
   const base = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, {}, stats.eq), bare = bareSheet();
-  const after = tried ? statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), equipWith(stats.eq, tried)) : sheet;   // with what it pushes off
+  const after = tried ? statsOf(stats.cls, stats.level, stats.skills, stats.weapon, buffsNow(), equipWith(stats.eq, tried, Number(tipAnchor.dataset.plus) || 0)) : sheet;   // with what it pushes off
   const combat = SHEET_ROWS.flat().filter(Boolean).map(([label, k]) => {
     if (after[k] === sheet[k]) return statCell(label, sheet[k], sheet[k] > base[k], sheet[k] - bare[k]);
     const c = statCell(label, after[k]), b = c.lastChild;   // "83 → 95", green for more and red for less
@@ -2197,15 +2285,16 @@ function renderStore() {
     return b;
   };
   // one row of the list: the item, a line about it, and what can be done with it
-  const row = (id, n, text, locked, buttons, hint) => {
+  const row = (id, n, text, locked, buttons, hint, plus = 0) => {
     const r = el('div', `sk${locked ? ' locked' : ''}`), info = el('div', 'info');
     r.dataset.item = id;
-    info.append(el('div', 'name', stackText(id, n)), el('div', 'text', text));
-    r.append(tile(id), info, ...buttons);
-    tipOn(r, () => itemTip(id, hint));
+    info.append(el('div', 'name', stackText(id, n, plus)), el('div', 'text', text));
+    r.append(tile(id, 1, '', plus), info, ...buttons);
+    tipOn(r, () => itemTip(id, hint, false, plus));
     return r;
   };
   const facts = (it) => (it.kind === 'potion' ? `Restores ${it.hp || it.mp} ${it.hp ? 'health' : 'mana'}`
+    : it.kind === 'scroll' ? `Raises the weapon you hold by one, up to +${ENCHANT_MAX} - past +${ENCHANT_SAFE} it may break`
     : `${Object.entries(it.bonus).map(([k, v]) => `+${v} ${BONUS_NAMES[k]}`).join(' · ')} · ${it.hands === 2 ? 'two-handed · ' : ''}level ${it.lvl}`);
   const list = $('storeList');
   if (storeTab === 'buy') {
@@ -2221,10 +2310,10 @@ function renderStore() {
   } else if (!stats.inv.length) {
     list.replaceChildren(el('div', 'sub', 'Your bag is empty.'));
   } else {
-    list.replaceChildren(...stats.inv.map(([id, n], i) => {
-      const price = sellPrice(id), buttons = [button(`Sell · ${price} g`, true, () => send({ t: 'sell', i, id, n: 1 }))];
+    list.replaceChildren(...stats.inv.map((stack, i) => {
+      const [id, n] = stack, price = sellPrice(id), buttons = [button(`Sell · ${price} g`, true, () => send({ t: 'sell', i, id, n: 1 }))];
       if (n > 1) buttons.push(button(`All · ${price * n} g`, true, () => send({ t: 'sell', i, id, n })));
-      return row(id, n, facts(ITEMS[id]), false, buttons, '');
+      return row(id, n, facts(ITEMS[id]), false, buttons, '', plusOf(stack));
     }));
   }
 }
@@ -2299,7 +2388,7 @@ function renderSheet() {
     ...section('Status', [
       cell('HP', `${stats.hp} / ${stats.maxHp}`), cell('MP', `${stats.mp} / ${stats.maxMp}`),
       cell('Experience', `${(stats.xp / need * 100).toFixed(2)}%`), cell('SP', stats.sp),
-      cell('Gold', stats.gold), cell('Weapon upgrade', `Lv ${stats.weapon}`),   // the Blacksmith's work (B)
+      cell('Gold', stats.gold), cell('Weapon enchant', stats.eq.weapon ? `+${wornPlus(stats.eq)}` : '—'),   // scrolls, and the Blacksmith (B)
     ]),
     ...section('PvP', [cell('PvP wins', stats.pvp), cell('PK', stats.pk), cell('Karma', stats.karma), cell('Standing', PVP_TITLES[stats.st])]),
     ...section('Attributes', ATTR_NAMES.map((n) => cell(n, sheet[n]))),
@@ -2365,7 +2454,7 @@ function updateHud() {
     } else if (it) {
       // a potion: how many the bag holds, and the cooldown all potions share; gear: a mark while it is worn
       const n = bagCount(id), worn = !!it.slot && stats.eq[it.slot] === id, potion = it.kind === 'potion';
-      say(note, potion ? String(n) : worn ? '✓' : '');
+      say(note, !it.slot ? String(n) : worn ? '✓' : '');   // what stacks shows how many there are
       cd.style.height = potion ? potionCd : '0';
       say(left, potion && potionWait > 0.5 ? String(Math.ceil(potionWait)) : '');
       node.classList.toggle('dim', !n && !worn);   // none left: the slot keeps its item and waits for more
@@ -2407,12 +2496,12 @@ function updateHud() {
   if (storeOpen && !atTrader) toggleStore(false);   // walking away ends the deal
   if (storeOpen) renderStore();
   if (bagOpen) { renderBag(); renderBagStats(); }
-  const cost = upgradeCost(stats.weapon);
+  if (enchantOpen) renderEnchant();
   // the Blacksmith and the Trader may stand close enough together for both to be in reach
   const tips = [];
   if (atSage) tips.push('K — learn skills from the Sage');
-  else if (nearNpc(map, me, 'blacksmith')) {   // the Blacksmith has no window: his line says all there is to his trade
-    tips.push(`${stats.gold >= cost ? 'B — upgrade weapon' : 'Weapon upgrade'} Lv ${stats.weapon} → ${stats.weapon + 1}: ${cost} gold (you have ${stats.gold})`);
+  else if (nearNpc(map, me, 'blacksmith')) {   // he enchants weapons: his line says what he needs for it
+    tips.push(`B — the Blacksmith enchants your weapon with a steadier hand${bagCount(ENCHANT_SCROLL) ? '' : ' (bring a Scroll: Enchant Weapon - the Trader sells them)'}`);
   }
   if (atTrader && !storeOpen) tips.push('T — trade with the Trader');
   const tip = bookOpen || helpOpen || storeOpen || mapOpen ? '' : tips.join(' · ');   // those four reach down to where the line stands

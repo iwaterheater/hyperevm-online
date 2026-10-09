@@ -43,14 +43,14 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `1`, clicking the target again, or right click on a monster | **Attack** — the cat runs up to its target and keeps hitting it with its weapon (auto-attack). The attack is the first slot of the [action bar](#action-bar) |
 | `2` – `9`, `0` | The other slots of the [action bar](#action-bar): cast the skill, drink the potion or wear the gear in the slot. Skills cost mana and every one takes a moment - a spell is cast, a blow is wound up - and most have a cooldown; the cat stands still for that moment. A click on a slot does the same |
 | `I` | Inventory: the character's numbers, the cat with its six equipment slots, and the bag. Click an item to wear or drink it, click a worn item to take it off, drag an item onto the action bar, right-click an item twice to destroy it; hover for its stats and what it would change. Drag the cat to turn it |
-| `C` | Character status window: experience, skill points, gold, the weapon's upgrade level, attributes and combat stats, with what the equipment adds |
+| `C` | Character status window: experience, skill points, gold, the weapon's enchantment, attributes and combat stats, with what the equipment adds |
 | `K` | Skill book: everything the class can learn; a learned skill is dragged from it onto the action bar. Buying skills and choosing a profession only works next to the Sage in town |
 | `M` | World map: the whole island with its relief, the zones and their level ranges, the boss lair, the monster camps tinted by how dangerous they are for this character, and the cats in sight. Hover a camp for its monsters. A click on the minimap opens it too |
 | `O` | Settings: sound on or off and its volume; the resolution the world is rendered at (low, medium, high), shadows, the glow of lamps and spells, grass and flowers; Auto, which lowers those while the game runs slow; and the frame rate at the top edge. A change is at work at once and is remembered in the browser |
 | `H` / `F1` | Help: every control |
 | `X` | Sit down to rest — health and mana come back much faster; moving stands the cat up |
 | `Space` | Jump (double jump) |
-| `B` | Buy a weapon upgrade (stand next to the Blacksmith in town) |
+| `B` | Enchant the weapon in the paw (stand next to the Blacksmith in town; see [Enchanting](#enchanting)) |
 | `T` | Trade (stand next to the Trader in town): buy potions and gear, sell anything from the bag |
 | `Enter` | Open chat / send message |
 
@@ -78,7 +78,7 @@ The map that ships with the game is a long island with the town in its middle. T
 
 | Zone | Where | Monster levels | Who lives there |
 | --- | --- | --- | --- |
-| Hypercat Town | The middle of the island | – | Walled safe zone: fast healing, townsfolk, the Blacksmith's weapon upgrades, the Trader's shop |
+| Hypercat Town | The middle of the island | – | Walled safe zone: fast healing, townsfolk, the Blacksmith's enchanting, the Trader's shop |
 | Green Meadows | Around the town | 1 – 4 | Slimes, Mushnubs, bunnies, chickens, pigs, pups, tabbies, pigeons, deer and stags, wolves and foxes, pandas, Armabees, a Stumpling and, rarely, the Mushroom King |
 | Graveyard Wastes | Beyond the meadows, to the north and west | 5 – 9 | Skeletons, Ghosts, Skull Wraiths, Hopping Skulls, Cave Bats, Giant Spiders, ninjas, Hex Blobs and Glubs |
 | Red Badlands | East | 6 – 10 | Cactoros, Prickles, orcs with their shamans and brutes, Sand Cyclopes, Crimson Dinos, Raptors, wolves, Wild Bulls with Alpacas, Alpakings, Sand Wyrmlings, Tribal Spirits |
@@ -127,7 +127,7 @@ Each class has its own hoodie colour and gear.
 
 ### Character stats
 
-Press `C` for the character status window. Every class has six fixed base attributes, and all combat stats are derived from them, the level, the weapon upgrade, passive skills, active buffs and the equipment — there are no points to assign. A value raised by a buff is shown in gold; the part of a value that comes from equipment stands beside it in green.
+Press `C` for the character status window. Every class has six fixed base attributes, and all combat stats are derived from them, the level, the weapon's enchantment, passive skills, active buffs and the equipment — there are no points to assign. A value raised by a buff is shown in gold; the part of a value that comes from equipment stands beside it in green.
 
 | Attribute | Raises |
 | --- | --- |
@@ -172,10 +172,28 @@ The window has three parts side by side:
 - **Weapons** come in five families — swords, greatswords, daggers (+10 – 40 Critical), bows and staves — and any class may wield any of them. The cat holds what is equipped, and how it fights follows the weapon, not the class: a bow shoots from afar in anyone's paws, everything else strikes up close. A bow is shot the way an archer does it: the cat turns side-on, holds the bow out at its target, takes an arrow from the quiver on its back, nocks it and pulls the string to its cheek while a gold bar fills, and the arrow flies when the draw is full. Walking away or losing the target lets the arrow down. With an empty weapon slot the cat fights with the basic weapon of its class, as before.
 - **One hand or two.** A sword is one-handed; a greatsword, a bow, a staff and a pair of daggers (one in each paw) are two-handed. **Shields** go into the off hand of any class and give P. Def and a little M. Def. A two-handed weapon and a shield exclude each other: putting one on takes the other off into the bag (the tooltip and the numbers beside the doll show what that costs before you click), and when a sword and a shield would both have to come off for a two-handed weapon and the bag has no free place, nothing happens and the game says so. A cat with a shield and no weapon equipped fights with a plain sword if the weapon of its class would need both paws.
 - **The Knight's shield.** Whoever becomes a Knight is handed a Wooden Buckler - onto the off paw when that is free, else into the bag - unless he owns a shield already. A Knight from before shields were items gets his the first time he enters the world. The defence his old built-in shield gave is part of his armour now, so no Knight lost anything.
-- The bonus of an item is added to the base value of the class, so it grows with the level, and the Blacksmith's upgrade (`B`), passive skills and buffs multiply a weapon item like the basic weapon. The tooltip of an item shows what wearing it would change in the numbers of the status window.
+- The bonus of an item is added to the base value of the class, so it grows with the level, and the weapon's enchantment, passive skills and buffs multiply a weapon item like the basic weapon. The tooltip of an item shows what wearing it would change in the numbers of the status window.
 - **Potions** stack up to 99: Lesser Health Potion (80 HP), Health Potion (250 HP), Lesser Mana Potion (50 MP), Mana Potion (160 MP). They are drunk with a click in the bag or from a slot of the action bar - each kind of potion takes a slot of its own; all potions share a 6-second cooldown.
 - **Loot** goes straight into the bag of whoever lands the killing blow, with a line in the chat. A minion leaves a piece of gear about one time in sixteen, a warrior one time in five, and the chance grows a little with the monster's level; the tier matches the level of the monster (now and then one tier lower). The Skeleton King leaves a Hypurr piece and three potions to everyone who wounded him. Chests sometimes hold a potion and seldom a piece of gear — the richer the chest, the better. Loot that does not fit into a full bag is lost.
 - A new character starts with five Lesser Health Potions. Dying loses no items.
+
+### Enchanting
+
+A weapon is made stronger with a **Scroll: Enchant Weapon**, by the rules of Lineage II. The Trader sells the scroll
+(150 gold); monsters leave one now and then, the King always, and chests may hold one.
+
+- A scroll raises the weapon in the paw by one, up to **+30**. Every step adds 8% of the weapon's attack - the basic
+  weapon of the class and the item together - so a +30 weapon hits 3.4 times as hard.
+- The first three steps always succeed. Every step after +3 succeeds two times in three, and when it fails **the weapon
+  breaks**: it is gone, with everything it had. The scroll is spent either way.
+- Click a scroll in the bag - or its slot on the action bar - to open the enchant window: the weapon, what it would
+  become, the odds. It stays open, a click a scroll.
+- Beside the **Blacksmith**, `B` opens the same window with a second button: he does it with a steadier hand - ten
+  points more chance - for a fee that grows with the weapon (`20 × (level of enchantment + 1)` gold). He needs the
+  scroll too, and where a step cannot fail he has nothing to add.
+- The enchantment belongs to the weapon: it stays with it in the bag, and goes with it to the Trader. A weapon made
+  +7 or better, or lost at that height, is told to the whole world.
+- A character from before enchanting keeps what it paid the Blacksmith for: every old upgrade is five steps on its weapon.
 
 ### The Trader
 
@@ -188,7 +206,7 @@ Stand next to the Trader in town and press `T`. He sells the four potions and al
 - Mana is spent on skills and comes back slowly in the field, quickly while sitting, and fastest in town.
 - Monsters drop gold coins, and now and then potions and gear (see [Items and equipment](#items-and-equipment)).
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold and the better what else may lie in them. The King's hoard waits inside his fortress.
-- Spend gold at the Blacksmith in town (`B`) to upgrade your weapon, which raises P. Atk and M. Atk.
+- Enchant your weapon with scrolls - see [Enchanting](#enchanting) - to raise P. Atk and M. Atk.
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
 
 ### Fighting other cats
@@ -369,7 +387,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Combat is target-based, as in classic MMORPGs: the server checks that the selected monster is alive and within reach before a swing or a bolt lands.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
 - A character saved before the game had items loads with an empty bag; whatever a save holds that is not a known item is left out when it is read. One saved before the action bar gets the default bar, one saved before the off hand loads with that paw empty - and a Knight among them is handed his shield.
-- Progress (class, level, XP, SP, skills, gold, weapon upgrade, bag, equipment and action bar) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
+- Progress (class, level, XP, SP, skills, gold, bag, equipment with the weapon's enchantment, and action bar) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 
 ## Playing with friends over the internet
 
@@ -387,7 +405,7 @@ npm run bots -- --url http://localhost:3000 --count 4 --verbose
 A bot is a player like any other: it joins through the game's WebSocket and plays by the same rules, and the server
 saves it with its level and gear, so it comes back as it left. It hunts the camp that fits
 its level, rests, drinks potions, and goes back to town to sell its loot, buy gear and potions, learn skills from the
-Sage and have its weapon upgraded. It walks around water, cliffs and scenery, takes a moment to react, says a line in
+Sage; a scroll it finds goes onto its weapon while nothing can go wrong. It walks around water, cliffs and scenery, takes a moment to react, says a line in
 the chat now and then, and takes a break of a few minutes every half hour or so (`--no-breaks` keeps them all in).
 
 The roster is in `bots/run.mjs`: a name, a class, the level the bot starts at and the one it stops growing at - three of

@@ -299,6 +299,21 @@
     border: 1px solid rgba(127, 232, 214, .25); background: #18546f; }
 
   /* settings: a name and its control a row, under a heading per group */
+  /* the enchant window: the weapon, what a scroll would make of it, the odds, and the two ways to try */
+  #enchant { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(360px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
+  #enchant.on { display: block; }
+  #enchant h2 { margin: 0 0 10px; font-size: 20px; color: var(--teal); }
+  #enchantBody .what { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 15px; font-weight: 700; white-space: pre; }
+  #enchantBody .line { margin: 4px 0; font-size: 13px; line-height: 1.35; }
+  #enchantBody .good { color: #8ee68e; }
+  #enchantBody .bad { color: #ff8095; }
+  #enchantBody .dim { opacity: .75; }
+  #enchantBody .acts { display: flex; gap: 8px; margin: 12px 0 8px; }
+  #enchantBody button { flex: 1; padding: 8px 10px; font-size: 13px; box-shadow: none; white-space: nowrap; }
+  #enchantBody > button { display: block; margin: 0 0 0 auto; flex: none; padding: 5px 14px; font-size: 12px; color: #e8fffa; background: rgba(255, 255, 255, .1); }
+  #enchantBody button:hover { transform: none; filter: brightness(1.2); }
+  #enchantBody button:disabled { background: rgba(255, 255, 255, .15); color: rgba(255, 255, 255, .5); cursor: default; filter: none; }
+  .slot .plus { position: absolute; left: 3px; top: 0; z-index: 1; font-size: 11px; font-weight: 800; color: var(--gold); text-shadow: 0 1px 2px #000; }
   #settings { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(400px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
   #settings.on { display: block; }
   #settings h2 { margin: 0 0 2px; font-size: 20px; color: var(--teal); }
@@ -602,6 +617,10 @@
     <div id="mapLegend"></div>
     <canvas id="mapView"></canvas>
   </div>
+  <div class="panel" id="enchant">
+    <h2>Enchant weapon</h2>
+    <div id="enchantBody"></div>
+  </div>
   <div class="panel" id="settings">
     <h2>Settings</h2>
     <div class="sub">A change is at work at once and is remembered in this browser.</div>
@@ -650,7 +669,7 @@
       <div><kbd>K</kbd></div><span>Skill book; next to the Sage it sells skills and professions</span>
       <div><kbd>M</kbd></div><span>World map: the whole island, its zones and their levels, the monster camps. A click on the radar opens it too</span>
       <div><kbd>T</kbd></div><span>Trade, next to the Trader</span>
-      <div><kbd>B</kbd></div><span>Buy a weapon upgrade, next to the Blacksmith</span>
+      <div><kbd>B</kbd></div><span>Enchant your weapon next to the Blacksmith, who does it with a steadier hand for a fee. It takes a Scroll: Enchant Weapon; a click on the scroll in the bag does it anywhere</span>
       <div><kbd>O</kbd></div><span>Settings: sound and graphics</span>
       <div><kbd>H</kbd> / <kbd>F1</kbd></div><span>This window</span>
       <h3>Other</h3>
