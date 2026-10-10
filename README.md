@@ -175,6 +175,7 @@ The window has three parts side by side:
 - The bonus of an item is added to the base value of the class, so it grows with the level, and the weapon's enchantment, passive skills and buffs multiply a weapon item like the basic weapon. The tooltip of an item shows what wearing it would change in the numbers of the status window.
 - **Potions** stack up to 99: Lesser Health Potion (80 HP), Health Potion (250 HP), Lesser Mana Potion (50 MP), Mana Potion (160 MP). They are drunk with a click in the bag or from a slot of the action bar - each kind of potion takes a slot of its own; all potions share a 6-second cooldown.
 - **Loot** goes straight into the bag of whoever lands the killing blow, with a line in the chat. A minion leaves a piece of gear about one time in sixteen, a warrior one time in five, and the chance grows a little with the monster's level; the tier matches the level of the monster (now and then one tier lower). The Skeleton King leaves a Hypurr piece and three potions to everyone who wounded him. Chests sometimes hold a potion and seldom a piece of gear — the richer the chest, the better. Loot that does not fit into a full bag is lost.
+- **What a monster leaves** is written in its target frame: select it and a row of chips under its health shows the gold of its coins, each tier of gear it can drop and the two potions, every one with how often it comes (hover a chip for the names). The numbers are the ones the server rolls by (`lootTable` in `src/shared.js`), so the frame cannot promise what the dice do not give.
 - A new character starts with five Lesser Health Potions. Dying loses no items.
 
 ### Enchanting
@@ -208,6 +209,7 @@ Stand next to the Trader in town and press `T`. He sells the four potions and al
 - Treasure chests stand beside the four roads and refill a few minutes after being opened; the further from town, the more gold and the better what else may lie in them. The King's hoard waits inside his fortress.
 - Enchant your weapon with scrolls - see [Enchanting](#enchanting) - to raise P. Atk and M. Atk.
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
+- The cat is a puppet of rigid parts with elbows, knees, a tail of four segments and ears that turn, and it shows what happens to it: it winds a blow up before it lets it go and steps into it, stoops for a coin and bends down to a chest, gives at the knees when it lands, falls on its back when it is struck down and gets up when it lives again - and with nothing to do it looks about, licks a paw or has a stretch. An archer takes its arrows from a quiver at the hip.
 
 ### Fighting other cats
 
@@ -338,7 +340,7 @@ map/world.json    The world: terrain, scenery, regions, monster camps, chests, t
 map/backups/      The map before each save (created by the server, git-ignored)
 map/library/      The map library: named copies of the map, listed in the editor's Maps menu
 src/main.js       Client: rendering, input, networking, HUD
-src/cat.js        The cat: a Blender model of rigid parts (assets/cat/hypercat.glb), animated in code; weapons, armour and the shield, tinted by tier
+src/cat.js        The cat: a Blender model of rigid parts on joints (assets/cat/hypercat.glb), animated in code; weapons, armour and the shield, tinted by tier
 art/              The Blender sources: the cat, its weapons and its armour (hypercat.blend), the skill effects (fx.blend)
 src/fx.js         What skills look like: Blender-made shapes (assets/fx/fx.glb) - bolts, ground circles, glyphs, flames, light - animated in code
 src/skeleton.js   Skeleton monsters: loads the KayKit models and drives their animations

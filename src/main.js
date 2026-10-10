@@ -16,7 +16,7 @@ import {
   TICK, ATTACK_WINDUP, MOB_RISE, MOB_TYPES, MOB_KEYS, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL,
   professionsOf, SKILLS, skillsFor, activeSkills, statsOf, castTime, isSpell, ATTR_NAMES, xpNext,
   ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, ENCHANT_POWER, enchantChance, smithFee, plusOf, wornPlus, itemName,
-  ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor,
+  ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor, lootTable,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
   CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK,
 } from './shared.js';
@@ -382,7 +382,7 @@ function makeAvatar(cls = 'fighter') {
   return {
     root, cat, cls, look: 0, orb, swingT: -1, swingDur: SWING_DEFAULT, swingKind: 0, castT: -1, castDur: 1, castSkill: '', bar: makeBar(root, 2.75, 1.3, 0x6dffb0), label: null, labelKey: '',
     x: 0, y: 0, z: 0, yaw: 0, tx: 0, ty: 0, tz: 0, tyaw: 0,
-    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0, drawT: -1, drawDur: 1,
+    speed: 0, hp: 100, maxHp: 100, level: 1, dead: false, sitting: false, shootPose: 0, drawT: -1, drawDur: 1, pickT: -1, pickDur: 0.6,
     name: 'Cat', top: CAT_TOP, def: CAT_DEF, st: PVP_PEACE, flags: 0, status: null,
   };
 }
@@ -458,7 +458,7 @@ function makeMobView(ti, lvl) {
 
   scene.add(root);
   return {
-    root, skeleton, label, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
+    root, skeleton, label, type, def, lvl, top, bar: makeBar(root, top + 0.3, Math.max(1.2, def.r * 1.6), 0xff5577),
     x: 0, z: 0, tx: 0, tz: 0, hp: 1, maxHp: 1, flags: 0, flash: 0, rise: 0, yaw: 0,
   };
 }
@@ -708,6 +708,7 @@ function onSnapshot(s) {
     ([, x, y, z, yaw, , , , , , , cls]) => Object.assign(makeAvatar(CLASS_KEYS[cls]), { x, y, z, yaw }),
     (a, [id, x, y, z, yaw, speed, hp, maxHp, level, dead, sit, cls, look, st = 0, flags = 0]) => {
       tween(a, x, y, z);
+      if (a.dead && !dead) Object.assign(a, { x, z, fx: x, fz: z });   // back to life somewhere else: it gets up there, it does not slide there
       Object.assign(a, { tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
       setLook(a, CLASS_KEYS[cls], look);
       setLabel(a, `${a.name} · ${CLASSES[a.cls].name} ${level}`, PVP_COLORS[st]);   // purple while it is flagged, red for an outlaw
@@ -919,9 +920,16 @@ function onEvent(ev) {
       sfx(ev.pk ? 110 : 523, 0.5, ev.pk ? 'sawtooth' : 'triangle', 0.08, ev.pk ? -50 : 400);
       break;
     }
+    case 'pick': {   // a cat stoops for a coin
+      const a = ev.o === myId ? me : others.get(ev.o);
+      if (a && a.pickT < 0) Object.assign(a, { pickT: 0, pickDur: 0.55 });
+      break;
+    }
     case 'open': {
       const c = map.chests[ev.i];
       if (!c) break;
+      const a = ev.o === myId ? me : others.get(ev.o);   // whoever opened it bends down to it
+      if (a) Object.assign(a, { pickT: 0, pickDur: 0.8 });
       burst(c.x, 1.2, c.z, 0xffd76a, c.big ? 60 : 24, 7);
       sfxAt(c.x, c.z, 520, 0.25, 'triangle', 0.07, 520);
       break;
@@ -1423,14 +1431,13 @@ function updateAvatar(a, dt, isMe) {
   if (a.orb.visible && !a.cat.castPoint(a.orb.position)) a.orb.position.set(0, 1.0, 0.85);   // at the crystal of a staff, else between the paws
   a.orb.material = orbMat(a.castSkill);
   a.orb.scale.setScalar(0.06 + charge * 0.26);
-  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: spell, windup: a.castT >= 0 && !spell ? a.castT / a.castDur : -1, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind });
+  if (a.pickT >= 0 && (a.pickT += dt / a.pickDur) >= 1) a.pickT = -1;
+  a.cat.update(dt, { speed: a.speed, airborne: a.y > 0.05, shooting: a.shootPose > 0, dashing: isMe && local.dashT > 0, casting: spell, windup: a.castT >= 0 && !spell ? a.castT / a.castDur : -1, sitting: a.sitting, hurt: isMe ? Math.max(0, local.invuln) / 0.5 : 0, draw: a.drawT >= 0 ? a.drawT / a.drawDur : -1, swing: a.swingT, swingKind: a.swingKind,
+    pick: a.pickT, dead: isMe ? !!stats.dead : a.dead });
 }
 
 function updateViews(dt) {
-  for (const a of others.values()) {
-    updateAvatar(a, dt, false);
-    a.root.visible = !a.dead;
-  }
+  for (const a of others.values()) updateAvatar(a, dt, false);   // a dead cat stays in sight: it lies where it fell
 
   const k = 1 - Math.exp(-10 * dt);
   for (const v of mobViews.values()) {
@@ -2406,6 +2413,48 @@ function updateBars() {
 }
 
 let xpSeen = null;   // the level and the experience the bar showed last, to tell when more has come in
+// What a monster leaves, as chips in its frame: the coins, the gear by tier, the potions - each with how often
+// (lootTable in src/shared.js has the odds the server plays by). Built when the target or its level changes.
+const percent = (chance) => { const p = chance * 100; return `${p >= 10 ? Math.round(p) : Number(p.toFixed(1))}%`; };
+// the same in the little room of a chip: whole percents, where there is at least one (the tooltip has the exact number)
+const roughly = (chance) => (chance >= 0.01 ? `${Math.round(chance * 100)}%` : percent(chance));
+// "Iron gear" - or, where the armour and the weapons of a tier are named differently, "Leather armour or Bronze weapon"
+function gearName(t) {
+  const tier = TIERS[t], arms = tier.arms[0].toUpperCase() + tier.arms.slice(1);
+  return arms === tier.name ? `${tier.name} gear` : `${tier.name} armour or ${arms} weapon`;
+}
+let dropsKey = '';
+function renderDrops(tv) {
+  const key = tv && !tv.cat ? `${tv.type}|${tv.lvl}` : '';
+  if (key === dropsKey) return;
+  dropsKey = key;
+  if (tipAnchor && $('tgDrops').contains(tipAnchor)) hideTip();   // the chip it described is about to go
+  if (!key) { $('tgDrops').replaceChildren(); return; }
+  const { gold, items } = lootTable(tv.type, tv.lvl), boss = tv.type === 'boss';
+  const whose = boss ? 'To every cat that wounded him' : 'To whoever strikes the last blow';
+  const chip = (icon, text, tip) => {
+    const node = el('span', 'loot');
+    node.append(icon, text);
+    tipOn(node, tip);
+    return node;
+  };
+  $('tgDrops').replaceChildren(
+    chip(el('i', 'coin'), `${gold[0]}–${gold[1]}`, () => [el('b', 'name', 'Gold'), el('div', 'kind', 'Every kill'),
+      el('div', '', `Coins worth ${gold[0]} to ${gold[1]} gold in all, left on the ground for whoever picks them up`)]),
+    ...items.map((it) => {
+      const often = `${percent(it.chance)} of kills`;
+      if (it.id) {
+        return chip(picture(itemIcon(it.id)), roughly(it.chance), () => [el('b', 'name', stackText(it.id, it.n)), el('div', 'kind', often), el('div', 'dim', whose)]);
+      }
+      const tier = TIERS[it.gear];
+      const node = chip(picture(itemIcon(`${tier.id}_body`)), roughly(it.chance), () => [el('b', 'name', gearName(it.gear)), el('div', 'kind', often),
+        el('div', '', 'One piece: a helmet, a body armour, gloves, boots, a shield or a weapon'), el('div', 'dim', whose)]);
+      node.classList.add('gear');
+      node.style.setProperty('--tint', css(tier.color));
+      return node;
+    }));
+}
+
 function updateHud() {
   const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
   say($('who'), names.get(myId) || 'Cat');
@@ -2473,22 +2522,21 @@ function updateHud() {
     skills.note = `${stats.sp} skill points: the Sage has ${n} ${n === 1 ? 'skill' : 'skills'} you can afford`;
   }
 
-  // target frame: name and level tinted by how dangerous the monster is for this player; a cat's by how it stands
+  // The target's frame: the level on a badge, the name - both tinted by how dangerous a monster is for this player, or
+  // by how a cat stands - what it is doing, and its health. How much health another has is shown by the bar alone,
+  // never in numbers. A monster's frame also tells what it leaves (renderDrops).
   const tv = mobViews.get(targetId) || others.get(targetId);
   $('target').style.display = tv ? 'block' : 'none';
   $('tgAttack').style.display = tv?.cat && !attacking ? 'inline-block' : 'none';
-  if (tv?.cat) {
-    $('tgName').textContent = `${tv.name} · ${CLASSES[tv.cls].name} ${tv.level}`;
-    $('tgName').style.color = PVP_COLORS[tv.st];
+  renderDrops(tv);
+  if (tv) {
+    const tint = tv.cat ? PVP_COLORS[tv.st] : threat(tv.lvl), ailing = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : '';
+    say($('tgLevel'), String(tv.cat ? tv.level : tv.lvl));
+    $('tgLevel').style.setProperty('--tint', tint);
+    say($('tgName'), tv.cat ? `${tv.name} · ${CLASSES[tv.cls].name}` : tv.def.name);
+    $('tgName').style.color = tint;
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
-    $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : PVP_TITLES[tv.st];
-  } else if (tv) {
-    $('tgName').textContent = `${tv.def.name} · Lv ${tv.lvl}`;
-    $('tgName').style.color = threat(tv.lvl);
-    $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    $('tgHp').textContent = '';   // how much health another has is shown by the bar alone, never in numbers
-    $('tgState').textContent = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : 'Selected';
+    say($('tgState'), ailing || (tv.cat ? PVP_TITLES[tv.st] : tv.def.calm ? 'Calm' : 'Hostile'));
   }
 
   const atSage = nearNpc(map, me, 'sage'), atTrader = nearNpc(map, me, 'trader');
@@ -2690,7 +2738,6 @@ function tick(dt) {
   fx.update(dt);
   updateAvatar(me, dt, true);
   me.bar.set(0, false);
-  me.root.visible = !stats.dead;   // a hit shows as a flinch of the cat (cat.js), not as blinking in and out
   updateCamera(dt);
   if (bagOpen && state === 'playing') drawDoll(dt);
 

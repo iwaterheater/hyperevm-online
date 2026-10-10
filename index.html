@@ -83,18 +83,31 @@
   #place div { min-width: 0; }
   #place b, #place span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
   #place span { opacity: .8; font-variant-numeric: tabular-nums; }
-  .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--teal); opacity: .85;
-    display: flex; justify-content: space-between; }
   .title { font-size: 17px; font-weight: 800; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .bar { height: 9px; margin: 3px 0 7px; border-radius: 6px; background: rgba(255, 255, 255, .1); overflow: hidden; }
-  .bar:last-child { margin-bottom: 0; }
-  .bar > i { display: block; height: 100%; width: 0; border-radius: 6px; transition: width .12s; }
-  #tgFill { background: linear-gradient(90deg, #e8263f, #ff7a7a); }
+  #tgFill { background: linear-gradient(90deg, #e8263f, #ff5a66 70%, #ff7a7a); }
   @keyframes pulse { to { filter: brightness(1.6); } }
 
-  #target { top: 16px; left: 50%; transform: translateX(-50%); width: 260px; display: none; text-align: center; }
-  #target .title { margin-bottom: 4px; }
-  #tgAttack { display: none; margin-top: 8px; padding: 4px 16px; font-size: 12px; font-weight: 700; letter-spacing: .04em; color: #ffd0d6;
+  /* The target's frame: the level on a badge edged in the colour of the threat, the name and what the target is doing;
+     its health; and for a monster a row of chips - what it leaves, each with how often (the chips alone take the mouse,
+     for their tooltips). 292px: room for the coins, two tiers of gear and the two potions in one row. */
+  #target { top: 10px; left: 50%; transform: translateX(-50%); width: 292px; display: none; padding: 6px 9px 7px; text-align: center; border-radius: 12px; }
+  #tgHead { display: flex; align-items: center; gap: 6px; }
+  #tgLevel { flex: none; min-width: 21px; height: 21px; padding: 0 4px; border-radius: 11px; font-size: 10.5px; font-weight: 800; line-height: 17px;
+    background: #0a1210; border: 2px solid var(--tint, #e8b84a); box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+  #target .title { flex: 1; min-width: 0; margin: 0; font-size: 13.5px; text-align: left; text-shadow: 0 1px 2px #000; }
+  #tgState { flex: none; font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--teal); opacity: .9; }
+  #target .gauge { height: 7px; margin-top: 5px; }
+  #tgDrops { display: flex; justify-content: center; gap: 3px; margin-top: 5px; white-space: nowrap; pointer-events: auto; }
+  #tgDrops:empty { display: none; }
+  /* a chip of that row (not ".drop": that is a slot of the action bar something is being dragged onto) */
+  .loot { display: flex; align-items: center; gap: 3px; padding: 1px 5px 1px 2px; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: default;
+    border-radius: 6px; background: rgba(255, 255, 255, .07); border: 1px solid var(--line); }
+  .loot:hover { background: rgba(255, 255, 255, .16); }
+  .loot .icon { display: block; width: 15px; height: 15px; border-radius: 4px; }
+  .loot.gear .icon { box-shadow: 0 0 0 1px var(--tint); }   /* a piece of gear wears the colour of its tier */
+  .loot .coin { width: 11px; height: 11px; margin: 2px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff3b0, #f2b632 60%, #b97a12);
+    box-shadow: 0 0 0 1px #7a4e08; }
+  #tgAttack { display: none; margin-top: 6px; padding: 3px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: #ffd0d6;
     background: rgba(255, 90, 106, .16); border: 1px solid rgba(255, 90, 106, .6); border-radius: 999px; box-shadow: none; }
   #tgAttack:hover { background: rgba(255, 90, 106, .32); transform: none; }
   #notice { position: absolute; top: 31%; left: 0; right: 0; text-align: center; font-size: 17px; font-weight: 700; color: #ffb3c4;
@@ -552,9 +565,9 @@
     <div id="sidebar"></div>
   </div>
   <div class="panel" id="target">
-    <div class="title" id="tgName"></div>
-    <div class="bar"><i id="tgFill"></i></div>
-    <div class="label"><span id="tgState"></span><span id="tgHp"></span></div>
+    <div id="tgHead"><span id="tgLevel"></span><span class="title" id="tgName"></span><span id="tgState"></span></div>
+    <div class="gauge"><i id="tgFill"></i></div>
+    <div id="tgDrops"></div>
     <button id="tgAttack" title="Attack this cat (Ctrl + click on it does the same)">Attack</button>
   </div>
   <div id="fps"></div>

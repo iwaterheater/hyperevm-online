@@ -617,19 +617,41 @@ function pickGear(t, r) {
   for (const family of WEAPON_FAMILIES) pool.push(`${TIERS[t].arms}_${family}`);
   return pool[Math.min(pool.length - 1, Math.floor(r * pool.length))];
 }
-const pickPotion = (strong, r) => `${r < 0.6 ? 'hp' : 'mp'}_${strong ? 'large' : 'small'}`;
+const LOWER_TIER = 0.25;   // how often a monster's piece of gear is of the tier below its own
+const HP_SHARE = 0.6;      // the share of health potions among the potions monsters leave; the rest is mana
+const STRONG_FROM = 8;     // from this level on a monster's potions are the large ones
+const pickPotion = (strong, r) => `${r < HP_SHARE ? 'hp' : 'mp'}_${strong ? 'large' : 'small'}`;
 // What a killed monster leaves in the bag of a player: a list of [id, count], often empty. Gear matches the monster's
 // level (one time in four it is a tier below); the boss always leaves a piece of the top tier, and potions.
 export function rollLoot(type, lvl, rnd = Math.random) {
   const out = [], boss = type === 'boss';
   if (rnd() < gearChance(type, lvl)) {
     let t = boss ? TIERS.length - 1 : tierForLevel(lvl);
-    if (!boss && t > 0 && rnd() < 0.25) t--;
+    if (!boss && t > 0 && rnd() < LOWER_TIER) t--;
     out.push([pickGear(t, rnd()), 1]);
   }
-  if (boss || rnd() < POTION_CHANCE) out.push([pickPotion(lvl >= 8, rnd()), boss ? 3 : 1]);
+  if (boss || rnd() < POTION_CHANCE) out.push([pickPotion(lvl >= STRONG_FROM, rnd()), boss ? 3 : 1]);
   if (boss || rnd() < SCROLL_CHANCE) out.push([ENCHANT_SCROLL, boss ? 2 : 1]);   // drawn last: what was rolled before it is as it was
   return out;
+}
+// The coins a killed monster scatters: `drops` of them (one, unless the kind says more), each worth one to three
+// times the monster's level.
+export const coinsOf = (type) => MOB_TYPES[type].drops ?? 1;
+export const coinGold = (lvl, rnd = Math.random) => Math.ceil((1 + 2 * rnd()) * lvl);
+// What a monster of a kind and level can leave, and how often: the odds rollLoot() and the coins play by, spelled out
+// for whoever wants to show them.
+//   gold    [least, most] of what its coins are worth together
+//   items   the likeliest first, each with its `chance` per kill (0..1): { gear: t } is one piece of gear of tier
+//           TIERS[t] - any armour, shield or weapon; { id, n } is `n` of that item
+export function lootTable(type, lvl) {
+  const boss = type === 'boss', coins = coinsOf(type), items = [];
+  const gear = gearChance(type, lvl), top = boss ? TIERS.length - 1 : tierForLevel(lvl), slip = !boss && top > 0 ? LOWER_TIER : 0;
+  items.push({ gear: top, chance: gear * (1 - slip) });
+  if (slip) items.push({ gear: top - 1, chance: gear * slip });
+  const potion = boss ? 1 : POTION_CHANCE, n = boss ? 3 : 1, strong = lvl >= STRONG_FROM;
+  items.push({ id: pickPotion(strong, 0), n, chance: potion * HP_SHARE }, { id: pickPotion(strong, HP_SHARE), n, chance: potion * (1 - HP_SHARE) });
+  items.push({ id: ENCHANT_SCROLL, n: boss ? 2 : 1, chance: boss ? 1 : SCROLL_CHANCE });
+  return { gold: [coins * lvl, coins * 3 * lvl], items: items.sort((a, b) => b.chance - a.chance) };
 }
 // What a treasure chest holds besides its gold: the richer the chest, the better. `big` is the King's hoard.
 export function chestLoot(gold, big, rnd = Math.random) {

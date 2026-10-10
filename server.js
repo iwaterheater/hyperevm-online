@@ -13,7 +13,7 @@ import {
   PVP_FLAG, PVP_DAMAGE, KARMA_DEATH, CAT_R, karmaGain, karmaBurn, PVP_PEACE, PVP_FLAGGED, PVP_OUTLAW,
   TIERS, WEAPON_FAMILIES, weaponFamily, tierForLevel,
   ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, KNIGHT_SHIELD, stackMax, sellPrice, heldFamily, fightStyle, equipError, wearItem, roomFor, addItem, takeItem,
-  cleanBag, cleanEquip, lookCode, rollLoot, chestLoot, cleanBar, defaultBar, barAdd,
+  cleanBag, cleanEquip, lookCode, rollLoot, coinsOf, coinGold, chestLoot, cleanBar, defaultBar, barAdd,
 } from './src/shared.js';
 import {
   normalize, validate, serialize, stringifyMap, regionIndex, pushOutOfSafe, nearNpc, startPoint, spawnHome, pickType, pickLevel,
@@ -777,11 +777,10 @@ function damageMob(m, hit, dx, dz, knock, p) {
   m.dead = true;
   m.respawnAt = now + m.respawn * (m.type === 'boss' ? 1 : RESPAWN_MULT);
   emit({ k: 'kill', ti: m.ti, ...ev }, m.x, m.z);
-  const drops = m.def.drops ?? 1;
-  for (let i = 0; i < drops; i++) {
+  for (let i = coinsOf(m.type); i > 0; i--) {
     gems.push({
       id: nextId++, x: m.x + rand(-1, 1) * m.r * 1.5, z: m.z + rand(-1, 1) * m.r * 1.5,
-      until: now + 25, gold: Math.ceil(rand(1, 3) * m.lvl),
+      until: now + 25, gold: coinGold(m.lvl),
     });
   }
   for (const id of m.dmgBy) {
@@ -1162,6 +1161,7 @@ function tick() {
       if (!p.dead && Math.hypot(p.x - g.x, p.z - g.z) < 1.6) {
         p.gold += g.gold;
         p.events.push({ k: 'gem', gold: g.gold });
+        emit({ k: 'pick', o: p.id }, p.x, p.z);   // everyone near sees the cat stoop for it
         return false;
       }
     }
@@ -1177,7 +1177,7 @@ function tick() {
       p.gold += gold;
       p.events.push({ k: 'chest', gold });
       for (const [id, n] of chestLoot(c.gold, c.big)) giveItem(p, id, n, c.x, c.z);
-      emit({ k: 'open', i: c.i }, c.x, c.z);
+      emit({ k: 'open', i: c.i, o: p.id }, c.x, c.z);
       c.openUntil = now + c.respawn;
       break;
     }
