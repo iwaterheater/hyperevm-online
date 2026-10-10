@@ -58,7 +58,7 @@ test('what is not a skill or an item has no icon', () => {
 
 test('the listed files are the files of assets/icons, each a 128 px RGBA PNG, no two alike', () => {
   assert.equal(new Set(ICON_FILES).size, ICON_FILES.length);
-  assert.equal(ICON_FILES.length, SKILL_KEYS.length + 15);
+  assert.equal(ICON_FILES.length, SKILL_KEYS.length + 16);
   const bodies = new Map();
   for (const file of ICON_FILES) {
     const data = fs.readFileSync(path.join(ROOT, file));

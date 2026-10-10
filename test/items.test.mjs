@@ -9,7 +9,8 @@ import {
   ITEMS, ITEM_KEYS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_KEYS, BONUS_NAMES, WEAPON_FAMILIES, heldFamily, fightStyle, MELEE_REACH, BOW_REACH, BAG_SIZE, STACK_MAX, SELL_RATE, SHOP, SHOP_TIER,
   STARTER_KIT, KNIGHT_SHIELD, itemOf, stackMax, sellPrice, weaponFamily, basicFamily, handsOf, equipError, equipBonus, roomFor, addItem, takeItem, cleanBag, cleanEquip,
   pushedOff, comesOff, equipWith, wearError, wearItem,
-  lookCode, lookOf, gearChance, tierForLevel, rollLoot, chestLoot, POTION_CHANCE,
+  lookCode, lookOf, gearChance, tierForLevel, rollLoot, chestLoot, POTION_CHANCE, SCROLL_CHANCE,
+  ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, ENCHANT_POWER, SMITH_BONUS, enchantChance, smithFee, enchant, takeOff, plusOf, wornPlus, itemName,
   SKILLS, SKILL_KEYS, activeSkills, BAR_SIZE, barSkill, cleanBar, defaultBar, barAdd,
 } from '../src/shared.js';
 
@@ -21,8 +22,9 @@ const BARE = { weapon: null, offhand: null, head: null, body: null, hands: null,
 
 // ---------------------------------------------------------------- the table
 
-test('the item table: four tiers of armour for four slots, of shields, of weapons for every family, and potions', () => {
-  const gear = ITEM_KEYS.filter((id) => ITEMS[id].kind !== 'potion');
+test('the item table: four tiers of armour for four slots, of shields, of weapons for every family, potions and the enchant scroll', () => {
+  const gear = ITEM_KEYS.filter((id) => ITEMS[id].slot);
+  assert.deepEqual(ITEM_KEYS.filter((id) => !ITEMS[id].slot && ITEMS[id].kind !== 'potion'), [ENCHANT_SCROLL]);
   assert.equal(TIERS.length, 4);
   assert.equal(gear.filter((id) => ITEMS[id].kind === 'armor').length, 16);
   assert.equal(gear.filter((id) => ITEMS[id].kind === 'shield').length, 4);
@@ -37,6 +39,10 @@ test('the item table: four tiers of armour for four slots, of shields, of weapon
       assert.ok((it.hp > 0) !== (it.mp > 0), `${id} restores health or mana`);
       assert.equal(it.slot, undefined);
       assert.equal(stackMax(id), STACK_MAX);
+      continue;
+    }
+    if (it.kind === 'scroll') {   // it is used up on a weapon: nothing to wear, and it stacks
+      assert.deepEqual([it.slot, it.tier, it.bonus, stackMax(id)], [undefined, undefined, undefined, STACK_MAX]);
       continue;
     }
     assert.ok(EQUIP_SLOTS.includes(it.slot) && SLOT_NAMES[it.slot], id);
@@ -75,8 +81,8 @@ test('the item table: four tiers of armour for four slots, of shields, of weapon
   assert.equal(ITEMS[KNIGHT_SHIELD].name, 'Wooden Buckler');
 });
 
-test('the Trader sells potions and gear up to his tier; an id from outside is an item only when it is one', () => {
-  for (const id of ITEM_KEYS) assert.equal(SHOP.includes(id), ITEMS[id].kind === 'potion' || ITEMS[id].tier <= SHOP_TIER, id);
+test('the Trader sells potions, the enchant scroll and gear up to his tier; an id from outside is an item only when it is one', () => {
+  for (const id of ITEM_KEYS) assert.equal(SHOP.includes(id), ITEMS[id].kind === 'potion' || id === ENCHANT_SCROLL || ITEMS[id].tier <= SHOP_TIER, id);
   assert.ok(SHOP.includes('iron_sword') && !SHOP.includes('steel_sword'));
   for (const id of ['leather_shield', 'iron_shield', 'bronze_greatsword', 'iron_greatsword']) assert.ok(SHOP.includes(id), id);
   for (const id of ['steel_shield', 'hypurr_shield', 'steel_greatsword', 'hypurr_greatsword']) assert.ok(!SHOP.includes(id), id);
@@ -492,12 +498,16 @@ test('loot: the chance grows with the level, the tier follows it, and most kills
   assert.deepEqual(rollLoot('tank', 12, dice([0.99, 0, 0])), [['hp_large', 1]]);
   assert.deepEqual(rollLoot('runner', 3, dice([0.99, POTION_CHANCE - 0.001, 0.7])), [['mp_small', 1]]);
   assert.deepEqual(rollLoot('runner', 3, dice([0.99, POTION_CHANCE, 0.7])), []);
+  // the scroll is the last draw: now and then a monster carries one
+  assert.deepEqual(rollLoot('runner', 3, dice([0.99, 0.99, SCROLL_CHANCE - 0.001])), [[ENCHANT_SCROLL, 1]]);
+  assert.deepEqual(rollLoot('runner', 3, dice([0.99, 0.99, SCROLL_CHANCE])), []);
+  assert.deepEqual(rollLoot('chaser', 6, dice([0, 0.9, 0, 0.9, 0])), [['iron_head', 1], [ENCHANT_SCROLL, 1]]);
   // with real dice: gear of the right tiers only, at about the promised rate
   let gear = 0;
   for (let i = 0; i < 4000; i++) {
     for (const [id, n] of rollLoot('shooter', 12)) {
       assert.ok(itemOf(id) && n === 1);
-      if (ITEMS[id].kind === 'potion') continue;
+      if (!ITEMS[id].slot) continue;   // a potion, or a scroll
       gear++;
       assert.ok([1, 2].includes(ITEMS[id].tier), `a level 12 monster dropped ${id}`);
     }
@@ -506,11 +516,12 @@ test('loot: the chance grows with the level, the tier follows it, and most kills
   assert.ok(gear > expected * 0.7 && gear < expected * 1.3, `${gear} pieces in 4000 kills, about ${Math.round(expected)} expected`);
 });
 
-test('loot: the King always leaves a piece of the top tier and potions; every piece of a tier can drop', () => {
+test('loot: the King always leaves a piece of the top tier, potions and two scrolls; every piece of a tier can drop', () => {
   const pieces = new Set();
   for (let i = 0; i < 600; i++) {
     const loot = rollLoot('boss', 18);
-    assert.equal(loot.length, 2);
+    assert.equal(loot.length, 3);
+    assert.deepEqual(loot[2], [ENCHANT_SCROLL, 2]);
     assert.equal(ITEMS[loot[0][0]].tier, TIERS.length - 1);
     assert.equal(ITEMS[loot[1][0]].kind, 'potion');
     assert.equal(loot[1][1], 3);
@@ -527,8 +538,11 @@ test('chests: sometimes a potion, seldom gear, and the richer the chest the bett
   assert.deepEqual(chestLoot(12, false, dice([0, 0, 0.9, 0, 0])), [['hp_small', 1], ['leather_head', 1]]);
   assert.deepEqual(chestLoot(40, false, dice([0, 0.9, 0, 0, 0])), [['mp_large', 2], ['iron_head', 1]]);
   assert.deepEqual(chestLoot(90, false, dice([0.9, 0, 0])), [['steel_head', 1]]);
-  assert.deepEqual(chestLoot(400, true, dice([0.9, 0.49, 0])), [['hypurr_head', 1]]);
-  assert.deepEqual(chestLoot(400, true, dice([0.9, 0.5, 0])), []);
+  // the last draw is for a Scroll: Enchant Weapon: seldom in a chest by the road, always in the King's hoard
+  assert.deepEqual(chestLoot(400, true, dice([0.9, 0.49, 0])), [['hypurr_head', 1], [ENCHANT_SCROLL, 1]]);
+  assert.deepEqual(chestLoot(400, true, dice([0.9, 0.5, 0])), [[ENCHANT_SCROLL, 1]]);
+  assert.deepEqual(chestLoot(12, false, dice([0.9, 0.9, 0.079])), [[ENCHANT_SCROLL, 1]]);
+  assert.deepEqual(chestLoot(12, false, dice([0.9, 0.9, 0.08])), []);
   for (let i = 0; i < 500; i++) for (const [id, n] of chestLoot(90, false)) assert.ok(itemOf(id) && n >= 1 && n <= 2);
 });
 
@@ -555,4 +569,83 @@ test('every skill takes a moment: spells are sped up by Casting Spd, blows and s
   assert.equal(castTime(SKILLS.backstab, { castMult: 3, atkMult: 1 }), SKILLS.backstab.cast);
   assert.equal(castTime(SKILLS.bolt, { castMult: 1, atkMult: 3 }), SKILLS.bolt.cast);
   assert.equal(castTime(SKILLS.power_strike, {}), 0.5, 'stats from before blows had a wind-up');
+});
+
+// ---------------------------------------------------------------- enchanting
+
+test('enchanting: safe to +3, two times in three after it, a little surer at the Blacksmith - and a failure breaks the weapon', () => {
+  assert.deepEqual([ENCHANT_MAX, ENCHANT_SAFE], [30, 3]);
+  for (let plus = 0; plus < ENCHANT_SAFE; plus++) assert.deepEqual([enchantChance(plus), enchantChance(plus, true)], [1, 1]);
+  for (const plus of [3, 10, 29]) {
+    assert.ok(Math.abs(enchantChance(plus) - 2 / 3) < 1e-9);
+    assert.ok(Math.abs(enchantChance(plus, true) - 2 / 3 - SMITH_BONUS) < 1e-9);
+  }
+  assert.ok(smithFee(0) > 0 && smithFee(10) > smithFee(9));
+  // the safe steps hold whatever the luck
+  const eq = cleanEquip({ weapon: 'iron_sword', head: 'iron_head' });
+  for (let step = 1; step <= ENCHANT_SAFE; step++) assert.deepEqual(enchant(eq, 0.999999), { ok: true, id: 'iron_sword', plus: step });
+  assert.deepEqual([eq.plus, wornPlus(eq)], [3, 3]);
+  // past them the luck decides: under the chance it holds ...
+  assert.deepEqual(enchant(eq, 0.66), { ok: true, id: 'iron_sword', plus: 4 });
+  // ... and the Blacksmith's hand turns a failure into a success
+  assert.deepEqual(enchant({ ...eq }, 0.7, true), { ok: true, id: 'iron_sword', plus: 5 });
+  // ... over it the weapon is gone, with its enchantment; what else is worn stays
+  assert.deepEqual(enchant(eq, 0.7), { ok: false, id: 'iron_sword', plus: 4 });
+  assert.deepEqual(eq, { ...BARE, head: 'iron_head' });
+  assert.equal(enchant(eq, 0), null, 'an empty paw has nothing to enchant');
+  assert.equal(enchant({ ...BARE, offhand: 'iron_shield' }, 0), null, 'only a weapon takes a scroll');
+  const top = cleanEquip({ weapon: 'hypurr_sword', plus: ENCHANT_MAX });
+  assert.equal(enchant(top, 0), null, 'there is no +31');
+  assert.equal(top.plus, ENCHANT_MAX);
+  // with honest dice: about two of three hold
+  let held = 0;
+  for (let i = 0; i < 3000; i++) if (enchant(cleanEquip({ weapon: 'iron_bow', plus: 7 }), Math.random()).ok) held++;
+  assert.ok(held > 1850 && held < 2150, `${held} of 3000 held`);
+});
+
+test('enchanting: the number belongs to the weapon - in the paw, in the bag, through a swap - and makes it hit harder', () => {
+  assert.deepEqual([itemName('iron_sword'), itemName('iron_sword', 5), itemName('iron_head', 5), itemName('hp_small', 2)], ['Iron Sword', '+5 Iron Sword', 'Iron Helmet', 'Lesser Health Potion']);
+  // a save file: a number only on a weapon, whole, above nothing and not beyond the top
+  assert.deepEqual(cleanBag([['iron_sword', 1, 4], ['iron_sword', 1], ['iron_head', 1, 4], ['hp_small', 3, 2], ['iron_bow', 1, 99], ['iron_staff', 1, -2], ['iron_staff', 1, 1.5]]),
+    [['iron_sword', 1, 4], ['iron_sword', 1], ['iron_head', 1], ['hp_small', 3], ['iron_bow', 1, ENCHANT_MAX], ['iron_staff', 1], ['iron_staff', 1]]);
+  assert.deepEqual(cleanBag([['iron_sword', 1, 4]]).map(plusOf), [4]);
+  assert.deepEqual(cleanEquip({ weapon: 'iron_sword', plus: 6 }), { ...BARE, weapon: 'iron_sword', plus: 6 });
+  assert.deepEqual(cleanEquip({ head: 'iron_head', plus: 6 }), { ...BARE, head: 'iron_head' }, 'no weapon, no number');
+  assert.deepEqual(cleanEquip({ weapon: 'iron_sword', plus: 0 }), { ...BARE, weapon: 'iron_sword' });
+  assert.equal(wornPlus({ weapon: 'iron_sword', plus: 'many' }), 0);
+  // worn: the +2 sword of the bag takes the place of the +5 one in the paw, and each keeps its number
+  const inv = [['hp_small', 2], ['steel_sword', 1, 2]], eq = cleanEquip({ weapon: 'iron_sword', plus: 5 });
+  assert.equal(wearItem(inv, eq, 1), '');
+  assert.deepEqual([inv, eq.weapon, eq.plus], [[['hp_small', 2], ['iron_sword', 1, 5]], 'steel_sword', 2]);
+  // armour put on leaves the weapon and its number alone
+  inv.push(['iron_head', 1]);
+  wearItem(inv, eq, 2);
+  assert.deepEqual([eq.head, eq.weapon, eq.plus], ['iron_head', 'steel_sword', 2]);
+  // a shield pushes a two-handed weapon off: into the bag with its number
+  const both = cleanEquip({ weapon: 'iron_greatsword', plus: 9 }), bag = [['iron_shield', 1]];
+  wearItem(bag, both, 0);
+  assert.deepEqual([bag, both.weapon, both.offhand, both.plus], [[['iron_greatsword', 1, 9]], null, 'iron_shield', undefined]);
+  // an unenchanted weapon put on over an enchanted one takes the number out of the paw
+  wearItem(inv, eq, inv.findIndex((s) => s[0] === 'iron_sword'));
+  assert.deepEqual([eq.weapon, eq.plus, inv.find((s) => s[0] === 'steel_sword')], ['iron_sword', 5, ['steel_sword', 1, 2]]);
+  // taken off
+  assert.equal(takeOff(inv, eq, 'weapon'), true);
+  assert.deepEqual([eq.weapon, eq.plus, inv.at(-1)], [null, undefined, ['iron_sword', 1, 5]]);
+  assert.equal(takeOff(inv, eq, 'weapon'), false, 'nothing there');
+  assert.equal(takeOff(Array.from({ length: BAG_SIZE }, () => ['iron_head', 1]), cleanEquip({ weapon: 'iron_sword' }), 'weapon'), false, 'a full bag');
+  // addItem: an enchanted weapon is a stack of its own; potions and plain gear as before
+  const fresh = [];
+  assert.deepEqual([addItem(fresh, 'iron_bow', 1, 3), addItem(fresh, 'iron_bow', 1), addItem(fresh, 'hp_small', 2, 7)], [1, 1, 2]);
+  assert.deepEqual(fresh, [['iron_bow', 1, 3], ['iron_bow', 1], ['hp_small', 2]]);
+  // the stats: every step adds a share of the weapon's attack, class weapon and item together
+  const plain = statsOf('fighter', 10, {}, 1, {}, { weapon: 'iron_sword' }), plus5 = statsOf('fighter', 10, {}, 1, {}, { weapon: 'iron_sword', plus: 5 });
+  assert.equal(plus5.pAtk, Math.round((18 + 8) * (1 + 5 * ENCHANT_POWER) * 1.9));
+  assert.ok(plus5.pAtk > plain.pAtk && plus5.mAtk > plain.mAtk);
+  for (const k of ['pDef', 'mDef', 'maxHp', 'atkSpd', 'acc', 'crit']) assert.equal(plus5[k], plain[k], k);
+  assert.deepEqual(statsOf('fighter', 10, {}, 1, {}, { head: 'iron_head', plus: 5 }), statsOf('fighter', 10, {}, 1, {}, { head: 'iron_head' }), 'a number without a weapon is nothing');
+  // what the preview of the bag compares: the equipment with the hovered weapon and ITS number
+  assert.deepEqual(equipWith({ ...BARE, weapon: 'iron_sword', plus: 5 }, 'steel_sword', 2), { ...BARE, weapon: 'steel_sword', plus: 2 });
+  assert.deepEqual(equipWith({ ...BARE, weapon: 'iron_sword', plus: 5 }, 'steel_sword'), { ...BARE, weapon: 'steel_sword' });
+  assert.deepEqual(equipWith({ ...BARE, weapon: 'iron_sword', plus: 5 }, 'iron_head'), { ...BARE, weapon: 'iron_sword', head: 'iron_head', plus: 5 });
+  assert.deepEqual(equipWith({ ...BARE, weapon: 'iron_greatsword', plus: 5 }, 'iron_shield'), { ...BARE, offhand: 'iron_shield' });
 });

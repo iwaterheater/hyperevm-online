@@ -1015,7 +1015,8 @@ check('items: an old save loads with an empty bag, a new cat gets the starter ki
   // the next run of the server reads what this one wrote
   await withServer({ setup: seed(file) }, async (s) => {
     const old = await enter(s, { token: 'old-token', name: 'Old' });
-    assert.deepEqual(old.inv, [['iron_sword', 1], ['hp_small', 7]]);
+    // the Blacksmith's upgrade it had bought in the time before enchanting has become five steps on the sword it owns now
+    assert.deepEqual(old.inv, [['iron_sword', 1, 5], ['hp_small', 7]]);
     assert.deepEqual(old.eq, { ...NAKED, head: 'iron_head' });
     assert.equal(old.me.gold, 2000 - 120 - 240 - 7 * 12);
     const back = await enter(s, { token: 'new-token', name: 'New' });
@@ -1152,7 +1153,7 @@ check('items: the bag is full - nothing more goes in, and nothing is lost', () =
 }));
 
 check('items: the Trader - buying and selling change gold and bag, and only beside him', () => withServer({
-  setup: seed({ rich: { ...OLD, gold: 300, inv: [['steel_sword', 1], ['hp_small', 4]] }, far: { ...OLD, gold: 300, inv: [['steel_sword', 1]] } }),
+  setup: seed({ rich: { ...OLD, weapon: 1, gold: 300, inv: [['steel_sword', 1], ['hp_small', 4]] }, far: { ...OLD, weapon: 1, gold: 300, inv: [['steel_sword', 1]] } }),
 }, async (s) => {
   const { ITEMS, sellPrice } = await import('../src/shared.js');
   const far = await enter(s, { token: 'far', at: [100, 100] });
@@ -1822,4 +1823,96 @@ check('a save of the characters that fails does not take the server down, and ne
   });
   assert.deepEqual(fs.readdirSync(fine.dataDir), ['players.json']);
   assert.equal(savedPlayers(fine).saver.name, 'Saver');
+});
+
+
+// ---------------------------------------------------------------- enchanting
+
+const SMITH = FILE.npcs.find((n) => n.kind === 'blacksmith');
+
+check('enchanting: a scroll raises the weapon in the paw, the number stays with the weapon, and a failure breaks it', async () => {
+  const { smithFee, ENCHANT_SAFE } = await import('../src/shared.js');
+  const smithy = { ...OLD, name: 'Smithy', level: 10, gold: 5000, weapon: 1, inv: [['scroll_weapon', 40], ['iron_sword', 1], ['hp_small', 2]], equip: {} };
+  const s = await withServer({ setup: seed({ e: smithy }) }, async (s) => {
+    const p = await enter(s, { token: 'e', name: 'Smithy', at: [SMITH.x + 1.5, SMITH.z + 1.5] });
+    const scrolls = () => p.inv.find((stack) => stack[0] === 'scroll_weapon')?.[1] ?? 0;
+    const use = async (more = {}) => { await p.send({ t: 'ench', i: p.inv.findIndex((stack) => stack[0] === 'scroll_weapon'), id: 'scroll_weapon', ...more }); };
+    // nothing in the paw: nothing to enchant, and the scroll is kept
+    await use();
+    assert.equal((await p.event('err')).m, 'Hold the weapon you want to enchant');
+    assert.equal(scrolls(), 40);
+    // a potion is no scroll
+    await p.send({ t: 'ench', i: 2, id: 'hp_small' });
+    await p.send({ t: 'eq', i: 1, id: 'iron_sword' });
+    await p.until('the sword in the paw', () => p.eq.weapon === 'iron_sword');
+    const bare = p.me.maxHp;
+    // the safe steps: three scrolls, three steps
+    for (let step = 1; step <= ENCHANT_SAFE; step++) {
+      await use();
+      assert.deepEqual(await p.event('ench'), { k: 'ench', ok: 1, id: 'iron_sword', plus: step });
+    }
+    await p.until('+3', () => p.eq.plus === 3 && scrolls() === 37);
+    assert.equal(p.me.maxHp, bare);
+    // taken off and put back on, the weapon keeps its number
+    await p.send({ t: 'uneq', slot: 'weapon' });
+    await p.until('the sword in the bag', () => p.inv.some((stack) => stack[0] === 'iron_sword' && stack[2] === 3));
+    assert.deepEqual([p.eq.weapon, p.eq.plus], [null, undefined]);
+    await p.send({ t: 'eq', i: p.inv.findIndex((stack) => stack[0] === 'iron_sword'), id: 'iron_sword' });
+    await p.until('the sword back', () => p.eq.weapon === 'iron_sword' && p.eq.plus === 3);
+    // past the safe steps, at the Blacksmith: his fee is paid and the scroll spent either way; the weapon gains a
+    // step or breaks. Until it breaks:
+    let plus = 3, gold = p.me.gold, left = scrolls();
+    for (;;) {
+      await use({ smith: 1 });
+      const ev = await p.event('ench');
+      gold -= smithFee(plus);
+      left--;
+      await p.until('the fee and the scroll gone', () => p.me.gold === gold && scrolls() === left);
+      if (!ev.ok) { assert.deepEqual(ev, { k: 'ench', ok: 0, id: 'iron_sword', plus }); break; }
+      assert.deepEqual(ev, { k: 'ench', ok: 1, id: 'iron_sword', plus: ++plus });
+      await p.until('the step', () => p.eq.plus === plus);
+      assert.ok(left > 0, 'forty scrolls and no failure: the chance is not what it says');
+    }
+    await p.until('the paw empty', () => p.eq.weapon === null);
+    assert.equal(p.eq.plus, undefined);
+    assert.ok(!p.inv.some((stack) => stack[0] === 'iron_sword'), 'the sword is gone, not back in the bag');
+    // the Trader sells the scroll, and it stacks
+    const far = await enter(s, { token: 'f', name: 'Far', at: AT_TRADER });
+    await far.send({ t: 'ench', i: 0, id: 'hp_small', smith: 1 });
+    await far.settled();
+    await p.settled();
+  });
+  const saved = savedPlayers(s).e;
+  assert.deepEqual([saved.equip.weapon, saved.equip.plus, saved.weapon], [null, undefined, 1]);
+});
+
+check('enchanting: the Blacksmith\'s old upgrades come along as steps on the weapon, and the Blacksmith has to be near for his hand', async () => {
+  const old = (name, more) => ({ ...OLD, name, level: 12, gold: 900, ...more });
+  const s = await withServer({ setup: seed({
+    held: old('Held', { weapon: 3, equip: { weapon: 'iron_sword' }, inv: [['scroll_weapon', 2]] }),
+    bagged: old('Bagged', { weapon: 4, inv: [['hp_small', 1], ['iron_bow', 1], ['iron_staff', 1]] }),
+    bare: old('Bare', { weapon: 2, inv: [] }),
+    master: old('Master', { weapon: 9, equip: { weapon: 'steel_sword', plus: 2 } }),
+  }) }, async (s) => {
+    const held = await enter(s, { token: 'held', name: 'Held', at: AT_TRADER });
+    assert.deepEqual([held.eq.weapon, held.eq.plus, held.me.weapon], ['iron_sword', 10, 1], 'five steps for an upgrade');
+    const bagged = await enter(s, { token: 'bagged', name: 'Bagged', at: AT_TRADER });
+    assert.deepEqual([bagged.inv, bagged.me.weapon], [[['hp_small', 1], ['iron_bow', 1, 15], ['iron_staff', 1]], 1], 'the first weapon of the bag gets them');
+    const bare = await enter(s, { token: 'bare', name: 'Bare', at: AT_TRADER });
+    assert.deepEqual([bare.eq.plus, bare.me.weapon], [undefined, 2], 'no weapon to carry them: kept until there is one');
+    const master = await enter(s, { token: 'master', name: 'Master', at: AT_TRADER });
+    assert.deepEqual([master.eq.plus, master.me.weapon], [30, 1], 'and never beyond the top');
+    // far from the Blacksmith his hand is not to be had: nothing is spent
+    await held.send({ t: 'ench', i: 0, id: 'scroll_weapon', smith: 1 });
+    assert.equal((await held.event('err')).m, 'The Blacksmith is too far away');
+    await master.send({ t: 'buy', id: 'scroll_weapon', n: 3 });
+    await master.until('three scrolls', () => master.inv.some((stack) => stack[0] === 'scroll_weapon' && stack[1] === 3));
+    await master.send({ t: 'ench', i: 0, id: 'scroll_weapon' });
+    assert.match((await master.event('err')).m, /^\+30 Steel Sword cannot be enchanted any further$/);
+    await held.settled();
+    assert.deepEqual([held.inv, held.eq.plus, held.me.gold], [[['scroll_weapon', 2]], 10, 900]);
+    await master.settled();
+  });
+  const file = savedPlayers(s);
+  assert.deepEqual([file.held.equip.plus, file.held.weapon, file.bagged.inv[1], file.bare.weapon, file.master.equip.plus], [10, 1, ['iron_bow', 1, 15], 2, 30]);
 });

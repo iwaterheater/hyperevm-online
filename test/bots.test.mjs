@@ -118,8 +118,9 @@ test('a bot starts as the character of its roster line - asked by a program on t
   const s = await boot(FILE);
   const me = await joinOnce(s, { token: 'bot-a', bot: { lvl: 12, cls: 'knight', family: 'greatsword' } });
   assert.deepEqual([me.level, me.cls, me.xp, me.gold], [12, 'fighter', 0, 480], 'a profession waits for its level');
-  assert.deepEqual(me.eq, { weapon: 'steel_greatsword', offhand: null, head: 'steel_head', body: 'steel_body', hands: 'iron_hands', feet: 'iron_feet' });
-  for (const id of Object.values(me.eq)) if (id) assert.ok(!equipError(me.cls, me.level, id), id);
+  // its weapon carries the safe steps a cat of its level would have dared: one for every five levels, three at most
+  assert.deepEqual(me.eq, { weapon: 'steel_greatsword', offhand: null, head: 'steel_head', body: 'steel_body', hands: 'iron_hands', feet: 'iron_feet', plus: 2 });
+  for (const id of Object.values(me.eq)) if (typeof id === 'string') assert.ok(!equipError(me.cls, me.level, id), id);
   assert.deepEqual(me.inv, [['hp_large', 5], ['mp_small', 3]]);
   assert.deepEqual(me.skills, { power_strike: 2, weapon_mastery: 2, stun_strike: 1, war_cry: 1, armor_mastery: 1 });
   for (const id of Object.keys(me.skills)) assert.ok(SKILLS[id].lvl <= 12 && me.skills[id] <= SKILLS[id].sp.length);
@@ -128,9 +129,9 @@ test('a bot starts as the character of its roster line - asked by a program on t
   assert.deepEqual([again.level, again.cls], [12, 'fighter']);
   // at the level of a profession it starts in it; junk is a level 1 Fighter
   const high = await joinOnce(s, { token: 'bot-b', bot: { lvl: 25, cls: 'wizard' } });
-  assert.deepEqual([high.level, high.cls, high.eq.weapon], [25, 'wizard', 'hypurr_staff']);
+  assert.deepEqual([high.level, high.cls, high.eq.weapon, high.eq.plus], [25, 'wizard', 'hypurr_staff', 3]);
   const junk = await joinOnce(s, { token: 'bot-c', bot: { lvl: 'many', cls: 'constructor', family: '__proto__' } });
-  assert.deepEqual([junk.level, junk.cls, junk.eq.weapon], [1, 'fighter', 'bronze_sword']);
+  assert.deepEqual([junk.level, junk.cls, junk.eq.weapon, junk.eq.plus], [1, 'fighter', 'bronze_sword', undefined]);
   // a page - it names its Origin - gets a new cat like everybody
   const page = await joinOnce(s, { token: 'page', bot: { lvl: 30 } }, s.url);
   assert.deepEqual([page.level, page.gold, page.eq.weapon], [1, 0, null]);
