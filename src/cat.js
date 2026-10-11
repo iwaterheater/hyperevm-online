@@ -36,6 +36,10 @@ const SHOULDERS = [new THREE.Vector3(-0.255, 0.72, 0), new THREE.Vector3(0.255, 
 const HANG = new THREE.Vector3(0.36, 0.38, 0), QUIVER = new THREE.Vector3(0.37, 0.69, -0.25);
 // which way an elbow goes: down and out for the paw with the bow, out and back for the one with the string
 const POLE_BOW = new THREE.Vector3(-0.2, -1, 0.3), POLE_STRING = new THREE.Vector3(1, 0.1, -0.5);
+// the string's paw does not go in straight lines: out and round to the quiver, and up over the bow to the string;
+// when it has let go it flies on, back and away
+const ROUND_TO_QUIVER = new THREE.Vector3(0.54, 0.48, -0.1), OVER_TO_STRING = new THREE.Vector3(0.5, 0.95, 0.24);
+const LET_GO = new THREE.Vector3(0.17, 0.04, -0.1);
 const V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), V3 = new THREE.Vector3(), Q1 = new THREE.Quaternion();
 // The shield on the off paw, in the frame of the body: where its middle is from the paw (out to the side, up, in
 // front) and how it faces - forward, turned a little outwards and leaning back; and how far that paw is held up for it.
@@ -71,6 +75,25 @@ const SWINGS = [
   { wound: pawPose([-0.3, -0.35, 0.88], [-0.8, 0.15, -0.2], 0.5), thru: pawPose([0.75, -0.3, 0.55], [0.8, 0.05, 0.6], 0.05), turn: 1 },
   { wound: pawPose([0.93, 0.3, -0.15], [-0.1, 0.9, -0.42], 0.25), thru: pawPose([0.2, -0.55, 0.8], [0, -0.45, 0.9], 0.05), turn: 0 },
 ];
+
+// The paw on guard: for a while after a blow the blade is not let down, it is held up in front, ready for the next.
+const GUARD = pawPose([0.3, -0.45, 0.85], [0.15, 0.8, 0.55], 0.85);
+// A value that follows its target the way a body does: with weight - late, a little past it, and back. s = { x, v }.
+function springTo(s, target, dt, stiff, damp) {
+  for (let left = Math.min(dt, 0.1); left > 1e-6; left -= 1 / 120) {
+    const h = Math.min(left, 1 / 120);
+    s.v += ((target - s.x) * stiff - s.v * damp) * h;
+    s.x += s.v * h;
+  }
+  return s.x;
+}
+// out to the end and a little past it, then back
+const backOut = (f) => { const g = f - 1; return 1 + 2.1 * g * g * g + 1.1 * g * g; };
+// a path that bends: from a to b, pulled towards c on the way
+function bend(out, a, c, b, f) {
+  const g = 1 - f;
+  return out.set(a.x * g * g + 2 * c.x * f * g + b.x * f * f, a.y * g * g + 2 * c.y * f * g + b.y * f * f, a.z * g * g + 2 * c.z * f * g + b.z * f * f);
+}
 
 // Sinking on its knees by `depth` (model units) with the feet staying where they are: -> how far the thigh comes
 // forward at the hip and how far the knee folds.
@@ -433,6 +456,11 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
   let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0, aim = 0, strike = 0, wind = 0;
   let wasAir = false, land = 0, down = 0, still = 0, fidget = null, nextFidget = 4 + Math.random() * 5, nextFlick = 1 + Math.random() * 3;
   const flick = [0, 0];
+  // what has weight: the body in a blow (how it turns, leans, rolls and steps), and the turn into the archer's stance
+  const body = { twist: { x: 0, v: 0 }, lean: { x: 0, v: 0 }, roll: { x: 0, v: 0 }, lunge: { x: 0, v: 0 }, stance: { x: 0, v: 0 }, look: { x: 0, v: 0 } };
+  // the paw with the weapon as the last frame left it (a blow starts from there), and where the blow in hand started
+  const pawNow = new THREE.Quaternion(), from = new THREE.Quaternion(), idle = new THREE.Quaternion();
+  let bendNow = 0.16, fromBend = 0.16, wasSlash = -1, guard = 0, recoil = 0, wasShooting = false;
   const pawQuat = (i, out) => out.copy(rig.arms[i].quaternion).multiply(rig.arms[i].fore.quaternion);
   const rise = (f) => 1 - (1 - f) * (1 - f), drop = (f) => f * f, settle = (f) => f * f * (3 - 2 * f);
 
@@ -528,56 +556,81 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       crouch += wind * 0.05 * drawn;
     }
 
-    // ---- the sword swing (0..1). Kinds: 0 = left to right, 1 = right to left, 2 = overhead chop.
-    // A swing has three beats: the blade is drawn back and slows at the top, so the wind-up can be read; it comes
-    // through gathering speed; and the arm eases back. The wind-up takes the first SWING_WINDUP of it. The whole cat
-    // is in it: the elbow is cocked and then thrown straight, the body winds up against the blow and goes with it,
-    // one foot steps into it, the free paw and the tail swing the other way.
-    let step = 0, brace = 0, counter = 0;
-    if (slash >= 0) {
-      const W = SWING_WINDUP, H = SWING_HIT;
-      const up = slash < W ? rise(slash / W) : slash < H ? 1 - drop((slash - W) / (H - W)) : 0;                // drawn back: 0..1..0
-      const thru = slash < W ? 0 : slash < H ? drop((slash - W) / (H - W)) : 1 - settle((slash - H) / (1 - H));   // through, then back: 0..1..0
-      const grip = Math.max(up, thru);
-      // the paw goes from where it was to the wound-up pose, through the blow, and back
-      const { wound, thru: through, turn } = SWINGS[slashKind] ?? SWINGS[2], rest = Q3.copy(arms[1].quaternion);
-      let cocked;
-      if (slash < W) { const a = rise(slash / W); arms[1].quaternion.copy(rest).slerp(wound.q, a); cocked = mix(bend1, wound.b, a); }
-      else if (slash < H) { const a = drop((slash - W) / (H - W)); arms[1].quaternion.copy(wound.q).slerp(through.q, a); cocked = mix(wound.b, through.b, a); }
-      else { const a = settle((slash - H) / (1 - H)); arms[1].quaternion.copy(through.q).slerp(rest, a); cocked = mix(through.b, bend1, a); }
-      if (slashKind === 2) {
-        lean += -0.2 * up + 0.34 * thru;
-        twist += 0.3 * up - 0.18 * thru;
-        lunge += -0.05 * up + 0.2 * thru;
-        crouch += 0.02 * up + 0.07 * thru;
-        bob += 0.04 * up;
-        counter = -0.8 * up + 0.6 * thru;
-      } else {
-        // wound up to one side, then across to the other
-        const across = slash < W ? -up : slash < H ? mix(-1, 1, drop((slash - W) / (H - W))) : thru;   // -1 wound up, +1 through
-        twist += across * turn * 0.85;
-        roll = across * turn * 0.07;
-        lean += 0.06 * up + 0.16 * thru;
-        lunge += -0.03 * up + 0.16 * thru;
-        crouch += 0.06 * grip;
-        counter = (-0.5 * up + 0.5 * thru) * 0.8;
-      }
-      bend1 = cocked;
-      step = thru;
-      brace = grip;
+    // ---- on guard. For a while after a blow the cat stays ready: the blade up in front, the other paw up beside
+    // it, the weapon shoulder back, a little down on its knees. The next blow starts from there, not from a paw
+    // that hangs.
+    const armed = !rig.bow && !rig.staff;
+    guard = slash >= 0 && armed ? 1 : Math.max(0, guard - dt / 1.4);
+    const ready = settle(Math.min(1, guard * 1.8)) * (1 - sit) * (1 - cast) * (1 - wind) * (1 - run * 0.7) * (1 - air);
+    let swTwist = 0, swLean = 0, swRoll = 0, swLunge = 0;
+    if (ready > 0.001) {
+      arms[1].quaternion.slerp(GUARD.q, ready);
+      bend1 = mix(bend1, GUARD.b, ready);
+      if (!rig.shield) { arms[0].rotation.x = mix(arms[0].rotation.x, -0.5, ready); bend0 = mix(bend0, 0.85, ready); }
+      swTwist += 0.2 * ready;
+      crouch += 0.025 * ready;
     }
+
+    // ---- the blow (0..1). Kinds: 0 = from the weapon's side across the front, 1 = back the other way, 2 = the chop.
+    // The blade is drawn back, a little too far, and settles; it comes through gathering speed, goes a little past
+    // and stays there for the moment in which the blow lands; then the paw comes back to guard. It is a whip: the
+    // body goes first - it winds up against the blow and turns into it, one foot stepping forward - the paw follows,
+    // and the elbow is thrown straight last. What has weight - the body - moves on springs: late, and a little past.
+    let step = 0, brace = 0, counter = 0, landed = 0;
+    if (slash >= 0) {
+      if (wasSlash < 0 || slash < wasSlash) { from.copy(pawNow); fromBend = bendNow; }   // a new blow: from wherever the paw is
+      const W = SWING_WINDUP, H = SWING_HIT, C = H - 0.05;   // C: the blade is through
+      const wound = (at) => (at <= 0 ? 0 : at < W ? backOut(at / W) : 1);
+      const through = (at) => (at < W ? 0 : at < C ? drop((at - W) / (C - W)) * 1.1 : at < H + 0.08 ? mix(1.1, 1, settle((at - C) / (H + 0.08 - C))) : 1);
+      const home = (at) => (at < H + 0.06 ? 0 : settle(Math.min(1, (at - H - 0.06) / (1 - H - 0.06))));
+      const { wound: back, thru: across, turn } = SWINGS[slashKind] ?? SWINGS[2];
+      idle.copy(arms[1].quaternion);
+      const late = slash - 0.035;                             // the elbow is behind the paw
+      arms[1].quaternion.copy(from).slerp(back.q, wound(slash)).slerp(across.q, through(slash)).slerp(idle, home(slash));
+      bend1 = mix(mix(mix(fromBend, back.b, wound(late)), across.b, Math.min(1, through(late))), bend1, home(late));
+      // the body, a little ahead of the paw: wound up 0..1..0, through 0..1..0
+      const lead = slash + 0.05, th = Math.min(1.05, through(lead)) * (1 - home(lead)), up = wound(lead) * (1 - Math.min(1, through(lead)));
+      if (slashKind === 2) {
+        swLean += -0.22 * up + 0.38 * th;
+        swTwist += 0.34 * up - 0.24 * th;
+        swLunge += -0.06 * up + 0.22 * th;
+        crouch += 0.02 * up + 0.08 * th;
+        bob += 0.05 * up - 0.015 * th;
+        counter = -0.7 * up + 0.6 * th;
+      } else {
+        const sweep = th - up;   // -1 wound up, +1 through
+        swTwist += sweep * turn * 0.95;
+        swRoll += sweep * turn * 0.09;
+        swLean += 0.05 * up + 0.2 * th;
+        swLunge += -0.05 * up + 0.2 * th;
+        crouch += 0.05 * Math.max(up, th);
+        counter = -0.5 * up + 0.5 * th;
+      }
+      step = th;
+      brace = Math.max(up, th);
+      landed = Math.exp(-(((slash - C) / 0.06) ** 2));        // the moment the blow lands: the cat is stretched into it
+      // the foot that steps is lifted on its way
+      if (slash > W && slash < C) knee0 += Math.sin((slash - W) / (C - W) * Math.PI) * 0.55 * (1 - run);
+    }
+    wasSlash = slash;
+    twist += springTo(body.twist, swTwist, dt, 260, 24);
+    lean += springTo(body.lean, swLean, dt, 240, 25);
+    roll += springTo(body.roll, swRoll, dt, 240, 24);
+    lunge += springTo(body.lunge, swLunge, dt, 320, 30);
     if (!rig.shield && !rig.bow && Math.abs(counter) > 0.001) {
       arms[0].rotation.x += counter * (1 - run * 0.5);
-      bend0 = mix(bend0, 0.7, Math.min(1, Math.abs(counter)));
+      arms[0].rotation.z -= 0.25 * Math.abs(counter);
+      bend0 = mix(bend0, 0.6, Math.min(1, Math.abs(counter)));
     }
-    // the step into the blow: the near foot goes forward, the other one stays behind (standing; a running cat keeps running)
-    if (step > 0.001 || brace > 0.001) {
-      const stand = 1 - run;
+    // the step into the blow: the near foot goes forward, the other one stays behind (standing; a running cat keeps
+    // running); on guard the feet stay apart
+    if (step > 0.001 || brace > 0.001 || ready > 0.001) {
+      const stand = 1 - run, wide = Math.max(brace, ready * 0.7);
       legs[0].rotation.x += -0.5 * step * stand;
       legs[1].rotation.x += 0.42 * step * stand;
-      legs[0].rotation.z = -0.12 * brace * stand;
-      legs[1].rotation.z = 0.12 * brace * stand;
-      knee0 += 0.55 * step * stand;
+      legs[0].rotation.z = -0.13 * wide * stand;
+      legs[1].rotation.z = 0.13 * wide * stand;
+      knee0 += 0.5 * step * stand;
       knee1 += 0.15 * brace * stand;
     }
 
@@ -673,7 +726,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     }
     inner.rotation.set(lean, twist, roll);
     inner.position.set(0, bob - sink * SCALE, lunge * SCALE - 0.22 * jolt);
-    inner.scale.set(1 + 0.1 * jolt + 0.07 * give, (1 - 0.14 * jolt) * (1 - 0.12 * give), 1 + 0.1 * jolt + 0.07 * give);
+    inner.scale.set(1 + 0.1 * jolt + 0.07 * give, (1 - 0.14 * jolt) * (1 - 0.12 * give) * (1 - 0.04 * landed), (1 + 0.1 * jolt + 0.07 * give) * (1 + 0.07 * landed));
     // the face stays on what the cat is fighting while the body turns under it
     headY -= twist * 0.75;
     arms[0].fore.rotation.x = -bend0;
@@ -682,44 +735,59 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     legs[1].shin.rotation.x = knee1;
 
     // ---- the bow. The cat stands side-on to its target, as an archer does, and looks along the arrow. One paw goes
-    // back to the quiver at the hip and comes forward with an arrow while the other brings the bow in; the arrow is
-    // laid on it; then the bow is pushed out at the target and the string taken back. `draw` runs through all of
-    // that, 0..1; for a moment after the arrow has left (shoot) the stance is held.
+    // round to the quiver at the hip and comes up over the bow with an arrow while the other brings the bow in; the
+    // arrow is laid on it; then the bow is pushed out at the target and the string taken back - fast at first, slower
+    // as the bow resists - and the cat leans away from it. `draw` runs through all of that, 0..1. When the arrow goes
+    // the string sings, the bow tips forward in its paw, the other paw flies on backwards and the body rocks back;
+    // for a moment after (shoot) the stance is held. The head turns first, the body after it, on a spring.
     aim += ((draw >= 0 ? 1 : 0) - aim) * Math.min(1, dt * 14);
+    if (shooting && !wasShooting) recoil = 1;
+    wasShooting = shooting;
+    recoil *= Math.exp(-dt * 6);
     if (rig.bow) {
       const { bow, string, arrow, inPaw } = rig.bow;
-      const drawing = draw >= 0, p = drawing ? Math.min(1, draw) : 0, stance = Math.max(aim, shoot);
-      const toQuiver = smooth(0, 0.2, p), toBow = smooth(0.24, 0.46, p), pull = drawing ? smooth(0.5, 1, p) : 0;
-      const out = drawing ? Math.max(pull, 1 - smooth(0.08, 0.46, p)) : 1;        // how far the bow is held out: 1 - in - 1
-      if (stance > 0.01) {
-        inner.rotation.y += STANCE * stance;
-        headY += -STANCE * 0.9 * stance;
+      const drawing = draw >= 0, p = drawing ? Math.min(1, draw) : 0, held = drawing || shoot > 0.05 ? 1 : 0;
+      const turned = springTo(body.stance, held, dt, 120, 17), looking = Math.min(1, Math.max(0, springTo(body.look, held, dt, 300, 30)));
+      const stance = Math.min(1, Math.max(0, Math.max(turned, aim * 0.6, shoot)));
+      const toQuiver = smooth(0, 0.2, p), toBow = smooth(0.2, 0.5, p);
+      const taken = Math.min(1, Math.max(0, (p - 0.48) / 0.52)), pull = drawing ? 1 - (1 - taken) ** 3 : 0;
+      const out = drawing ? Math.max(pull, 1 - smooth(0.06, 0.46, p)) : 1;        // how far the bow is held out: 1 - in - 1
+      if (stance > 0.01 || Math.abs(turned) > 0.01) {
+        inner.rotation.y += STANCE * turned;
+        inner.rotation.z += (-0.08 * pull + 0.07 * recoil) * stance;              // away from the bow as it is drawn, and back
+        headY += -STANCE * 0.9 * looking;
         const grip = V1.copy(BOW_NEAR).lerp(BOW_FAR, out);
+        grip.x -= 0.035 * recoil; grip.y += 0.02 * recoil + Math.sin(t * 23) * 0.003 * pull;
         const a = reach(SHOULDERS[0], grip, POLE_BOW);
         arms[0].quaternion.slerp(a.q, stance);
         arms[0].fore.rotation.x = mix(arms[0].fore.rotation.x, -a.bend, stance);
-        // the string's paw: hanging -> at the quiver -> where the arrow meets the string, which then comes back with it;
-        // just loosed, it stays where it let go
+        // the string's paw: hanging -> round to the quiver -> up over the bow to where the arrow meets the string,
+        // which then comes back with it; when it has let go it flies on
         const nock = V2.copy(grip); nock.x += BOW_STRING + BOW_PULL * (drawing ? pull : 1);
-        V3.copy(HANG).lerp(QUIVER, drawing ? toQuiver : 0).lerp(nock, drawing ? toBow : 1);
+        if (!drawing) V3.copy(nock).addScaledVector(LET_GO, settle(Math.min(1, (1 - recoil) * 2.2)));
+        else if (toBow > 0) bend(V3, QUIVER, OVER_TO_STRING, nock, toBow);
+        else bend(V3, HANG, ROUND_TO_QUIVER, QUIVER, toQuiver);
         const b = reach(SHOULDERS[1], V3, POLE_STRING);
         arms[1].quaternion.slerp(b.q, stance);
         arms[1].fore.rotation.x = mix(arms[1].fore.rotation.x, -b.bend, stance);
       }
-      // upright whatever the paw does, and turned with the stance so that its belly faces the target
-      bow.quaternion.copy(pawQuat(0, Q1)).invert().multiply(Q2.setFromAxisAngle(UP, -STANCE * stance));
-      const back = -BOW_STRING - BOW_PULL * pull, at = string.geometry.attributes.position;
-      if (at.getZ(1) !== back) { at.setZ(1, back); at.needsUpdate = true; }
-      arrow.visible = drawing && toBow >= 1;                      // on the bow once it is nocked
+      // upright whatever the paw does, turned with the stance so that its belly faces the target - and tipped forward
+      // for a moment by the shot
+      bow.quaternion.copy(pawQuat(0, Q1)).invert().multiply(Q2.setFromAxisAngle(UP, -STANCE * stance)).multiply(Q3.setFromAxisAngle(AXIS_X, 0.4 * recoil * (1 - recoil) * 4 * stance));
+      const back = -BOW_STRING - BOW_PULL * pull, sing = Math.sin(t * 85) * 0.04 * recoil, at = string.geometry.attributes.position;
+      if (at.getZ(1) !== back + sing) { at.setZ(1, back + sing); at.needsUpdate = true; }
+      arrow.visible = drawing && toBow >= 0.98;                   // on the bow once it is nocked
       arrow.position.z = back + ARROW_NOCK;
-      inPaw.visible = drawing && toQuiver > 0.8 && toBow < 1;     // in the paw on the way from the quiver
+      inPaw.visible = drawing && toQuiver > 0.8 && toBow < 0.98;  // in the paw on the way from the quiver
     }
     head.rotation.set(headX, headY, headZ);
 
     // ---- the tail: a wave runs down its four segments, faster on the run, where it also streams out behind
     for (let i = 0; i < 4; i++) {
       const s = tail[i];
-      s.rotation.y = Math.sin(t * (3 + move * 5) - i * 0.85) * (0.14 + move * 0.1) * (i ? 0.75 : 0.6) - twist * 0.18;
+      // it trails behind a body that turns, the more the further down it is
+      const dragged = Math.max(-0.5, Math.min(0.5, -body.twist.v * 0.03 * (i + 1)));
+      s.rotation.y = Math.sin(t * (3 + move * 5) - i * 0.85) * (0.14 + move * 0.1) * (i ? 0.75 : 0.6) - twist * 0.18 + dragged;
       s.rotation.x = Math.sin(t * 2 - i * 0.6) * 0.05 - move * (i ? 0.06 : 0.12) - stoop * (i ? 0.08 : 0.3) - jolt * 0.12;
       s.rotation.z = 0;
     }
@@ -730,7 +798,9 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     for (let i = 0; i < 2; i++) {
       flick[i] = Math.max(0, flick[i] - dt / 0.2);
       const out = i ? -1 : 1;   // the left ear turns outwards about +Z, the right one about -Z
-      ears[i].rotation.set(-0.3 * move - 0.35 * jolt, 0, out * (0.85 * jolt - 0.3 * Math.sin(flick[i] * Math.PI)));
+      // and thrown back by a lunge, or to the side by a turn
+      const thrown = Math.max(-0.4, Math.min(0.4, -body.lunge.v * 0.9)), swept = Math.max(-0.3, Math.min(0.3, body.twist.v * 0.025));
+      ears[i].rotation.set(-0.3 * move - 0.35 * jolt + Math.min(0, thrown), 0, out * (0.85 * jolt - 0.3 * Math.sin(flick[i] * Math.PI)) + swept);
     }
 
     blink -= dt;
@@ -754,6 +824,9 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       for (let i = 0; i < 4; i++) { tail[i].rotation.y *= 1 - K; tail[i].rotation.x = mix(tail[i].rotation.x, i ? 0.12 : 0.5, K); }
       if (K > 0.35) eyes[0].scale.y = eyes[1].scale.y = 0.12;
     }
+
+    pawNow.copy(arms[1].quaternion);
+    bendNow = -arms[1].fore.rotation.x;
 
     // The staff, whatever its paw has just been told to do: upright on the ground, level on the move, crystal first
     // for a spell, and with the paw for a blow. It slides through the paw so that the right part of it is held: the
