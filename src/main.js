@@ -400,7 +400,7 @@ function setLabel(a, text, color) {
 // What a cat wears and holds: its class gives the hoodie, the look code of its equipment (lookCode in shared.js) the
 // armour pieces, their tiers, the shield on its off paw and the kind of weapon in the other - any class may hold any
 // weapon; with nothing equipped it holds the one its class starts with (basicFamily). A piece, a shield and a weapon
-// are tinted by their tier.
+// are tinted by their tier, and a weapon enchanted far enough glows.
 function setLook(a, cls, code = a.look) {
   if (!CLASSES[cls] || (a.cls === cls && a.look === code)) return;
   a.cls = cls;
@@ -411,6 +411,7 @@ function setLook(a, cls, code = a.look) {
     // the server never sends a shield beside a weapon that takes both paws; a code that says so anyway shows the weapon
     ...CLASSES[cls], weapon: a.family, weaponTint: tint(worn.weapon), shield: handsOf(a.family) === 2 ? null : tint(worn.offhand),
     armor: { helmet: tint(worn.head), chest: tint(worn.body), gloves: tint(worn.hands), boots: tint(worn.feet) },
+    glow: worn.glow | 0,   // an enchanted weapon glows: blue from +4, red from +16
   });
 }
 

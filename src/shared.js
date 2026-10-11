@@ -525,10 +525,14 @@ export function cleanEquip(raw) {
 //   digits 0 - 4: the tier + 1 of what is worn as weapon, head, body, hands, feet (0 = nothing);
 //   digit 5: the kind of weapon in the paw, its family's place in WEAPON_FAMILIES + 1 (0 = none equipped);
 //   digit 6: the tier + 1 of the shield in the off hand;
-//   digit 7: what of the family number does not fit into digit 5.
+//   digit 7: what of the family number does not fit into digit 5;
+//   digit 8: how the weapon glows for its enchantment (enchantGlow), 0 for not at all.
 // The first six digits are the whole code of the time before the off hand and the fifth family, so a number made
 // then still reads as it did - which is why the base is a fixed 5 and the two newer things stand above the rest.
-const LOOK_BASE = 5, LOOK_SLOTS = ['weapon', 'head', 'body', 'hands', 'feet'], LOOK_FAMILY = 5, LOOK_OFFHAND = 6, LOOK_FAMILY_HIGH = 7;
+const LOOK_BASE = 5, LOOK_SLOTS = ['weapon', 'head', 'body', 'hands', 'feet'], LOOK_FAMILY = 5, LOOK_OFFHAND = 6, LOOK_FAMILY_HIGH = 7, LOOK_GLOW = 8;
+// An enchanted weapon glows, as in Lineage II: not below +4, then blue - brighter from +7 and again from +11 - and red
+// from +16 on. -> 0 (no glow) to 4.
+export const enchantGlow = (plus) => (plus < 4 ? 0 : plus < 7 ? 1 : plus < 11 ? 2 : plus < 16 ? 3 : 4);
 export function lookCode(equip) {
   let code = 0;
   const put = (digit, value) => { code += value * LOOK_BASE ** digit; };
@@ -537,6 +541,7 @@ export function lookCode(equip) {
   const family = WEAPON_FAMILIES.indexOf(worn(equip, 'weapon')?.family) + 1;
   put(LOOK_FAMILY, family % LOOK_BASE);
   put(LOOK_FAMILY_HIGH, Math.floor(family / LOOK_BASE));
+  put(LOOK_GLOW, enchantGlow(wornPlus(equip)));
   return code;
 }
 // -> { weapon, offhand, head, body, hands, feet, family }: the tier worn in each slot (-1 for nothing) and the family
@@ -546,6 +551,7 @@ export function lookOf(code) {
   const tier = (i) => Math.min(TIERS.length, digit(i)) - 1;
   const look = Object.fromEntries(EQUIP_SLOTS.map((slot) => [slot, tier(slot === 'offhand' ? LOOK_OFFHAND : LOOK_SLOTS.indexOf(slot))]));
   look.family = WEAPON_FAMILIES[digit(LOOK_FAMILY) + LOOK_BASE * digit(LOOK_FAMILY_HIGH) - 1] ?? null;
+  if (digit(LOOK_GLOW)) look.glow = digit(LOOK_GLOW);   // only a weapon that glows says so
   return look;
 }
 

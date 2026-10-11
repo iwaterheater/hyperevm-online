@@ -9,7 +9,7 @@ import {
   ITEMS, ITEM_KEYS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_KEYS, BONUS_NAMES, WEAPON_FAMILIES, heldFamily, fightStyle, MELEE_REACH, BOW_REACH, BAG_SIZE, STACK_MAX, SELL_RATE, SHOP, SHOP_TIER,
   STARTER_KIT, KNIGHT_SHIELD, itemOf, stackMax, sellPrice, weaponFamily, basicFamily, handsOf, equipError, equipBonus, roomFor, addItem, takeItem, cleanBag, cleanEquip,
   pushedOff, comesOff, equipWith, wearError, wearItem,
-  lookCode, lookOf, gearChance, tierForLevel, rollLoot, lootTable, coinsOf, coinGold, chestLoot, POTION_CHANCE, SCROLL_CHANCE,
+  lookCode, lookOf, enchantGlow, gearChance, tierForLevel, rollLoot, lootTable, coinsOf, coinGold, chestLoot, POTION_CHANCE, SCROLL_CHANCE,
   ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, ENCHANT_POWER, SMITH_BONUS, enchantChance, smithFee, enchant, takeOff, plusOf, wornPlus, itemName,
   SKILLS, SKILL_KEYS, activeSkills, BAR_SIZE, barSkill, cleanBar, defaultBar, barAdd,
 } from '../src/shared.js';
@@ -693,4 +693,20 @@ test('enchanting: the number belongs to the weapon - in the paw, in the bag, thr
   assert.deepEqual(equipWith({ ...BARE, weapon: 'iron_sword', plus: 5 }, 'steel_sword'), { ...BARE, weapon: 'steel_sword' });
   assert.deepEqual(equipWith({ ...BARE, weapon: 'iron_sword', plus: 5 }, 'iron_head'), { ...BARE, weapon: 'iron_sword', head: 'iron_head', plus: 5 });
   assert.deepEqual(equipWith({ ...BARE, weapon: 'iron_greatsword', plus: 5 }, 'iron_shield'), { ...BARE, offhand: 'iron_shield' });
+});
+
+test('an enchanted weapon glows for everyone: nothing below +4, blue that grows, red from +16', () => {
+  assert.deepEqual([0, 3, 4, 6, 7, 10, 11, 15, 16, 30].map(enchantGlow), [0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
+  const look = (equip) => lookOf(lookCode(equip));
+  // the glow travels in the look code, and only when there is one: an unenchanted weapon reads as it always did
+  assert.equal(lookCode({ weapon: 'iron_sword', plus: 3 }), lookCode({ weapon: 'iron_sword' }));
+  assert.equal(look({ weapon: 'iron_sword', plus: 3 }).glow, undefined);
+  assert.deepEqual(look({ ...IRON, plus: 5 }), { weapon: 1, offhand: -1, head: 1, body: 1, hands: 1, feet: 1, family: 'sword', glow: 1 });
+  assert.deepEqual([8, 12, 16, 30].map((plus) => look({ weapon: 'hypurr_bow', plus }).glow), [2, 3, 4, 4]);
+  assert.equal(look({ weapon: 'hypurr_bow', offhand: null, plus: 30 }).family, 'bow', 'the rest of the look is not disturbed');
+  // a number without a weapon to carry it glows on nothing
+  assert.equal(look({ head: 'iron_head', plus: 20 }).glow, undefined);
+  assert.equal(look({ offhand: 'iron_shield', plus: 20 }).glow, undefined);
+  // every look still fits a number a snapshot can carry exactly
+  assert.ok(Number.isSafeInteger(lookCode({ weapon: 'hypurr_greatsword', head: 'hypurr_head', body: 'hypurr_body', hands: 'hypurr_hands', feet: 'hypurr_feet', plus: 30 })));
 });

@@ -192,6 +192,8 @@ A weapon is made stronger with a **Scroll: Enchant Weapon**, by the rules of Lin
 - Beside the **Blacksmith**, `B` opens the same window with a second button: he does it with a steadier hand - ten
   points more chance - for a fee that grows with the weapon (`20 × (level of enchantment + 1)` gold). He needs the
   scroll too, and where a step cannot fail he has nothing to add.
+- An enchanted weapon **glows**, for everyone to see: nothing below +4, then blue - brighter from +7 and again from
+  +11 - and red from +16 on.
 - The enchantment belongs to the weapon: it stays with it in the bag, and goes with it to the Trader. A weapon made
   +7 or better, or lost at that height, is told to the whole world.
 - A character from before enchanting keeps what it paid the Blacksmith for: every old upgrade is five steps on its weapon.

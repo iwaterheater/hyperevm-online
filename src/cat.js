@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // The cat, its weapons and its armour are modelled in Blender (art/hypercat.blend) and exported as one file.
 // The model is made of rigid parts hung on pivots - head, ears, body, two arms with elbows, two legs with knees, a
@@ -40,6 +41,9 @@ const V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), V3 = new THREE.Vector3
 // front) and how it faces - forward, turned a little outwards and leaning back; and how far that paw is held up for it.
 const SHIELD_AT = new THREE.Vector3(-0.05, 0.03, 0.085), SHIELD_FACING = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.14, -0.3, 0, 'YXZ'));
 const SHIELD_ARM = -0.7;
+// The glow of an enchanted weapon, by its level (enchantGlow in shared.js): the colour, how strong it is, and how far it
+// stands off the weapon, in model units. Blue that grows, then red - as Lineage II has it.
+const AURAS = [null, [0x2f6bff, 0.4, 0.016], [0x3f8cff, 0.6, 0.022], [0x86c8ff, 0.85, 0.028], [0xff2a2a, 0.9, 0.032]];
 // The staff, in the frame of the body. Standing, the cat holds it out to the side, planted on the ground: how far the
 // paw is raised for that. Walking, it carries it level at its hip, the crystal ahead. For a spell the crystal is put
 // forward at the target, and thrust out as the spell leaves. For a blow it is swung like a club: that one is told in
@@ -171,7 +175,7 @@ function getShared() {
     cat_head: () => toon(0xffffff, { map: m.map }),
   }[m.name]?.() ?? toon(m.color.getHex()));
   shared = {
-    toon, outline, mats: new Map(), shieldParts: null,
+    toon, outline, mats: new Map(), shieldParts: null, auraShapes: new WeakMap(),
     ready: new GLTFLoader().loadAsync(MODEL_URL).then((gltf) => {
       gltf.scene.traverse((o) => {
         if (!o.isMesh) return;
@@ -352,8 +356,9 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
   //   weaponTint: the colour of the blade and of the glow of what is held; nothing leaves the weapon as modelled
   //   shield: the colour of the shield on the off paw (a number); nothing for no shield. The caller sees to it that a
   //          shield never comes with a weapon that needs that paw
-  function setLook({ hoodie: color = HOODIE, weapon: held = 'sword', armor: worn = null, weaponTint: tint = null, shield: guard = null } = {}) {
-    look = { hoodie: color, weapon: held, armor: worn, weaponTint: tint, shield: guard };
+  //   glow: how the weapon glows for its enchantment, 0 (not at all) to 4
+  function setLook({ hoodie: color = HOODIE, weapon: held = 'sword', armor: worn = null, weaponTint: tint = null, shield: guard = null, glow: level = 0 } = {}) {
+    look = { hoodie: color, weapon: held, armor: worn, weaponTint: tint, shield: guard, glow: level };
     own.hoodie.color.set(color);
     own.trim.color.set(color).multiplyScalar(0.62);
     if (!rig) return;
@@ -372,6 +377,7 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       const mine = { w_steel: own.blade, w_glow: own.glow };
       for (const g of rig.gear) g.traverse((o) => { if (o.isMesh && mine[o.userData.mat]) o.material = mine[o.userData.mat]; });
     }
+    glowWeapon(AURAS[level] ?? null);
     for (const [piece, { nodes, plates }] of Object.entries(rig.pieces)) {
       const value = worn?.[piece], on = !!value || value === 0;   // 0 is a colour too: black
       for (const o of nodes) o.visible = on;
@@ -380,6 +386,48 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
       if (!plain) (own.plates[piece] ??= S.toon(value)).color.set(value);
       for (const o of plates) o.material = plain ? S.mats.get('a_steel') : own.plates[piece];
     }
+  }
+
+  // The glow of an enchanted weapon: every mesh of the weapon is drawn twice more, pushed out along its normals and
+  // added to the picture - a near shell and a fainter wide one, which together read as light around the blade. The
+  // weapon's own normals are those of its flat faces, which would tear a shell apart at every edge: the shells are
+  // made of the same points with the normals smoothed (once per shape, for all cats). update() makes the light breathe.
+  function glowWeapon(aura) {
+    rig.aura = null;
+    if (!aura) return;
+    const [color, strength, width] = aura;
+    own.aura ??= [1, 2.4].map((reach) => {
+      const m = new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide });
+      m.userData.push = { value: 0 };
+      m.userData.reach = reach;
+      m.onBeforeCompile = (shader) => {
+        shader.uniforms.uPush = m.userData.push;
+        shader.vertexShader = `uniform float uPush;\n${shader.vertexShader}`.replace('#include <begin_vertex>', 'vec3 transformed = position + normalize( normal ) * uPush;');
+      };
+      return m;
+    });
+    for (const m of own.aura) {
+      m.color.set(color).multiplyScalar(1.5);   // bright enough to bloom
+      m.userData.push.value = width * m.userData.reach;
+    }
+    const shapeOf = (geometry) => {
+      let shape = S.auraShapes.get(geometry);
+      if (!shape) {
+        shape = new THREE.BufferGeometry();
+        shape.setAttribute('position', geometry.getAttribute('position').clone());
+        if (geometry.index) shape.setIndex(geometry.index.clone());
+        shape = mergeVertices(shape, 1e-4);
+        shape.computeVertexNormals();
+        S.auraShapes.set(geometry, shape);
+      }
+      return shape;
+    };
+    // the weapon itself: not the shield, not the quiver, not an arrow
+    const isArrow = (o) => { for (let p = o; p; p = p.parent) if (p.name === 'Arrow') return true; return false; };
+    const meshes = [];
+    for (const g of rig.gear) if (g !== rig.shield) g.traverse((o) => { if (o.isMesh && o.userData.mat && !isArrow(o)) meshes.push(o); });
+    for (const o of meshes) for (const m of own.aura) o.add(new THREE.Mesh(shapeOf(o.geometry), m));
+    rig.aura = { strength };
   }
 
   let t = 0, runPhase = 0, blink = 2, move = 0, air = 0, shoot = 0, cast = 0, sit = 0, aim = 0, strike = 0, wind = 0;
@@ -412,6 +460,11 @@ export function createCat({ hoodie = HOODIE, weapon = 'sword', armor = null, wea
     wasAir = airborne;
     land = Math.max(0, land - dt / 0.28);
     if (!rig) return;
+    if (rig.aura) {
+      const breath = 0.78 + 0.22 * Math.sin(t * 3.2);
+      own.aura[0].opacity = rig.aura.strength * breath;
+      own.aura[1].opacity = rig.aura.strength * 0.4 * breath;
+    }
     const { arms, legs, head, ears, tail, eyes } = rig;
 
     // ---- on its feet: the legs swing from the hip and fold at the knee as they come forward; the arms swing against
