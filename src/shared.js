@@ -2,6 +2,10 @@
 
 export const TICK = 1 / 20;
 export const ATTACK_WINDUP = 0.4;   // seconds between a monster starting its swing and the hit landing
+// A blow of a cat's paw: how long the swing lasts for a given pause between attacks, and how far through it the blade
+// lands. The server deals the damage at that moment; the cat's animation (src/cat.js) has the blade there then.
+export const swingTime = (atkCd) => Math.min(0.8, Math.max(0.34, atkCd * 0.92));
+export const SWING_LANDS = 0.55;
 
 // hp, pAtk: at level 1. pDef / mDef: multipliers on the level-based defence (warriors shrug off blades, mages shrug off spells).
 // eva: bonus to evasion.

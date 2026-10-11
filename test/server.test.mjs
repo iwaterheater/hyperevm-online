@@ -1646,6 +1646,26 @@ async function fight(p, id, done, what) {
 }
 const seen = (p, id) => p.others.find((row) => row[0] === id);   // how p sees the cat `id`: its row of the snapshot
 
+check('a blade takes time to get there: a blow lands part of the way through its swing, not as the swing starts', async () => {
+  await withServer({ map: NO_MONSTERS, setup: seed({ s: cat('Strong', 30), w: cat('Weak', 3) }) }, async (s) => {
+    const strong = await enter(s, { token: 's', name: 'Strong', at: FIELD }), weak = await enter(s, { token: 'w', name: 'Weak', at: BESIDE });
+    // when the last swing was seen to start, and when a blow was seen to land
+    let swung = 0, landed = 0, wait = 0;
+    strong.c.ws.on('message', (data) => {
+      const m = JSON.parse(data);
+      if (m.t !== 's' || landed) return;
+      for (const ev of m.e) {
+        if (ev.k === 'swing' && ev.o === strong.w.id) swung = Date.now();
+        if (ev.k === 'hit' && ev.id === weak.w.id) { landed = Date.now(); wait = landed - swung; }
+      }
+    });
+    await fight(strong, weak.w.id, () => landed, 'no blow landed');
+    // the shortest swing there is has its blade through after 0.19 s, the longest after 0.44 s; events travel with
+    // the snapshots, twenty a second
+    assert.ok(swung > 0 && wait >= 120 && wait <= 700, `the blow landed ${wait} ms after its swing began`);
+  });
+});
+
 check('pvp: an attack flags the attacker, and beating a cat that fought back is a PvP win that costs the loser nothing', async () => {
   const s = await withServer({ map: NO_MONSTERS, setup: seed({ s: cat('Strong', 30), w: cat('Weak', 3) }) }, async (s) => {
     const strong = await enter(s, { token: 's', name: 'Strong', at: FIELD }), weak = await enter(s, { token: 'w', name: 'Weak', at: BESIDE });

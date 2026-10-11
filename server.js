@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  TICK, ATTACK_WINDUP, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R, RESPAWN_MULT, MOB_RISE,
+  TICK, ATTACK_WINDUP, swingTime, SWING_LANDS, CHEST_REACH, SHOP_RANGE, AGGRO_R, BOSS_AGGRO_R, LEASH_R, WANDER_R, RESPAWN_MULT, MOB_RISE,
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS,
   ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, enchant, smithFee, takeOff, wornPlus, plusOf, itemName,
@@ -888,6 +888,21 @@ function strikePlayer(q, hit, p) {
   else die(q, p, ev);
   return true;
 }
+// The blows that are due. One lands if the cat still stands and can act, and its foe is still there, still a foe and
+// still within reach (with slack for lag and for a foe that was shoved); otherwise the blade cuts the air.
+function landBlows() {
+  for (const p of players.values()) {
+    const blow = p.blow;
+    if (!blow || now < blow.at) continue;
+    p.blow = null;
+    const m = foeOf(blow.id);
+    if (p.dead || held(p) || noFoe(p, m)) continue;
+    const dx = m.x - p.x, dz = m.z - p.z, d = Math.hypot(dx, dz) || 0.001;
+    if (d > blow.reach + bodyR(m) + 2) continue;
+    strike(m, physical(p, 2, defOf(m)), dx / d, dz / d, 5, p);
+  }
+}
+
 // An attack of p landing on a monster or on a cat. -> whether it did damage.
 function strike(m, hit, dx, dz, knock, p) {
   if (isCat(m)) return strikePlayer(m, hit, p);
@@ -1155,6 +1170,8 @@ function tick() {
     return false;
   });
 
+  landBlows();
+
   gems = gems.filter((g) => {
     if (now >= g.until) return false;
     for (const p of players.values()) {
@@ -1341,7 +1358,8 @@ const handlers = {
       bullets.push({ x: p.x, z: p.z, target: m.id, life: 2.5, owner: p.id, speed: 42, hit: physical(p, 2, defOf(m)) });
       emit({ k: 'shot', o: p.id, id: m.id, x: r2(p.x), z: r2(p.z), fx: 'arrow' }, p.x, p.z);
     } else {
-      strike(m, physical(p, 2, defOf(m)), dx / d, dz / d, 5, p);
+      // the blade is on its way: the blow lands when it gets there (landBlows), as everyone watching sees it
+      p.blow = { at: now + swingTime(p.st.atkCd) * SWING_LANDS, id: m.id, reach: c.reach };
     }
   },
   k(p, msg) {   // started casting: only tells nearby players to play the animation
@@ -1602,7 +1620,7 @@ function join(ws, msg, conn) {
     inv: cleanBag(fresh ? STARTER_KIT : data.inv), equip: cleanEquip(data.equip), bagDirty: true, potionAt: 0,
     bar: Array.isArray(data.bar) ? cleanBar(data.bar) : null, barDirty: true, knightKit: data.knightKit ? 1 : 0,
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
-    castAt: 0, swingAt: 0, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
+    castAt: 0, swingAt: 0, blow: null, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
     // PvP: fights won, murders, the karma they left - and, never saved, how long the cat stays flagged
     pvp: data.pvp | 0, pk: data.pk | 0, karma: Math.max(0, data.karma | 0), flagUntil: 0,
     stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null,   // what another cat's skills can do to it
