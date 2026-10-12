@@ -8,6 +8,7 @@ export const PACKS = {
   halloween: { dir: 'assets/halloween/', ext: 'gltf', scale: 1, label: 'Graveyard' },
   dungeon:   { dir: 'assets/dungeon/',   ext: 'glb',  scale: 1, label: 'Dungeon' },
   forest:    { dir: 'assets/forest/',    ext: 'gltf', scale: 1, label: 'Forest' },
+  nature:    { dir: 'assets/nature/',    ext: 'gltf', scale: 1, label: 'Nature' },
   builtin:   { dir: null, ext: null, scale: 1, label: 'Built-in' },                      // procedural geometry from src/map/builtin.js
 };
 export const BUILTIN = ['fountain', 'crystal', 'lamp_post', 'bush', 'spike', 'red_crystal', 'lair_ring',
@@ -104,6 +105,23 @@ add('forest', 'rocks', 0.75, ['rock_1_a', 'rock_1_b', 'rock_1_c', 'rock_1_d', 'r
   'rock_3_c', 'rock_3_d', 'rock_3_e', 'rock_3_f', 'rock_3_g', 'rock_3_h', 'rock_3_i', 'rock_3_j', 'rock_3_k',
   'rock_3_l', 'rock_3_m', 'rock_3_n', 'rock_3_o', 'rock_3_p', 'rock_3_q', 'rock_3_r']);
 add('forest', 'foliage', 0, ['grass_1_a', 'grass_1_b', 'grass_1_c', 'grass_1_d', 'grass_2_a', 'grass_2_b', 'grass_2_c', 'grass_2_d'], { cast: false });
+
+// ---- nature (P = 1): Quaternius' Stylized Nature MegaKit (the free part), as tools/import-nature.py brings it in.
+// Painted trees with leaves cut out of pictures: far more triangles than a tree of the other packs (4 000 to 10 000).
+add('nature', 'trees', 0.09, ['common_tree_1', 'common_tree_2', 'common_tree_3', 'common_tree_4', 'common_tree_5',
+  'pine_1', 'pine_2', 'pine_3', 'pine_4', 'pine_5']);   // wide crowns: only the trunk blocks
+add('nature', 'trees', 0.07, ['twisted_tree_1', 'twisted_tree_2', 'twisted_tree_3', 'twisted_tree_4', 'twisted_tree_5']);   // 13 units across
+add('nature', 'trees', 0.1, ['dead_tree_1', 'dead_tree_2', 'dead_tree_3', 'dead_tree_4', 'dead_tree_5']);
+add('nature', 'rocks', 0.75, ['rock_medium_1', 'rock_medium_2', 'rock_medium_3']);
+add('nature', 'rocks', 0, ['pebble_round_1', 'pebble_round_2', 'pebble_round_3', 'pebble_round_4', 'pebble_round_5',
+  'pebble_square_1', 'pebble_square_2', 'pebble_square_3', 'pebble_square_4', 'pebble_square_5', 'pebble_square_6',
+  'rock_path_round_small_1', 'rock_path_round_small_2', 'rock_path_round_small_3', 'rock_path_round_thin', 'rock_path_round_wide',
+  'rock_path_square_small_1', 'rock_path_square_small_2', 'rock_path_square_small_3', 'rock_path_square_thin', 'rock_path_square_wide'],
+  { cast: false });   // flat stones to walk on
+add('nature', 'foliage', 0, ['bush_common', 'bush_common_flowers', 'fern_1', 'plant_1_big', 'plant_7_big']);
+add('nature', 'foliage', 0, ['clover_1', 'clover_2', 'flower_3_group', 'flower_3_single', 'flower_4_group', 'flower_4_single',
+  'grass_common_short', 'grass_common_tall', 'grass_wispy_short', 'grass_wispy_tall', 'mushroom_common', 'mushroom_laetiporus',
+  'petal_1', 'petal_2', 'petal_3', 'petal_4', 'petal_5', 'plant_1', 'plant_7'], { cast: false });
 
 // ---- builtin (P = 1): procedural pieces, origin on the ground
 add('builtin', 'special', row(2.6, 0), ['fountain']);

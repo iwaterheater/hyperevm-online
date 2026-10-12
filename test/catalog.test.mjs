@@ -47,11 +47,12 @@ const FP = {
 // ---------------------------------------------------------------- constants and the table
 
 test('packs, built-ins and categories', () => {
-  assert.deepEqual(Object.keys(PACKS), ['medieval', 'halloween', 'dungeon', 'forest', 'builtin']);
+  assert.deepEqual(Object.keys(PACKS), ['medieval', 'halloween', 'dungeon', 'forest', 'nature', 'builtin']);
   assert.deepEqual(PACKS.medieval, { dir: 'assets/medieval/', ext: 'gltf', scale: 5, label: 'Medieval' });
   assert.deepEqual(PACKS.halloween, { dir: 'assets/halloween/', ext: 'gltf', scale: 1, label: 'Graveyard' });
   assert.deepEqual(PACKS.dungeon, { dir: 'assets/dungeon/', ext: 'glb', scale: 1, label: 'Dungeon' });
   assert.deepEqual(PACKS.forest, { dir: 'assets/forest/', ext: 'gltf', scale: 1, label: 'Forest' });
+  assert.deepEqual(PACKS.nature, { dir: 'assets/nature/', ext: 'gltf', scale: 1, label: 'Nature' });
   assert.deepEqual(PACKS.builtin, { dir: null, ext: null, scale: 1, label: 'Built-in' });
   assert.deepEqual(BUILTIN, ['fountain', 'crystal', 'lamp_post', 'bush', 'spike', 'red_crystal', 'lair_ring',
     'grass_tuft', 'flower_white', 'flower_yellow', 'flower_pink', 'flower_violet']);
@@ -97,8 +98,8 @@ test('the table lists every model file and every built-in', () => {
   for (const id of DISK_IDS) assert.ok(Object.hasOwn(MODELS, id), `${id} has no row in MODELS`);
   for (const name of BUILTIN) assert.ok(Object.hasOwn(MODELS, `builtin/${name}`), `builtin/${name} has no row in MODELS`);
   const count = (pack) => Object.keys(MODELS).filter((id) => id.startsWith(pack + '/')).length;
-  assert.deepEqual([count('medieval'), count('halloween'), count('dungeon'), count('builtin')], [57, 44, 21, 12]);
-  assert.equal(Object.keys(MODELS).length, 227);
+  assert.deepEqual([count('medieval'), count('halloween'), count('dungeon'), count('nature'), count('builtin')], [57, 44, 21, 68, 12]);
+  assert.equal(Object.keys(MODELS).length, 295);
   assert.deepEqual([ASSETS.packs.medieval.length, ASSETS.packs.halloween.length, ASSETS.packs.dungeon.length], [57, 44, 21]);
 });
 
@@ -209,10 +210,10 @@ test('modelInfo returns a copy: changing it leaves the table alone', () => {
 
 // ---------------------------------------------------------------- listModels
 
-test('listModels: 224 ids for the palette, 227 with the hidden ones', () => {
+test('listModels: 292 ids for the palette, 295 with the hidden ones', () => {
   const shown = listModels(ASSETS), all = listModels(ASSETS, { hidden: true });
-  assert.equal(shown.length, 57 + 44 + 18 + 93 + 12);
-  assert.equal(all.length, 227);
+  assert.equal(shown.length, 57 + 44 + 18 + 93 + 68 + 12);
+  assert.equal(all.length, 295);
   assert.deepEqual(all, Object.keys(MODELS).sort());
   for (const list of [shown, all]) {
     assert.deepEqual(list, [...list].sort());

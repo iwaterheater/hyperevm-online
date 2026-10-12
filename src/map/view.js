@@ -158,6 +158,17 @@ const STAND_IN = { geometry: BOX, material: MAGENTA };   // for a ghost whose mo
 
 const free = (material) => { material.map?.dispose(); material.dispose(); };
 
+// A material of leaves drawn as flat cards (a glTF material marked "extras": { foliage: true }, see
+// tools/import-nature.py): its normals are made up to light the crown as one soft body, so the back of a card must be
+// lit like its front - a double-sided material would turn the normal round there, and half the leaves would go dark.
+function softFoliage(material) {
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>',
+      '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );\n\tnonPerturbedNormal = normal;');
+  };
+  material.customProgramCacheKey = () => 'soft-foliage';
+}
+
 // One mesh of a glTF scene as a geometry in the scene's frame, reduced to position / normal / uv as plain float
 // attributes: parts with other attribute sets, interleaved or packed attributes cannot be merged.
 function partOf(mesh) {
@@ -796,7 +807,10 @@ export class MapView {
     const image = json.images?.[json.textures?.[def?.pbrMetallicRoughness?.baseColorTexture?.index]?.source];
     const picture = image ? image.uri ?? `${image.name}:${json.bufferViews?.[image.bufferView]?.byteLength}` : `#${JSON.stringify(def ?? null)}`;
     const key = `${pack}|${picture}|${mat.name}`;
-    if (!this.materials.has(key)) this.materials.set(key, mat);
+    if (!this.materials.has(key)) {
+      if (mat.userData?.foliage) softFoliage(mat);
+      this.materials.set(key, mat);
+    }
     return this.materials.get(key);
   }
 

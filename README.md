@@ -5,7 +5,7 @@ Players share one seamless world, pick a class, hunt slimes, wolves, orcs, demon
 
 - **Client:** [Three.js](https://threejs.org/) (no build step, loaded from a CDN)
 - **Monsters:** animated skeleton models from the [KayKit Character Pack: Skeletons](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0) by Kay Lousberg (CC0); slimes, orcs, demons, ghosts and the other creatures from [Ultimate Monsters](https://quaternius.com/packs/ultimatemonsters.html) and [Cute Animated Monsters](https://quaternius.com/packs/cutemonsters.html) by Quaternius (CC0); the wolf, fox, bull, stag, alpaca, spider and raptor are Quaternius's animals (CC0) as the open-source [World of ClaudeCraft](https://github.com/levy-street/world-of-claudecraft) ships them
-- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0); the King's fortress, ruins, chests and coins from [KayKit Dungeon Remastered](https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0); the meadow's trees, bushes, rocks and grass from the free part of the [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest) — all by Kay Lousberg (CC0)
+- **Scenery:** buildings, town walls, trees, rocks, hills and props from the [KayKit Medieval Hexagon Pack](https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0); graves, crypts, fences, dead trees and lanterns from [KayKit Halloween Bits](https://github.com/KayKit-Game-Assets/KayKit-Halloween-Bits-1.0); the King's fortress, ruins, chests and coins from [KayKit Dungeon Remastered](https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0); the meadow's trees, bushes, rocks and grass from the free part of the [KayKit Forest Nature Pack](https://kaylousberg.itch.io/kaykit-forest) — all by Kay Lousberg (CC0). A second, painted set of trees, plants and rocks - the free part of the [Stylized Nature MegaKit](https://quaternius.com/packs/stylizednaturemegakit.html) by Quaternius (CC0) - is in the editor's palette as the pack **Nature**; the library map *Nature Isle* (Maps menu) is an island dressed with it, with a grove of the KayKit trees beside it to compare
 - **Townsfolk:** guards, blacksmith, sage and trader from the [KayKit Character Pack: Adventurers](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) by Kay Lousberg (CC0)
 - **Server:** Node.js + [`ws`](https://github.com/websockets/ws), authoritative for monsters, damage, XP, loot, items and gold
 
@@ -350,6 +350,7 @@ assets/skeletons/ KayKit skeleton models, weapons and their CC0 license
 src/monster.js    The other monsters: loads the Quaternius models a map uses and drives their animations
 assets/monsters/  Quaternius monsters and animals, one file a monster, with their CC0 license
 assets/forest/    KayKit forest trees, bushes, rocks and grass, with their CC0 license
+assets/nature/    Quaternius painted trees, plants, grass and rocks, with their CC0 license
 assets/medieval/  KayKit buildings, walls, trees, rocks and props, with their CC0 license
 assets/halloween/ KayKit graveyard models, with their CC0 license
 assets/dungeon/   KayKit fortress walls, pillars, chests and coins, with their CC0 license
@@ -369,6 +370,7 @@ tools/bake-map.mjs      Wrote the first map/world.json from the old world genera
 tools/check-imports.mjs Checks every import and page reference of this bundler-less project (npm run check)
 tools/build-fx.py       Builds the skill-effect shapes in art/fx.blend and exports assets/fx/fx.glb; run inside Blender
 tools/import-monsters.mjs  Brings the Quaternius monsters and animals into assets/monsters/, keeping the five animations the game plays
+tools/import-nature.py     Brings the Quaternius nature pack into assets/nature/: small pictures, soft normals for the leaves
 test/             Tests of the map format, the items, the action bar, the server and the editor's logic (npm test)
 data/             Saved player progress (created at runtime, git-ignored)
 ```
