@@ -643,7 +643,10 @@ function reloadForMap() {
 
 function onMessage(msg) {
   if (state === 'reloading') return;
-  if (msg.t === 'map') {   // after a save, or instead of 'w' when this page joined with an old map
+  if (msg.t === 'full') {   // instead of 'w': the world holds as many cats as it can
+    $('lostText').textContent = `The world is full: ${msg.max} cats are playing. Try again in a little while.`;
+    showLost();
+  } else if (msg.t === 'map') {   // after a save, or instead of 'w' when this page joined with an old map
     if (msg.rev !== mapRev) reloadForMap();
   } else if (msg.t === 'w') {
     myId = msg.id;

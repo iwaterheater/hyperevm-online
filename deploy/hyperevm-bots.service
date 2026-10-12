@@ -1,0 +1,22 @@
+# The bots as a service of their own: ten cats that play on the server's own machine (see bots/run.mjs).
+#   sudo systemctl enable --now hyperevm-bots
+[Unit]
+Description=HyperEVM Online - bots
+After=hyperevm-online.service
+Requires=hyperevm-online.service
+
+[Service]
+Type=simple
+User=hyperevm
+WorkingDirectory=/opt/hyperevm-online
+# straight to the game server, not through nginx: the server starts a bot's character only for a program on its own machine
+ExecStart=/usr/bin/node bots/run.mjs --url http://localhost:8765
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

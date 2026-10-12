@@ -1383,9 +1383,9 @@ check('two paws: a full bag refuses what would take two things off, and nothing 
   const heads = Array.from({ length: 29 }, () => ['leather_head', 1]);
   const run = await withServer({
     setup: seed({
-      full: { ...OLD, inv: [...heads, ['iron_greatsword', 1]], equip: { weapon: 'iron_sword', offhand: 'iron_shield' } },
-      light: { ...OLD, inv: [...heads, ['iron_bow', 1]], equip: { offhand: 'iron_shield' } },
-      broken: { ...OLD, inv: [], equip: { weapon: 'iron_greatsword', offhand: 'iron_shield', head: 'iron_head' } },
+      full: { ...OLD, weapon: 1, inv: [...heads, ['iron_greatsword', 1]], equip: { weapon: 'iron_sword', offhand: 'iron_shield' } },
+      light: { ...OLD, weapon: 1, inv: [...heads, ['iron_bow', 1]], equip: { offhand: 'iron_shield' } },
+      broken: { ...OLD, weapon: 1, inv: [], equip: { weapon: 'iron_greatsword', offhand: 'iron_shield', head: 'iron_head' } },
     }),
   }, async (s) => {
     const f = await enter(s, { token: 'full' });
@@ -1426,7 +1426,7 @@ check('two paws: a full bag refuses what would take two things off, and nothing 
 check('two paws: a Knight is handed a shield - with the profession, or the first time an old Knight comes back - once', async () => {
   const sage = FILE.npcs.find((n) => n.kind === 'sage');
   const at = [sage.x + 1, sage.z + 1];
-  const ready = { ...OLD, level: 20, xp: 0 }, knight = { ...ready, cls: 'knight', skills: { provoke: 1 } };
+  const ready = { ...OLD, weapon: 1, level: 20, xp: 0 }, knight = { ...ready, cls: 'knight', skills: { provoke: 1 } };
   const stuffed = Array.from({ length: 30 }, () => ['leather_head', 1]);
   const { statsOf } = await import('../src/shared.js');
   const first = await withServer({
@@ -1935,4 +1935,132 @@ check('enchanting: the Blacksmith\'s old upgrades come along as steps on the wea
   });
   const file = savedPlayers(s);
   assert.deepEqual([file.held.equip.plus, file.held.weapon, file.bagged.inv[1], file.bare.weapon, file.master.equip.plus], [10, 1, ['iron_bow', 1, 15], 2, 30]);
+});
+
+
+// ---------------------------------------------------------------- a server strangers can reach
+
+check('walking: a cat goes as fast as it can and no faster, however the steps are cut up, and never onto water', async () => {
+  const { normalize, isBlocked } = await import('../src/map/format.js');
+  const { statsOf } = await import('../src/shared.js');
+  // The bake is flat and dry. For ground nobody walks on, the island of the committed map is read - only read: the
+  // server gets a copy - and whatever it looks like today, in some direction from its start point the land ends.
+  // shore: the last point of a walk from the start that is fine (`dry`), and one a short step on that is not (`wet`).
+  const ISLAND = fs.readFileSync(path.join(ROOT, 'map', 'world.json'), 'utf8'), land = normalize(JSON.parse(ISLAND));
+  let shore = null;
+  const r2 = (v) => Math.round(v * 100) / 100;
+  for (let k = 0; k < 16 && !shore; k++) {
+    const dx = Math.cos(k * Math.PI / 8), dz = Math.sin(k * Math.PI / 8), at = (r) => [r2(land.start.x + dx * r), r2(land.start.z + dz * r)];
+    for (let r = 2; r < land.radius - 4 && !shore; r += 0.25) {
+      if (isBlocked(land, ...at(r + 0.3)) && isBlocked(land, ...at(r + 0.6)) && !isBlocked(land, ...at(r - 1)) && !isBlocked(land, ...at(r - 1.3))) shore = { dry: at(r - 1), back: at(r - 1.3), wet: at(r + 0.3) };
+    }
+  }
+  assert.ok(shore, 'somewhere around its start point the island has ground nobody walks on');
+  await withServer({ map: NO_MONSTERS }, async (s) => {
+    const p = await enter(s, { test: { at: FIELD, lvl: 10 } }), watcher = await enter(s, { test: { at: BESIDE, lvl: 10 } });
+    const tps = () => p.events.filter((ev) => ev.k === 'tp').length;
+    const step = (x, z) => p.send({ t: 'm', x, y: 0, z, yaw: 0, s: 1 });
+    // where the server has the cat: a leap across the world is not taken, and the answer says where it stands
+    const locate = async () => { p.events.length = 0; await step(-9999, FIELD[1]); const ev = await p.event('tp'); return ev.x; };
+    await sleep(3300);   // the looser check of the first seconds after a join has run out
+    // at its own pace: twenty steps a second, each as long as the cat walks in that time
+    const pace = statsOf('fighter', 10).move * 0.05;
+    let x = FIELD[0];
+    for (let i = 0; i < 40; i++) { x -= pace; await step(x, FIELD[1]); await sleep(50); }
+    await p.settled();
+    assert.equal(tps(), 0, 'an honest walk is never put back');
+    assert.ok(Math.abs(seen(watcher, p.w.id)[1] - Math.round(x * 100) / 100) < 0.02, 'and arrives where it went');
+    assert.ok(Math.abs(await locate() - x) < 0.02, 'one leap across the map is not taken at all');
+    // a hack: the same twenty steps a second, each three units long - sixty units a second for four seconds
+    await sleep(3300);
+    const from = x;
+    p.events.length = 0;
+    for (let i = 0; i < 80; i++) { x -= 3; await step(x, FIELD[1]); await sleep(50); }
+    await p.settled();
+    assert.ok(tps() > 20, 'the cat is put back, again and again');
+    const gained = from - await locate();
+    assert.ok(gained > 5 && gained < 85, `in four seconds it came ${gained} units - what it had saved up and what it could walk - not 240`);
+  });
+  // and no step leads onto ground nobody walks on, however short
+  await withServer({ map: ISLAND }, async (s) => {
+    const wader = await enter(s, { test: { at: shore.dry, lvl: 10, god: true } });
+    assert.deepEqual([wader.w.x, wader.w.z], shore.dry);
+    await sleep(3300);
+    await wader.send({ t: 'm', x: shore.wet[0], y: 0, z: shore.wet[1], yaw: 0, s: 1 });
+    assert.deepEqual(await wader.event('tp'), { k: 'tp', x: shore.dry[0], z: shore.dry[1] });
+    // back from the shore it walks as anywhere
+    await wader.send({ t: 'm', x: shore.back[0], y: 0, z: shore.back[1], yaw: 0, s: 1 });
+    await wader.settled();
+    assert.equal(wader.events.filter((ev) => ev.k === 'tp').length, 0);
+  });
+});
+
+check('names and chat: a name is cleaned and nobody takes one that is in the world; a line is cleaned, starred and not too many', () => withServer({}, async (s) => {
+  const roster = async (c) => { const all = []; for (let i = 0; i < 20; i++) { const m = c.inbox.filter((x) => x.t === 'r').at(-1); if (m) all.push(...m.l.map((row) => row[1])); if (all.length) break; await sleep(50); } return all; };
+  const a = await join(s, { name: '  Mochi  ' }), aw = await a.take('w');
+  const b = await join(s, { name: 'mochi' }), bw = await b.take('w');
+  const c = await join(s, { name: 'ADMIN' }), d = await join(s, { name: '<i>Sh1tLord</i>' });
+  await c.take('w'); await d.take('w');
+  await sleep(300);
+  const names = (await roster(d));
+  assert.deepEqual(names.slice(-4), ['Mochi', 'mochi 2', 'Cat', 'Cat 2']);
+  assert.notEqual(aw.id, bw.id);
+  // the chat: one clean line, banned words starred, under the name the world knows
+  await sleep(600);
+  await b.send({ t: 'c', m: '  you   fucking\nnoob  ' });
+  assert.deepEqual(await a.take('c', (m) => !m.sys), { t: 'c', n: 'mochi 2', m: 'you ******* noob' });
+  // five lines in a row, then one every two seconds: of ten sent as fast as the half second allows, some are refused
+  for (let i = 0; i < 10; i++) { await b.send({ t: 'c', m: `line ${i}` }); await sleep(520); }
+  await sleep(300);
+  const heard = a.inbox.filter((m) => m.t === 'c' && !m.sys && /^line /.test(m.m)).length;
+  assert.ok(heard >= 5 && heard <= 8, `${heard} of ten lines came through`);
+  const told = b.inbox.filter((m) => m.t === 's').flatMap((m) => m.e).filter((ev) => ev.k === 'err' && ev.m === 'You are talking too fast');
+  assert.ok(told.length >= 1 && heard + told.length <= 10, 'and the cat is told why');
+}));
+
+check('flooding: a socket that will not stop is closed, a full world takes nobody else in, and one address holds only so many sockets', async () => {
+  await withServer({ env: { MAX_PLAYERS: '2', TRUST_PROXY: '1', MAX_PER_ADDRESS: '2' } }, async (s) => {
+    // a flood: far more than a socket may send. It is closed, and the server goes on.
+    const loud = await join(s);
+    await loud.take('w');
+    for (let i = 0; i < 4000; i++) loud.ws.send('{"t":"m","x":0,"y":0,"z":0,"yaw":0}');
+    await Promise.race([loud.closed, sleep(15000).then(() => assert.fail('the flooding socket was not closed'))]);
+    // the world holds two cats: the third is told so, and its socket is closed
+    const one = await join(s, { name: 'One' }), two = await join(s, { name: 'Two' });
+    await one.take('w'); await two.take('w');
+    const three = await join(s, { name: 'Three' });
+    assert.deepEqual(await three.take('full'), { t: 'full', max: 2 });
+    await three.closed;
+    assert.equal(three.inbox.some((m) => m.t === 'w'), false);
+    await one.close(); await two.close();
+    // behind the server's own proxy the address is what the proxy wrote: two sockets from one, the third is not let in
+    const from = (address) => new Promise((resolve) => {
+      const ws = new WebSocket(`ws://localhost:${s.port}`, { headers: { 'X-Forwarded-For': `10.9.9.9, ${address}` } });
+      let open = false;
+      ws.on('open', () => { open = true; setTimeout(() => resolve({ ws, open: ws.readyState === 1 }), 400); });
+      ws.on('close', () => { if (!open) resolve({ ws, open: false }); });
+      ws.on('error', () => {});
+    });
+    const first = await from('203.0.113.9'), second = await from('203.0.113.9'), third = await from('203.0.113.9'), other = await from('203.0.113.10');
+    assert.deepEqual([first.open, second.open, third.open, other.open], [true, true, false, true]);
+    // a socket that leaves makes room again
+    first.ws.close();
+    await sleep(300);
+    assert.equal((await from('203.0.113.9')).open, true);
+  });
+});
+
+check('the characters are copied aside once a day, before the first save of that day', async () => {
+  const before = { keeper: { ...OLD, name: 'Keeper', gold: 77 } };
+  const s = await withServer({ setup: seed(before) }, async (s) => {
+    const p = await enter(s, { token: 'keeper', name: 'Keeper', at: AT_TRADER });
+    await p.send({ t: 'buy', id: 'hp_small', n: 2 });
+    await p.until('the potions', () => p.inv.length === 1);
+    await p.settled();
+  });
+  const dir = path.join(s.dataDir, 'backups'), files = fs.readdirSync(dir);
+  assert.equal(files.length, 1);
+  assert.match(files[0], /^players-\d{8}\.json$/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, files[0]), 'utf8')), before, 'the file as it was before this run touched it');
+  assert.equal(savedPlayers(s).keeper.gold, 77 - 24);
 });

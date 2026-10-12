@@ -1,0 +1,31 @@
+# The game server as a systemd service. Copy to /etc/systemd/system/, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now hyperevm-online
+# Logs: journalctl -u hyperevm-online -f
+[Unit]
+Description=HyperEVM Online - game server
+After=network.target
+
+[Service]
+Type=simple
+User=hyperevm
+WorkingDirectory=/opt/hyperevm-online
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+# The server listens on this machine only: nginx in front of it speaks to the world (see deploy/nginx.conf).
+Environment=NODE_ENV=production
+Environment=PORT=8765
+Environment=TRUST_PROXY=1
+Environment=MAX_PLAYERS=200
+Environment=MAX_PER_ADDRESS=6
+# The characters (players.json), their daily backups and the server's own banned-words.txt live here.
+Environment=DATA_DIR=/var/lib/hyperevm-online
+# It needs nothing else of the machine.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hyperevm-online
+
+[Install]
+WantedBy=multi-user.target
