@@ -338,6 +338,8 @@ index.html        Page, HUD and styles
 editor.html       The map editor page
 server.js         HTTP static server + WebSocket game server; loads the map and, in editor mode, saves it
 bots/             The bots: run.mjs (the roster, the runner), bot.mjs (what a bot does), nav.mjs (where it can walk)
+deploy/           A server of your own: the game and the bots as systemd services, and the nginx site in front of them
+src/moderation.js Names and chat lines before others see them: what a name may be, what is starred out
 map/world.json    The world: terrain, scenery, regions, monster camps, chests, townsfolk, start point
 map/backups/      The map before each save (created by the server, git-ignored)
 map/library/      The map library: named copies of the map, listed in the editor's Maps menu
@@ -396,6 +398,45 @@ data/             Saved player progress (created at runtime, git-ignored)
 ## Playing with friends over the internet
 
 The server is a single Node.js process, so any host that can run Node and accept WebSocket connections works (a VPS, Railway, Render, Fly.io, …). Start it with `npm start` and point players at its address. Behind HTTPS the client automatically switches to `wss://`.
+
+### On a server of your own
+
+`deploy/` has what a Linux server (Ubuntu or Debian) needs: the game and the bots as systemd services, and an nginx site in front of them.
+
+```bash
+# as root, once
+apt install -y nodejs npm nginx certbot python3-certbot-nginx     # Node 18 or newer
+useradd --system --home /opt/hyperevm-online hyperevm
+git clone https://github.com/iwaterheater/hyperevm-online.git /opt/hyperevm-online
+cd /opt/hyperevm-online && npm ci --omit=dev
+mkdir -p /var/lib/hyperevm-online && chown hyperevm /var/lib/hyperevm-online
+cp deploy/hyperevm-online.service deploy/hyperevm-bots.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now hyperevm-online hyperevm-bots
+cp deploy/nginx.conf /etc/nginx/sites-available/hyperevm-online      # put your domain into it first
+ln -s /etc/nginx/sites-available/hyperevm-online /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx && certbot --nginx -d game.example.com
+```
+
+To update: `git pull && npm ci --omit=dev && systemctl restart hyperevm-online hyperevm-bots`. The characters are in
+`/var/lib/hyperevm-online/players.json`; the server copies that file aside once a day (`backups/players-<day>.json`,
+the last seven days).
+
+### What keeps a public server honest
+
+- **Walking.** The client moves its own cat; the server believes it as far as the cat's speed allows - what it could
+  have covered since its last step, with three tenths to spare, saved up over at most a second and a half - and never
+  onto water or up a cliff. A step beyond that is not taken and the client is put back. Scenery is the client's own
+  business: a cat that walks through a tree is seen doing it, and gains nothing by it.
+- **Fighting, loot, gold, items, enchanting** are decided by the server alone; a client only asks.
+- **Flooding.** A socket may send 60 messages a second (150 in a burst); what is over is not heard, and a socket that
+  keeps it up is closed. One address holds six sockets at most (`MAX_PER_ADDRESS`), the world 200 cats
+  (`MAX_PLAYERS`); a socket that stops answering is closed after 45 seconds.
+- **Names and chat.** A name is letters, digits and single spaces, sixteen at most, never the game's own voice
+  ("Admin", "System"), and unique among the cats in the world: a second Mochi is "Mochi 2". A chat line is one line
+  of 140 characters, at most five in a row and then one every two seconds, and a word that holds a banned one is
+  starred out. The built-in list is short; a server adds its own in `banned-words.txt` in its data folder, a word a line.
+- **The editor** is switched off in production (`NODE_ENV=production` without a token), and nginx does not offer its page.
+- Behind nginx set `TRUST_PROXY=1` (the service file does), or every player seems to come from one address.
 
 ## Bots
 

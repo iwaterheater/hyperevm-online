@@ -20,6 +20,7 @@ import {
   isBlocked, MapError, LIMITS,
 } from './src/map/format.js';
 import { PACKS, listModels } from './src/map/catalog.js';
+import { BANNED_WORDS, cleanName, uniqueName, cleanChat } from './src/moderation.js';
 
 const PORT = process.env.PORT || 8765;   // PORT=0 picks a free port; the start-up line prints the real one
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -103,6 +104,17 @@ function serveFile(req, res, pathname) {
 // ---------------------------------------------------------------- who may save
 
 // Headers that only a proxy adds. Behind one, every request arrives from the proxy's own (often loopback) address.
+// ---- a server strangers can reach. Every number here can be set from the environment.
+// TRUST_PROXY=1: the server stands behind a proxy of its own (nginx) that sets X-Forwarded-For: the address of a
+// client is the last one of that header. Without it every client seems to come from the proxy.
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+const envInt = (name, fallback) => (/^\d+$/.test(process.env[name] ?? '') ? Number(process.env[name]) : fallback);
+const MAX_PLAYERS = envInt('MAX_PLAYERS', 200);           // cats in the world at once
+const MAX_PER_ADDRESS = envInt('MAX_PER_ADDRESS', 6);     // sockets from one address at once (a household behind one router)
+const MSG_RATE = 60, MSG_BURST = 150;                     // messages a socket may send per second, and in one burst
+const FLOOD_STRIKES = 300;                                // messages over that before the socket is closed
+const SILENT_AFTER = 45000;                               // ms without an answer to a ping before a socket is given up
+
 const PROXY_HEADERS = ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip', 'forwarded', 'via',
   'cf-connecting-ip', 'cf-ray', 'true-client-ip', 'x-original-host'];
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
@@ -522,7 +534,23 @@ function persist(p) {
 function flush() {
   for (const p of players.values()) persist(p);
   fs.mkdirSync(path.dirname(SAVE_FILE), { recursive: true });
+  backupPlayers();
   writeFileAtomic(SAVE_FILE, JSON.stringify(saved));
+}
+// Once a day, before the first save of that day, the file as it stands is copied aside: data/backups/players-<day>.json,
+// the last PLAYER_BACKUPS of them. A bad day - a bug that empties bags, a file edited wrong - costs a day at most.
+const PLAYER_BACKUPS = 7;
+let backedUpOn = '';
+function backupPlayers() {
+  const day = backupDay(new Date());
+  if (day === backedUpOn) return;
+  backedUpOn = day;
+  if (!fs.existsSync(SAVE_FILE)) return;
+  const dir = path.join(path.dirname(SAVE_FILE), 'backups'), file = path.join(dir, `players-${day}.json`);
+  fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(file)) fs.copyFileSync(SAVE_FILE, file);
+  const old = fs.readdirSync(dir).filter((f) => /^players-\d{8}\.json$/.test(f)).sort().slice(0, -PLAYER_BACKUPS);
+  for (const f of old) fs.unlinkSync(path.join(dir, f));
 }
 // flush() for the timer and the way out: a save that fails is said, and the game goes on - the next one may succeed.
 function keep() {
@@ -548,8 +576,15 @@ const CLEAN = { kx: 0, kz: 0, target: 0, swing: null, cast: null, stunUntil: 0, 
 // position, a new map), and the units a step may then be beyond the speed limit. A cat that lands beside blocked ground
 // or scenery is pushed several units by its own client; without the grace the server would snap it back for ever.
 // The units are a budget for the whole grace, not for each message: they are there to settle once, not to travel on.
-const GRACE = 3, GRACE_SLACK = 40;
-const grace = (p) => { p.graceUntil = now + GRACE; p.slack = GRACE_SLACK; };
+// A cat that was only put back - to a place it had walked to itself - needs far less of it: PUT_BACK_SLACK.
+const GRACE = 3, GRACE_SLACK = 40, PUT_BACK_SLACK = 4;
+const grace = (p, slack = GRACE_SLACK) => { p.graceUntil = now + GRACE; p.slack = slack; };
+// How far a cat may walk. The client moves itself and says where it is; the server believes it as far as the cat's
+// own speed allows: what it could have covered since its last step, with SPEED_SPARE on top for the clocks of two
+// machines, saved up over at most SPEED_SAVED seconds (messages come in bursts, and a connection hiccups), and never
+// onto ground nobody walks on. A step beyond that is not taken, and the client is put back.
+const SPEED_SPARE = 1.3, SPEED_SAVED = 1.5, DASH_LENGTH = 9, STEP_SLACK = 0.6;
+const topSpeed = (p) => p.st.move * (now < p.slowUntil ? p.slowMult : 1) * p.pace * SPEED_SPARE;
 
 function makeMob(type, lvl, sx, sz, respawn) {
   const def = MOB_TYPES[type], st = mobStats(type, lvl);
@@ -917,7 +952,7 @@ function respawnPlayer(p) {
   p.mp = p.maxMp;
   p.dead = false;
   p.invulnUntil = now + 3;   // nobody is struck down again the moment it stands up
-  p.lastMoveAt = now;
+  p.lastMoveAt = performance.now() / 1000;
   grace(p);
   p.events.push({ k: 'tp', x: r2(p.x), z: r2(p.z) });
 }
@@ -1300,6 +1335,7 @@ const SKILL_EFFECTS = {
   dash(p) {
     p.dashUntil = now + 0.25;
     p.dashSeq++;
+    p.reach += DASH_LENGTH;   // the dash itself: further than a step, once
   },
   revive(p, s) {
     for (const q of players.values()) {
@@ -1324,25 +1360,28 @@ function stackOf(p, msg) {
 const handlers = {
   m(p, msg) {   // movement (client-side, sanity-checked here)
     if (p.dead) return;
-    if (held(p)) { p.speed = 0; p.lastMoveAt = now; return; }   // stunned or asleep: it stays where it is
-    const x = num(msg.x), z = num(msg.z);
-    const elapsed = Math.min(1, now - p.lastMoveAt);
-    const over = Math.hypot(x - p.x, z - p.z) - 36 * elapsed;   // units beyond the speed limit; 3 are always fine
-    if (over > (now < p.graceUntil ? p.slack : 3)) {
+    if (held(p)) { p.speed = 0; p.lastMoveAt = performance.now() / 1000; return; }   // stunned or asleep: it stays where it is
+    const x = num(msg.x), z = num(msg.z), at = performance.now() / 1000, top = topSpeed(p);
+    // what it has saved up to walk on: its speed for the time since its last message, kept for a little while
+    p.reach = Math.min(top * SPEED_SAVED, p.reach + top * Math.min(SPEED_SAVED, at - p.lastMoveAt));
+    p.lastMoveAt = at;
+    const step = Math.hypot(x - p.x, z - p.z), over = step - p.reach;
+    // onto water or up a cliff: never - unless it stands on such ground already and is finding its way out
+    const offLimits = isBlocked(map, x, z) && !isBlocked(map, p.x, p.z);
+    if (offLimits || over > (now < p.graceUntil ? p.slack : STEP_SLACK)) {
       p.events.push({ k: 'tp', x: r2(p.x), z: r2(p.z) });
-      p.lastMoveAt = now;
-      // The client is put back, and may be pushed out of scenery from there too. But a new grace starts only when the
-      // last one has run out: a refusal that always renewed it would buy 40 more units with every message.
-      if (now >= p.graceUntil) grace(p);
+      // The client is put back, and may be pushed a little by scenery there. That gets a small grace - and only when
+      // the last one has run out: a refusal that always renewed it would buy more units with every message.
+      if (now >= p.graceUntil) grace(p, PUT_BACK_SLACK);
       return;
     }
-    if (over > 3) p.slack -= over - 3;   // what the grace paid for is spent; the slack never gets below 3
+    if (over > 0) p.slack -= over;   // what the grace - or the slack of a step - paid for is spent
+    p.reach = Math.max(0, p.reach - step);
     p.x = x; p.z = z;
     p.y = Math.max(0, Math.min(8, num(msg.y)));
     p.yaw = num(msg.yaw);
     p.speed = msg.s ? 9 : 0;
     p.sit = !!msg.st;
-    p.lastMoveAt = now;
     clampWorld(p, 1);
   },
   a(p, msg) {   // auto-attack: one hit at the selected monster, or cat, with whatever is in the paw
@@ -1489,8 +1528,13 @@ const handlers = {
     p.barDirty = true;
   },
   c(p, msg) {   // chat
-    const text = String(msg.m || '').trim().slice(0, 140);
+    // cleaned, starred where it must be, and no more than a line every half second - five in a row, then one every two
+    const text = cleanChat(msg.m, bannedWords);
     if (!text || now < p.chatAt) return;
+    p.chatLeft = Math.min(5, p.chatLeft + (now - p.chatSince) / 2);
+    p.chatSince = now;
+    if (p.chatLeft < 1) { refuse(p, 'You are talking too fast'); return; }
+    p.chatLeft--;
     p.chatAt = now + 0.5;
     broadcast({ t: 'c', n: p.name, m: text });
   },
@@ -1571,8 +1615,11 @@ function dropSession(old) {
 
 // The first message of a socket. Returns the new player, or null when the client has to load the map again first.
 // `conn` is what the upgrade request said about the socket: { address, local, trusted }.
+// -> the new player, or null: the client has to load the map again first, or the world is full.
 function join(ws, msg, conn) {
   if (msg.rev !== rev) { send(ws, { t: 'map', rev }); return null; }
+  // a full world takes nobody else in - but a program on this machine (a bot) is the host's own business
+  if (players.size >= MAX_PLAYERS && !conn.local) { send(ws, { t: 'full', max: MAX_PLAYERS }); ws.close(); return null; }
 
   // Trusted = the same check as saving. Without a token it was settled by where the socket came from; with one, by the join.
   let trusted = conn.trusted;
@@ -1585,7 +1632,7 @@ function join(ws, msg, conn) {
   const test = trusted && msg.test && typeof msg.test === 'object' && !Array.isArray(msg.test) ? msg.test : null;
   const at = !trusted ? null : test ? test.at : msg.at;
 
-  const name = String(msg.name || '').replace(/\s+/g, ' ').trim().slice(0, 16) || 'Cat';
+  let name = cleanName(msg.name, bannedWords);
   // a play-test has no token: the designer's real character is neither read nor written, and a game tab of the same
   // browser is not its duplicate
   const token = test ? '' : String(msg.token || '').slice(0, 64);
@@ -1605,6 +1652,9 @@ function join(ws, msg, conn) {
     // a bot's first join brings the character it starts as (see botCharacter)
     if (keeps && !data && conn.local && msg.bot && typeof msg.bot === 'object' && !Array.isArray(msg.bot)) data = botCharacter(msg.bot);
   }
+  // Nobody takes the name of a cat that is in the world - the chat says who spoke: a second Mochi is "Mochi 2" for
+  // as long as the first one is here. (The newcomer's own old session is gone by now.)
+  name = uniqueName(name, [...players.values()].map((q) => q.name));
   // A character from before the game had items loads with an empty bag; only a new one gets the starter kit.
   const fresh = !data || !!test;
   data = data || {};
@@ -1620,13 +1670,14 @@ function join(ws, msg, conn) {
     inv: cleanBag(fresh ? STARTER_KIT : data.inv), equip: cleanEquip(data.equip), bagDirty: true, potionAt: 0,
     bar: Array.isArray(data.bar) ? cleanBar(data.bar) : null, barDirty: true, knightKit: data.knightKit ? 1 : 0,
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
-    castAt: 0, swingAt: 0, blow: null, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0,
+    castAt: 0, swingAt: 0, blow: null, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0, chatLeft: 5, chatSince: now,
     // PvP: fights won, murders, the karma they left - and, never saved, how long the cat stays flagged
     pvp: data.pvp | 0, pk: data.pk | 0, karma: Math.max(0, data.karma | 0), flagUntil: 0,
     stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null,   // what another cat's skills can do to it
     // a bot may name the level it stops growing at, with every join: some cats of the world stay small for good
     cap: conn.local && msg.bot && typeof msg.bot === 'object' ? Math.max(0, Math.min(40, Math.round(num(msg.bot.cap)))) : 0,
-    lastMoveAt: now, graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
+    lastMoveAt: performance.now() / 1000, reach: 0, pace: test?.speed === 2 ? 2 : 1,   // pace: a play-test may run at double speed
+    graceUntil: now + GRACE, slack: GRACE_SLACK, safe: false, god: !!test?.god, gone: false, events: [],
   };
   if (!test) forgeToEnchant(p);
   grantFree(p);
@@ -1644,13 +1695,61 @@ function join(ws, msg, conn) {
   return p;
 }
 
+// The words a name may not hold and a chat line gets starred for: the built-in few, and the server's own - one a line
+// in data/banned-words.txt, read once at start-up.
+const bannedWords = [...BANNED_WORDS];
+try {
+  for (const line of fs.readFileSync(path.join(path.dirname(SAVE_FILE), 'banned-words.txt'), 'utf8').split('\n')) {
+    const word = line.trim().toLowerCase();
+    if (word && !word.startsWith('#') && !bannedWords.includes(word)) bannedWords.push(word);
+  }
+} catch { /* no list of its own */ }
+
+// Where a socket comes from. Behind the server's own proxy that is what the proxy wrote last into X-Forwarded-For.
+function addressOf(req) {
+  const direct = String(req.socket.remoteAddress ?? '').replace(/^::ffff:/, '');
+  if (!TRUST_PROXY) return direct;
+  return String(req.headers['x-forwarded-for'] ?? '').split(',').map((part) => part.trim()).filter(Boolean).at(-1) || direct;
+}
+const socketsOf = new Map();   // address -> how many sockets it has open
+
+// A socket that does not answer is gone, whatever the network says: every 20 seconds each one is pinged, and one that
+// has been silent for SILENT_AFTER is closed - its cat leaves the world instead of standing in it for ever.
+setInterval(() => {
+  const at = Date.now();
+  for (const ws of wss.clients) {
+    if (at - (ws.heardAt ?? at) > SILENT_AFTER) ws.terminate();
+    else if (ws.readyState === 1) ws.ping();
+  }
+}, 20000).unref();
+
 wss.on('connection', (ws, req) => {
   let p = null;
+  // One address may hold only so many sockets: more is one machine pretending to be a crowd. This machine itself is
+  // not counted - the host's bots come from it.
+  const address = addressOf(req);
+  if (!isLoopback(address)) {
+    const open = (socketsOf.get(address) ?? 0) + 1;
+    if (open > MAX_PER_ADDRESS) { ws.close(1013, 'too many connections'); return; }
+    socketsOf.set(address, open);
+    ws.once('close', () => { const left = socketsOf.get(address) - 1; if (left > 0) socketsOf.set(address, left); else socketsOf.delete(address); });
+  }
+  ws.heardAt = Date.now();
+  ws.on('pong', () => { ws.heardAt = Date.now(); });
+  // A socket may send MSG_RATE messages a second, MSG_BURST at once. What is over is not heard, and one that keeps it
+  // up is closed: a flood costs the server nothing but the counting.
+  let allowance = MSG_BURST, countedAt = performance.now(), strikes = 0;
   // WebSockets ignore the same-origin policy, so here the Origin rule is what keeps a foreign page out.
   // local: the socket was opened by a program on this machine - not through a proxy, and not by a page, which always
   // names its Origin. That is what a bot's first join is asked.
   const conn = { address: req.socket.remoteAddress, local: localRequest(req) && req.headers.origin === undefined, trusted: EDITOR && !TOKEN_MODE && localRequest(req) && originOk(req) };
   ws.on('message', (raw) => {
+    ws.heardAt = Date.now();
+    const t = performance.now();
+    allowance = Math.min(MSG_BURST, allowance + (t - countedAt) / 1000 * MSG_RATE);
+    countedAt = t;
+    if (allowance < 1) { if (++strikes > FLOOD_STRIKES) ws.close(1008, 'flood'); return; }
+    allowance--;
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     try {   // nothing a client sends may take the process down
