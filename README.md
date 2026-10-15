@@ -239,7 +239,7 @@ A clan is a lasting band of cats, as in Lineage II; unlike a party it is kept wh
   gets a window to join or decline (30 seconds). Up to 30 cats. The Clan window lists every member, in the world or
   away; the leader sends one away with ×. A leader who leaves hands the clan to the member who joined first after it;
   **Disband** ends the clan for everyone.
-- The clan's name stands in brackets before its members' names. A chat line that starts with **@** goes to the clan
+- The clan's name stands in brackets before its members' names over their heads, which show the name alone (the class and the level are in the target frame). A chat line that starts with **@** goes to the clan
   alone; clan lines are green. Area skills pass over clan mates.
 - **War.** The Clan window lists the other clans. A leader presses **Declare war**; the war begins once the other
   clan's leader answers in kind (**Answer**) - or refuses. While two clans are at war their cats fight anywhere outside

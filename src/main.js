@@ -708,7 +708,7 @@ function onSnapshot(s) {
   const wasDead = stats.dead;
   Object.assign(stats, s.me, { dead: !!s.me.dead });
   // this cat's own name stands over its head as everyone else's does, in the colour the others see it in
-  setLabel(me, `${clanTag(myId)}${names.get(myId) || 'Cat'} · ${CLASSES[s.me.cls]?.name ?? ''} ${s.me.level}`, PVP_COLORS[s.me.st] ?? PVP_COLORS[0]);
+  setLabel(me, `${clanTag(myId)}${names.get(myId) || 'Cat'}`, PVP_COLORS[s.me.st] ?? PVP_COLORS[0]);
   setLook(me, stats.cls, lookCode(stats.eq));
   sheet = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, Object.fromEntries(stats.buffs.map(([stat, , mult]) => [stat, mult])), stats.eq);
   if (stats.dead !== wasDead) $('dead').classList.toggle('hidden', !stats.dead);
@@ -720,7 +720,7 @@ function onSnapshot(s) {
       if (a.dead && !dead) Object.assign(a, { x, z, fx: x, fz: z });   // back to life somewhere else: it gets up there, it does not slide there
       Object.assign(a, { tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
       setLook(a, CLASS_KEYS[cls], look);
-      setLabel(a, `${clanTag(id)}${a.name} · ${CLASSES[a.cls].name} ${level}`, catColor(id, st));
+      setLabel(a, `${clanTag(id)}${a.name}`, catColor(id, st));   // the name alone: class and level are in the target frame
     },
     removeAvatar);
 
