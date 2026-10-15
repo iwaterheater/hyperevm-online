@@ -18,7 +18,7 @@ import {
   ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, ENCHANT_POWER, enchantChance, smithFee, plusOf, wornPlus, itemName,
   ITEMS, TIERS, EQUIP_SLOTS, SLOT_NAMES, BONUS_NAMES, BAG_SIZE, POTION_CD, SELL_RATE, SHOP, SHOP_TIER, sellPrice, stackMax, roomFor, lootTable,
   basicFamily, handsOf, heldFamily, fightStyle, equipError, comesOff, equipWith, wearError, lookCode, lookOf, BAR_SIZE,
-  CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK,
+  CAT_R, PVP_PEACE, PVP_COLORS, PVP_TITLES, BAR_ATTACK, CLAN_LEVEL, CLAN_MAX, WAR_OURS, WAR_THEIRS, AT_WAR, WAR_COLOR,
 } from './shared.js';
 
 // how long a swing lasts when the attack speed behind it is not known: another player's blow, a skill
@@ -521,10 +521,11 @@ function banner(text) {
 
 // sys: said by the game, not by a player. kind: 'out' and 'in' are the lines of the combat log - what this cat dealt and
 // what it took - which only the System tab shows.
-// kind 'party': a line of the party chat, or of what happens in the party - in both tabs, in the party's colour.
+// kind 'party': a line of the party chat, or of what happens in the party - in both tabs, in the party's colour; 'clan'
+// the same for the clan.
 function chatLine(name, text, sys, kind = '') {
-  const div = document.createElement('div');
-  if (kind === 'party') div.className = sys ? 'party sys' : 'party';
+  const div = document.createElement('div'), own = kind === 'party' || kind === 'clan';
+  if (own) div.className = sys ? `${kind} sys` : kind;
   else if (sys) div.className = kind ? `sys fight ${kind}` : 'sys';
   if (name) {
     const b = document.createElement('b');
@@ -536,7 +537,7 @@ function chatLine(name, text, sys, kind = '') {
   log.append(div);
   // Each kind keeps its own last lines, more than a tab can show: a fight writes many, and must not push what the
   // players said, or what was looted, out of the log.
-  const same = log.querySelectorAll(kind === 'party' ? '.party' : kind ? '.fight' : sys ? '.sys:not(.fight):not(.party)' : 'div:not(.sys):not(.party)');
+  const same = log.querySelectorAll(own ? `.${kind}` : kind ? '.fight' : sys ? '.sys:not(.fight):not(.party):not(.clan)' : 'div:not(.sys):not(.party):not(.clan)');
   for (let i = 0; i < same.length - 30; i++) same[i].remove();
 }
 
@@ -665,9 +666,11 @@ function onMessage(msg) {
     sfx(440, 0.25, 'triangle', 0.08, 440);
   } else if (msg.t === 'r') {
     names.clear();
-    for (const [id, name] of msg.l) names.set(id, name);
+    clanTags.clear();
+    for (const [id, name, clan, clanName] of msg.l) { names.set(id, name); if (clan) clanTags.set(id, [clan, clanName]); }
   } else if (msg.t === 'c') {
-    chatLine(msg.party ? `[Party] ${msg.n}` : msg.n, msg.m, msg.sys, msg.party ? 'party' : '');
+    const kind = msg.party ? 'party' : msg.clan ? 'clan' : '';
+    chatLine(kind ? `[${msg.party ? 'Party' : 'Clan'}] ${msg.n}` : msg.n, msg.m, msg.sys, kind);
   } else if (msg.t === 's') {
     onSnapshot(msg);
   }
@@ -705,7 +708,7 @@ function onSnapshot(s) {
   const wasDead = stats.dead;
   Object.assign(stats, s.me, { dead: !!s.me.dead });
   // this cat's own name stands over its head as everyone else's does, in the colour the others see it in
-  setLabel(me, `${names.get(myId) || 'Cat'} · ${CLASSES[s.me.cls]?.name ?? ''} ${s.me.level}`, PVP_COLORS[s.me.st] ?? PVP_COLORS[0]);
+  setLabel(me, `${clanTag(myId)}${names.get(myId) || 'Cat'} · ${CLASSES[s.me.cls]?.name ?? ''} ${s.me.level}`, PVP_COLORS[s.me.st] ?? PVP_COLORS[0]);
   setLook(me, stats.cls, lookCode(stats.eq));
   sheet = statsOf(stats.cls, stats.level, stats.skills, stats.weapon, Object.fromEntries(stats.buffs.map(([stat, , mult]) => [stat, mult])), stats.eq);
   if (stats.dead !== wasDead) $('dead').classList.toggle('hidden', !stats.dead);
@@ -717,7 +720,7 @@ function onSnapshot(s) {
       if (a.dead && !dead) Object.assign(a, { x, z, fx: x, fz: z });   // back to life somewhere else: it gets up there, it does not slide there
       Object.assign(a, { tyaw: yaw, speed, hp, maxHp, level, dead: !!dead, sitting: !!sit, st, flags, name: names.get(id) || 'Cat' });
       setLook(a, CLASS_KEYS[cls], look);
-      setLabel(a, `${a.name} · ${CLASSES[a.cls].name} ${level}`, PVP_COLORS[st]);   // purple while it is flagged, red for an outlaw
+      setLabel(a, `${clanTag(id)}${a.name} · ${CLASSES[a.cls].name} ${level}`, catColor(id, st));
     },
     removeAvatar);
 
@@ -889,7 +892,7 @@ function onEvent(ev) {
       sfx(523, 0.5, 'triangle', 0.09, 520);
       break;
     case 'pinv':   // a cat invites this one to its party
-      showInvite(ev.o, ev.n, ev.t);
+      showInvite(`${ev.n} invites you to a party`, ev.t, (ok) => send({ t: 'pans', id: ev.o, ok }));
       chatLine('', `${ev.n} invites you to a party`, true, 'party');
       sfx(660, 0.2, 'triangle', 0.06, 200);
       break;
@@ -901,6 +904,14 @@ function onEvent(ev) {
       break;
     case 'psys':   // somebody came, went, or leads now
       chatLine('', ev.m, true, 'party');
+      break;
+    case 'cinv':   // the leader of a clan invites this cat
+      showInvite(`${ev.by} invites you to the clan ${ev.n}`, ev.t, (ok) => send({ t: 'clan', a: 'answer', c: ev.c, ok }));
+      chatLine('', `${ev.by} invites you to the clan ${ev.n}`, true, 'clan');
+      sfx(660, 0.2, 'triangle', 0.06, 200);
+      break;
+    case 'csys':   // what happens in the clan
+      chatLine('', ev.m, true, 'clan');
       break;
     case 'ench': {   // this cat's scroll has been used: the weapon holds its new number, or is gone
       const text = ev.ok ? `${ITEMS[ev.id].name} is now +${ev.plus}` : `${itemName(ev.id, ev.plus)} has broken`;
@@ -1054,11 +1065,17 @@ function pickTarget(clientX, clientY) {
 // Whether the cat `a` may be attacked now; `say` tells the player why not. Nobody in a safe place, and a peaceful cat
 // only once the player has forced the attack (a flagged one and an outlaw are fair game).
 const inParty = (id) => !!stats.party?.some((row) => row[0] === id);
+// The clans: what clan a cat is in (the roster tells it of every cat), and whether its clan and ours are at war.
+const clanTags = new Map();   // cat id -> [clan id, clan name]
+const clanTag = (id) => (clanTags.has(id) ? `[${clanTags.get(id)[1]}] ` : '');
+const atWarWith = (id) => { const c = clanTags.get(id)?.[0]; return !!c && !!stats.clan?.wars?.some((w) => w[0] === c && w[3] === AT_WAR); };
+// the colour of a cat's name: red for an outlaw, orange for an enemy in a clan war, purple while it is flagged
+const catColor = (id, st) => (st !== 2 && atWarWith(id) ? WAR_COLOR : PVP_COLORS[st]);
 function catFoe(a, id, say) {
   let why = '';
   if (inParty(id)) why = `${a.name} is in your party`;
   else if (isSafe(map, me.x, me.z) || isSafe(map, a.x, a.z)) why = 'No fighting in a safe place';
-  else if (a.st === PVP_PEACE && forced !== id) why = 'Ctrl + click to attack a peaceful cat';
+  else if (a.st === PVP_PEACE && forced !== id && !atWarWith(id)) why = 'Ctrl + click to attack a peaceful cat';   // a clan war asks no Ctrl
   if (why && say) notice(why);
   return !why;
 }
@@ -1118,7 +1135,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); jump(); }
   if (e.code === 'Tab') nextTarget();
   if (e.code === 'Escape') {
-    if (enchantOpen) toggleEnchant(false); else if (settingsOpen) toggleSettings(false); else if (mapOpen) toggleMap(false); else if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
+    if (clanOpen) toggleClan(false); else if (enchantOpen) toggleEnchant(false); else if (settingsOpen) toggleSettings(false); else if (mapOpen) toggleMap(false); else if (helpOpen) toggleHelp(false); else if (storeOpen) toggleStore(false); else if (bagOpen) toggleBag(false);
     else if (bookOpen) toggleBook(false); else if (sheetOpen) toggleSheet(false);
     else setTarget(0, false);
   }
@@ -1126,6 +1143,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyK') toggleBook();
   if (e.code === 'KeyC') toggleSheet();
   if (e.code === 'KeyB') enchantKey();
+  if (e.code === 'KeyN') toggleClan();
   if (e.code === 'KeyI') toggleBag();
   if (e.code === 'KeyT') tradeKey();
   if (e.code === 'KeyH' || e.code === 'F1') toggleHelp();
@@ -1167,6 +1185,7 @@ addEventListener('contextmenu', (e) => e.preventDefault());
 // the Attack button of a cat's target frame: the deliberate act it takes to attack a peaceful cat, without the keyboard
 $('tgAttack').addEventListener('click', () => { setTarget(targetId, true, true); $('tgAttack').blur(); });
 $('tgInvite').addEventListener('click', () => { send({ t: 'pinv', id: targetId }); $('tgInvite').blur(); });
+$('tgClan').addEventListener('click', () => { send({ t: 'clan', a: 'invite', id: targetId }); $('tgClan').blur(); });
 $('playBtn').addEventListener('click', connect);
 $('reloadBtn').addEventListener('click', () => location.reload());
 // the way back to the map editor: it opens, or moves its camera, at the spot where the cat stands
@@ -1788,7 +1807,7 @@ $('mapLegend').append('Camps', ...[...THREAT].reverse().map(([, color, word]) =>
 // Blacksmith, and stays open: a click, a scroll, a step - or a broken weapon. The rules are told in shared.js.
 let enchantOpen = false, enchantShown = null;
 function toggleEnchant(open = !enchantOpen) {
-  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); toggleSettings(false); }
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); toggleSettings(false); toggleClan(false); }
   enchantOpen = open;
   enchantShown = null;
   $('enchant').classList.toggle('on', open);
@@ -1801,7 +1820,7 @@ function enchantKey() {
 }
 function renderEnchant() {
   // any other window takes its place
-  if (bagOpen || bookOpen || helpOpen || storeOpen || sheetOpen || settingsOpen || mapOpen) { toggleEnchant(false); return; }
+  if (bagOpen || bookOpen || helpOpen || storeOpen || sheetOpen || settingsOpen || mapOpen || clanOpen) { toggleEnchant(false); return; }
   const id = ITEMS[stats.eq.weapon] ? stats.eq.weapon : null, plus = wornPlus(stats.eq), scrolls = bagCount(ENCHANT_SCROLL);
   const atSmith = nearNpc(map, me, 'blacksmith'), fee = smithFee(plus);
   const key = [id, plus, scrolls, atSmith, stats.gold >= fee, stats.dead, sheet.pAtk, sheet.mAtk].join('|');
@@ -1841,6 +1860,85 @@ function renderEnchant() {
   }
   out.push(close);
   $('enchantBody').replaceChildren(...out);
+}
+
+// ---- the clan window (N): founding a clan, its members, and its wars with the other clans. The rules are told in
+// shared.js; what it shows comes with the snapshot as stats.clan (clanView in server.js).
+let clanOpen = false, clanShown = null;
+const clanNameInput = el('input');
+clanNameInput.id = 'clanName';
+clanNameInput.maxLength = 16;
+clanNameInput.placeholder = 'Name of the clan';
+clanNameInput.addEventListener('keydown', (e) => {
+  e.stopPropagation();   // the keys spell the name, they do not walk the cat
+  if (e.code === 'Enter') { send({ t: 'clan', a: 'create', name: clanNameInput.value }); clanNameInput.blur(); }
+  if (e.code === 'Escape') clanNameInput.blur();
+});
+function toggleClan(open = !clanOpen) {
+  if (open) { toggleBook(false); toggleHelp(false); toggleSheet(false); toggleStore(false); toggleBag(false); toggleMap(false); toggleSettings(false); toggleEnchant(false); }
+  clanOpen = open;
+  clanShown = null;
+  $('clan').classList.toggle('on', open);
+  if (!open) clanNameInput.blur();
+  if (open) renderClan();
+}
+const WAR_WORDS = { [WAR_OURS]: 'You have declared war', [WAR_THEIRS]: 'They have declared war on you', [AT_WAR]: 'At war' };
+function renderClan() {
+  if (bagOpen || bookOpen || helpOpen || storeOpen || sheetOpen || settingsOpen || mapOpen || enchantOpen) { toggleClan(false); return; }
+  const c = stats.clan ?? { id: 0 }, atSage = nearNpc(map, me, 'sage');
+  const key = JSON.stringify([c, atSage, stats.level]);
+  if (key === clanShown) return;
+  clanShown = key;
+  const line = (text, cls = '') => el('div', `line ${cls}`, text);
+  const button = (label, onClick, cls = '') => {
+    const b = el('button', cls, label);
+    b.addEventListener('click', () => { onClick(); b.blur(); });
+    return b;
+  };
+  const act = (a, more) => send({ t: 'clan', a, ...more });
+  const out = [];
+  if (!c.id) {
+    $('clanTitle').textContent = 'Clan';
+    out.push(line('You are in no clan. The leader of a clan can invite you: it selects your cat and presses Clan under its name.', 'dim'));
+    if (stats.level < CLAN_LEVEL) out.push(line(`From level ${CLAN_LEVEL} you can found a clan of your own at the Sage.`));
+    else if (!atSage) out.push(line('Found a clan of your own: go to the Sage.'));
+    else {
+      const row = el('div', 'acts');
+      row.append(clanNameInput, button('Found', () => act('create', { name: clanNameInput.value })));
+      out.push(line(`Found a clan: it will hold up to ${CLAN_MAX} cats, and you lead it.`), row);
+    }
+  } else {
+    $('clanTitle').textContent = c.name;
+    out.push(line(`Led by ${c.leader} · ${c.members.length} / ${CLAN_MAX} cats`, 'dim'));
+    const list = el('div', 'list');
+    for (const [name, key2, online, level, cls, leader] of c.members) {
+      const row = el('div', `row${online ? '' : ' off'}`);
+      row.append(el('b', '', `${leader ? '★ ' : ''}${name}`), el('span', '', online ? `${CLASSES[CLASS_KEYS[cls]]?.name ?? ''} ${level}` : 'away'));
+      if (c.lead && !leader) row.append(button('×', () => act('kick', { key: key2 }), 'kick'));
+      list.append(row);
+    }
+    out.push(list);
+    out.push(el('h3', '', 'Wars'));
+    if (!c.wars.length) out.push(line('There is no other clan yet.', 'dim'));
+    const wars = el('div', 'list');
+    for (const [id, name, size, war, ours, theirs] of c.wars) {
+      const row = el('div', `row${war === AT_WAR ? ' war' : ''}`);
+      row.append(el('b', '', `${name} (${size})`), el('span', '', war ? `${WAR_WORDS[war]}${war === AT_WAR ? ` · ${ours} : ${theirs}` : ''}` : ''));
+      if (c.lead && !(war & WAR_OURS)) row.append(button(war ? 'Answer' : 'Declare war', () => act('war', { c: id }), 'war'));
+      // peace; or a declaration taken back, ours or theirs - a war is only on while both want it
+      if (c.lead && war) row.append(button(war === AT_WAR ? 'Make peace' : war === WAR_OURS ? 'Withdraw' : 'Refuse', () => act('peace', { c: id }), 'peace'));
+      wars.append(row);
+    }
+    out.push(wars);
+    if (c.lead) out.push(line('Your clan and one you are at war with fight anywhere outside the safe places, without Ctrl and without turning purple; a kill counts for the war and is never murder.', 'dim'));
+    out.push(line('A chat line that starts with @ goes to your clan alone.', 'dim'));
+    const acts = el('div', 'acts');
+    acts.append(button(c.lead && c.members.length === 1 ? 'Disband' : 'Leave the clan', () => act('leave')));
+    if (c.lead && c.members.length > 1) acts.append(button('Disband', () => act('disband')));
+    out.push(acts);
+  }
+  out.push(button('Close', () => toggleClan(false), 'close'));
+  $('clanBody').replaceChildren(...out);
 }
 
 // ---- settings: sound and graphics. A change is at work at once and is kept in the browser; the controls give the
@@ -2371,6 +2469,8 @@ const MENU = [
     icon: '<path d="M9 2h6a2 2 0 012 2v2h-2v-2h-6v2h-2v-2a2 2 0 012-2z"/><path d="M5 7h14a2 2 0 012 2v10.500a2 2 0 01-2 2h-14a2 2 0 01-2-2v-10.500a2 2 0 012-2zM9.500 11v3.500h5v-3.500z" fill-rule="evenodd"/>' },
   { name: 'Skills', key: 'K', toggle: () => toggleBook(), isOpen: () => bookOpen,
     icon: '<path d="M2.500 4.500c3-1.200 6-1.200 8.500.500v15c-2.500-1.700-5.500-1.700-8.500-.500zM21.500 4.500c-3-1.200-6-1.200-8.500.500v15c2.500-1.700 5.500-1.700 8.500-.500z"/>' },
+  { name: 'Clan', key: 'N', toggle: () => toggleClan(), isOpen: () => clanOpen,
+    icon: '<path d="M12 2l8.500 3v6.500c0 5-3.600 8.800-8.500 10.500-4.900-1.700-8.500-5.500-8.500-10.500v-6.500zm0 4.500l-1.500 3.200-3.400.400 2.500 2.300-.700 3.400 3.100-1.700 3.100 1.700-.700-3.400 2.500-2.300-3.400-.400z" fill-rule="evenodd"/>' },
   { name: 'Map', key: 'M', toggle: () => toggleMap(), isOpen: () => mapOpen,
     icon: '<path d="M2.500 6l6-2.500v14.500l-6 2.500zM9.500 3.500l5 2.500v14.500l-5-2.500zM15.500 6l6-2.500v14.500l-6 2.500z"/>' },
   { name: 'Settings', key: 'O', side: true, toggle: () => toggleSettings(), isOpen: () => settingsOpen,
@@ -2481,7 +2581,7 @@ function renderDrops(tv) {
 // ---- the party: a frame of every member under the cat's own - name, class, level, health and mana - and the window of
 // an invitation. A click on a member selects it, when it is in sight; the leader sends one away with ×.
 const PARTY_COLOR = '#7cc4ff';
-let partyShown = null, inviteFrom = 0, inviteTimer = 0;
+let partyShown = null, inviteAnswer = null, inviteTimer = 0;
 function renderParty() {
   const rows = stats.party, key = JSON.stringify(rows?.map((r) => [...r.slice(0, 4), Math.round(r[4] / r[5] * 40), Math.round(r[6] / Math.max(1, r[7]) * 40), r[8]]));
   if (key === partyShown) return;
@@ -2505,17 +2605,18 @@ function renderParty() {
     return row;
   }));
 }
-function showInvite(from, name, seconds) {
-  inviteFrom = from;
-  $('inviteText').textContent = `${name} invites you to a party`;
+// The window of an invitation, to a party or to a clan: `answer` tells the server yes or no.
+function showInvite(text, seconds, answer) {
+  inviteAnswer = answer;
+  $('inviteText').textContent = text;
   $('invite').classList.add('on');
   clearTimeout(inviteTimer);
   inviteTimer = setTimeout(() => answerInvite(false, true), seconds * 1000);
 }
 // quiet: the invitation ran out; the inviter is not told no, the window just goes
 function answerInvite(ok, quiet = false) {
-  if (inviteFrom && !quiet) send({ t: 'pans', id: inviteFrom, ok });
-  inviteFrom = 0;
+  if (inviteAnswer && !quiet) inviteAnswer(ok);
+  inviteAnswer = null;
   clearTimeout(inviteTimer);
   $('invite').classList.remove('on');
 }
@@ -2600,15 +2701,17 @@ function updateHud() {
   // a cat that is in no party of ours, while we lead one or are in none
   const leading = !stats.party || stats.party[0][0] === myId;
   $('tgInvite').style.display = tv?.cat && leading && !inParty(targetId) ? 'inline-block' : 'none';
+  // the leader of a clan, before a cat in none
+  $('tgClan').style.display = tv?.cat && stats.clan?.lead && !clanTags.has(targetId) ? 'inline-block' : 'none';
   renderDrops(tv);
   if (tv) {
-    const tint = tv.cat ? PVP_COLORS[tv.st] : threat(tv.lvl), ailing = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : '';
+    const tint = tv.cat ? catColor(targetId, tv.st) : threat(tv.lvl), ailing = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : '';
     say($('tgLevel'), String(tv.cat ? tv.level : tv.lvl));
     $('tgLevel').style.setProperty('--tint', tint);
-    say($('tgName'), tv.cat ? `${tv.name} · ${CLASSES[tv.cls].name}` : tv.def.name);
+    say($('tgName'), tv.cat ? `${clanTag(targetId)}${tv.name} · ${CLASSES[tv.cls].name}` : tv.def.name);
     $('tgName').style.color = tint;
     $('tgFill').style.width = `${Math.max(0, tv.hp / tv.maxHp) * 100}%`;
-    say($('tgState'), ailing || (tv.cat ? PVP_TITLES[tv.st] : tv.def.calm ? 'Calm' : 'Hostile'));
+    say($('tgState'), ailing || (tv.cat ? (tv.st !== 2 && atWarWith(targetId) ? 'At war' : PVP_TITLES[tv.st]) : tv.def.calm ? 'Calm' : 'Hostile'));
   }
 
   const atSage = nearNpc(map, me, 'sage'), atTrader = nearNpc(map, me, 'trader');
@@ -2617,6 +2720,7 @@ function updateHud() {
   if (storeOpen) renderStore();
   if (bagOpen) { renderBag(); renderBagStats(); }
   if (enchantOpen) renderEnchant();
+  if (clanOpen) renderClan();
   // the Blacksmith and the Trader may stand close enough together for both to be in reach
   const tips = [];
   if (atSage) tips.push('K — learn skills from the Sage');
@@ -2716,7 +2820,7 @@ function drawMinimap() {
     a.id = id;
     const at = place(a.x, a.z);
     if (!at) continue;
-    g.fillStyle = inParty(a.id ?? -1) ? PARTY_COLOR : a.st ? PVP_COLORS[a.st] : '#ffffff';
+    g.fillStyle = inParty(a.id ?? -1) ? PARTY_COLOR : a.st !== 2 && atWarWith(a.id ?? -1) ? WAR_COLOR : a.st ? PVP_COLORS[a.st] : '#ffffff';
     g.beginPath(); g.arc(at[0], at[1], 8.5, 0, 7); g.fill(); g.stroke();
   }
   // the player: an arrow that points where the cat looks

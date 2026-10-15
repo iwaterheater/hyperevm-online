@@ -748,6 +748,18 @@ export const PARTY_MAX = 9, PARTY_REACH = 40, PARTY_BONUS = 0.15, INVITE_TIME = 
 // what each of `n` members near the kill gets of a monster's `xp`
 export const partyShare = (xp, n) => Math.round(xp * (1 + PARTY_BONUS * (n - 1)) / n);
 
+// ---------------------------------------------------------------- clans
+
+// Clans, as in Lineage II. A cat of CLAN_LEVEL or more founds one at the Sage and leads it; the leader invites (up to
+// CLAN_MAX members), sends members away and may disband it. A line that starts with @ goes to the clan alone.
+// War: a leader declares war on another clan, and when that clan's leader declares war back, the two are at war.
+// Then their members fight anywhere outside the safe regions without asking (no Ctrl), nobody is flagged for it,
+// and a kill is no murder: it counts for the killer's PvP and for the war's score. Either leader ends the war.
+export const CLAN_LEVEL = 10, CLAN_MAX = 30, CLAN_NAME_MIN = 3;
+// What a clan's view of another one says of the war between them, as bits: 1 we declared, 2 they did; 3 is war.
+export const WAR_OURS = 1, WAR_THEIRS = 2, AT_WAR = 3;
+export const WAR_COLOR = '#ff9a3c';   // the name of a cat of a clan at war with ours
+
 // ---------------------------------------------------------------- PvP
 
 // Cats may fight each other outside the safe regions - in a safe one nobody is attacked - by the rules of Lineage II:

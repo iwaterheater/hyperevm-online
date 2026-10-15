@@ -52,11 +52,12 @@ The page opens on a loading screen and keeps it until the world can be drawn wit
 | `Space` | Jump (double jump) |
 | `B` | Enchant the weapon in the paw (stand next to the Blacksmith in town; see [Enchanting](#enchanting)) |
 | `T` | Trade (stand next to the Trader in town): buy potions and gear, sell anything from the bag |
+| `N` | Clan window: found a clan, its members, and its wars with the other clans (see [Clans and clan wars](#clans-and-clan-wars)) |
 | `Enter` | Open chat / send message |
 
 The screen: in the top-left corner the cat's frame - its portrait in a laurel ring with the level on a badge, and beside it the name, the level and class, health and mana. In the top-right one the minimap in its gold ring - north is up, the arrow is the cat and points where it looks, a skull marks the boss lair, a house the town, and its `+` and `−` show less or more of the surroundings - under it the name of the place the cat is in and where it stands, and under that the row of window buttons. The chat is in the lower-left corner: the last lines, a line to write on (`Enter`, or a click on it) and two tabs - General shows everything, System only what the game itself said. The action bar lies at the lower edge, and in the lower-right corner is a pad for the mouse: the attack, the jump, the next target, and the dash once the cat knows one. **Experience** is the gold line under the ten slots of the action bar, with its numbers below it; it lights up when experience comes in. Everything else lives in the window it belongs to: gold in the inventory, the Trader's window and the status window; skill points in the skill book; the weapon's upgrade level in the status window and in the Blacksmith's line; how many cats are online at the foot of the Help window.
 
-The windows also open from the buttons at the right edge: Character, Inventory, Skills and Map in the row under the minimap - and Shop while the Trader is in reach - Settings and Help under that. A button is lit while its window is open, and the Skills button wears a number while there are that many skills the unspent skill points can pay for. On a screen narrower than 1820 pixels one window is open at a time, in the middle between the chat and the minimap; a wider one shows the inventory beside the status window or the Trader's list.
+The windows also open from the buttons at the right edge: Character, Inventory, Skills, Clan and Map in the row under the minimap - and Shop while the Trader is in reach - Settings and Help under that. A button is lit while its window is open, and the Skills button wears a number while there are that many skills the unspent skill points can pay for. On a screen narrower than 1820 pixels one window is open at a time, in the middle between the chat and the minimap; a wider one shows the inventory beside the status window or the Trader's list.
 
 The pictures of the HUD - the frame, the portrait, the ring of the minimap, its buttons and landmarks - are cut out of two painted sheets, `art/hud-atlas.png` and `art/minimap-atlas.png`, by `python3 tools/build-hud.py` into `assets/ui/hud/`.
 
@@ -226,6 +227,27 @@ window to join or decline (the invitation stands for 30 seconds). Whoever invite
   it (when it is in sight). The leader sends a member away with ×; **Leave party** leaves. A leader who goes hands the
   party to the next member; a party of one breaks up.
 - A chat line that starts with **#** goes to the party alone. Party members are blue on the minimap.
+
+### Clans and clan wars
+
+A clan is a lasting band of cats, as in Lineage II; unlike a party it is kept when its members leave the world.
+
+- **Founding.** A cat of level 10 or more founds a clan at the Sage, in the Clan window (`N`), with a name of 3 to 16
+  characters no other clan has. The founder leads it. Only a character of one's own has a clan: not a guest, not a
+  play-test.
+- **Members.** The leader selects a cat in no clan and presses **Clan** under its name in the target frame; the cat
+  gets a window to join or decline (30 seconds). Up to 30 cats. The Clan window lists every member, in the world or
+  away; the leader sends one away with ×. A leader who leaves hands the clan to the member who joined first after it;
+  **Disband** ends the clan for everyone.
+- The clan's name stands in brackets before its members' names. A chat line that starts with **@** goes to the clan
+  alone; clan lines are green. Area skills pass over clan mates.
+- **War.** The Clan window lists the other clans. A leader presses **Declare war**; the war begins once the other
+  clan's leader answers in kind (**Answer**) - or refuses. While two clans are at war their cats fight anywhere outside
+  the safe places without `Ctrl` and without being flagged, and a kill is never murder: it counts as PvP for the
+  killer and as a point for its clan in the war's score (shown in the Clan window). Enemies' names are orange, on the
+  cat, in the target frame and on the minimap. Either leader ends the war with **Make peace**; the score stays.
+
+The clans are kept in `data/clans.json`, beside the characters, and saved the moment they change.
 
 ### Fighting other cats
 
@@ -409,7 +431,7 @@ data/             Saved player progress (created at runtime, git-ignored)
 - Combat is target-based, as in classic MMORPGs: the server checks that the selected monster is alive and within reach before a swing or a bolt lands.
 - Projectiles are drawn locally from "shot" events, so they look smooth regardless of the tick rate.
 - A character saved before the game had items loads with an empty bag; whatever a save holds that is not a known item is left out when it is read. One saved before the action bar gets the default bar, one saved before the off hand loads with that paw empty - and a Knight among them is handed his shield.
-- Progress (class, level, XP, SP, skills, gold, bag, equipment with the weapon's enchantment, and action bar) is saved to `data/players.json`, keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
+- Progress (class, level, XP, SP, skills, gold, bag, equipment with the weapon's enchantment, and action bar) is saved to `data/players.json` (clans to `data/clans.json`), keyed by a random token stored in the browser's `localStorage`. There are no accounts or passwords: clearing browser data loses the character.
 
 ## Playing with friends over the internet
 

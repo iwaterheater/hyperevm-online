@@ -10,7 +10,7 @@ import {
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS,
   ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, enchant, smithFee, takeOff, wornPlus, plusOf, itemName,
-  PARTY_MAX, PARTY_REACH, INVITE_TIME, partyShare,
+  PARTY_MAX, PARTY_REACH, INVITE_TIME, partyShare, CLAN_LEVEL, CLAN_MAX, CLAN_NAME_MIN, WAR_OURS, WAR_THEIRS,
   PVP_FLAG, PVP_DAMAGE, KARMA_DEATH, CAT_R, karmaGain, karmaBurn, PVP_PEACE, PVP_FLAGGED, PVP_OUTLAW,
   TIERS, WEAPON_FAMILIES, weaponFamily, tierForLevel,
   ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, KNIGHT_SHIELD, stackMax, sellPrice, heldFamily, fightStyle, equipError, wearItem, roomFor, addItem, takeItem,
@@ -21,7 +21,7 @@ import {
   isBlocked, MapError, LIMITS,
 } from './src/map/format.js';
 import { PACKS, listModels } from './src/map/catalog.js';
-import { BANNED_WORDS, cleanName, uniqueName, cleanChat } from './src/moderation.js';
+import { BANNED_WORDS, DEFAULT_NAME, cleanName, uniqueName, cleanChat } from './src/moderation.js';
 
 const PORT = process.env.PORT || 8765;   // PORT=0 picks a free port; the start-up line prints the real one
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -537,6 +537,7 @@ function flush() {
   fs.mkdirSync(path.dirname(SAVE_FILE), { recursive: true });
   backupPlayers();
   writeFileAtomic(SAVE_FILE, JSON.stringify(saved));
+  if (clans.size) saveClans();   // with the names their members go by now
 }
 // Once a day, before the first save of that day, the file as it stands is copied aside: data/backups/players-<day>.json,
 // the last PLAYER_BACKUPS of them. A bad day - a bug that empties bags, a file edited wrong - costs a day at most.
@@ -680,7 +681,8 @@ function broadcast(msg) {
   for (const p of players.values()) if (p.ws.readyState === 1) p.ws.send(s);
 }
 function sendRoster() {
-  broadcast({ t: 'r', l: [...players.values()].map((p) => [p.id, p.name]) });
+  // every cat with its clan: the id, to tell friend from enemy, and the name for its tag
+  broadcast({ t: 'r', l: [...players.values()].map((p) => [p.id, p.name, p.clan, clanName(p.clan)]) });
 }
 
 function clampWorld(o, margin) {
@@ -794,6 +796,7 @@ function addXp(p, xp) {
     p.mp = p.maxMp;
     p.events.push({ k: 'lvl', level: p.level });
     emit({ k: 'lvlfx', x: r2(p.x), z: r2(p.z) }, p.x, p.z);
+    if (p.clan) clanDirty(clans.get(p.clan));
   }
 }
 
@@ -882,6 +885,16 @@ function die(q, by = null, ev = {}) {
   q.events.push(by ? { k: 'died', xp: lost, by: by.name } : { k: 'died', xp: lost });
   emit({ k: 'kill', ...ev, id: 0, v: q.id, x: r2(q.x), z: r2(q.z), ti: -1 }, q.x, q.z);   // v: the cat that fell
   if (!by) { broadcast({ t: 'c', sys: 1, m: `${q.name} was slain` }); return; }
+  if (atWar(by.clan, q.clan)) {   // a kill in a clan war: never murder, whatever the fallen one did; it counts for the war
+    const ours = clans.get(by.clan), theirs = clans.get(q.clan);
+    by.pvp++;
+    ours.score.set(theirs.id, (ours.score.get(theirs.id) ?? 0) + 1);
+    keepClans();
+    clanDirty(ours); clanDirty(theirs);
+    by.events.push({ k: 'pvp', n: q.name, pk: 0, war: 1 });
+    broadcast({ t: 'c', sys: 1, m: `${q.name} of ${theirs.name} was defeated by ${by.name} of ${ours.name}` });
+    return;
+  }
   const murder = state === PVP_PEACE;
   if (murder) {
     by.pk++;
@@ -913,7 +926,7 @@ function canFight(p, q) {
 const noFoe = (p, m) => !m || m.dead || (isCat(m) && !canFight(p, m));
 // p has turned on q: that flags p, unless q is an outlaw
 function engage(p, q) {
-  if (q.karma <= 0) p.flagUntil = now + PVP_FLAG;
+  if (q.karma <= 0 && !atWar(p.clan, q.clan)) p.flagUntil = now + PVP_FLAG;   // a clan war asks nobody's leave
 }
 
 // One cat's attack landing on another. -> whether it did damage: a miss, a dodge and a blow that may not be struck
@@ -1184,7 +1197,7 @@ function tick() {
       }
       // An area skill never starts a fight: among cats it reaches only those who are in one already, and outlaws.
       for (const q of players.values()) {
-        if (q === p || q.dead || pvpState(q) === PVP_PEACE || (p.party && q.party === p.party)) continue;
+        if (q === p || q.dead || (pvpState(q) === PVP_PEACE && !atWar(p.clan, q.clan)) || (p.party && q.party === p.party) || (p.clan && q.clan === p.clan)) continue;
         if (Math.hypot(q.x - b.x, q.z - b.z) < b.radius + CAT_R) strikePlayer(q, (b.phys ? physical : magical)(p, b.power, q.st), p);
       }
     }
@@ -1266,6 +1279,10 @@ function tick() {
       snap.me.inv = p.inv;
       snap.me.eq = p.equip;
       p.bagDirty = false;
+    }
+    if (p.clanDirty) {   // and so does the clan window
+      snap.me.clan = clanView(p);
+      p.clanDirty = false;
     }
     if (p.barDirty) {   // and so does the action bar
       snap.me.bar = p.bar;
@@ -1548,6 +1565,12 @@ const handlers = {
     p.chatLeft--;
     p.chatAt = now + 0.5;
     // a line that starts with # is for the party alone
+    const clan = clans.get(p.clan);
+    if (text.startsWith('@') && clan) {   // and one that starts with @ for the clan
+      const line = text.slice(1).trim();
+      if (line) for (const q of players.values()) if (q.clan === clan.id) send(q.ws, { t: 'c', n: p.name, m: line, clan: 1 });
+      return;
+    }
     const party = parties.get(p.party);
     if (text.startsWith('#') && party) {
       const line = text.slice(1).trim();
@@ -1555,6 +1578,95 @@ const handlers = {
       return;
     }
     broadcast({ t: 'c', n: p.name, m: text });
+  },
+  // ---- clans (the rules are told in shared.js): one message, `a` says what is to be done
+  clan(p, msg) {
+    const clan = clans.get(p.clan), lead = !!clan && clan.leader === p.token;
+    const no = (text) => refuse(p, text);
+    switch (msg.a) {
+      case 'create': {
+        if (!p.persist || !p.token) return no('A clan needs a character of your own: not a guest, not a play-test');
+        if (clan) return no('You are in a clan already');
+        if (p.level < CLAN_LEVEL) return no(`A clan is founded from level ${CLAN_LEVEL}`);
+        if (!nearNpc(map, p, 'sage', SHOP_RANGE)) return no('A clan is founded at the Sage');
+        const name = cleanName(msg.name, bannedWords);
+        if (name === DEFAULT_NAME || [...name].length < CLAN_NAME_MIN) return no('That cannot be the name of a clan');
+        const taken = [...clans.values()].find((c) => c.name.toLowerCase() === name.toLowerCase());
+        if (taken) return no(`There is a clan called ${taken.name} already`);
+        const made = { id: nextClanId++, name, leader: p.token, members: new Map([[p.token, p.name]]), wars: new Set(), score: new Map() };
+        clans.set(made.id, made);
+        clanOf.set(p.token, made.id);
+        p.clan = made.id;
+        clansChanged(true);
+        broadcast({ t: 'c', sys: 1, m: `${p.name} has founded the clan ${name}` });
+        return;
+      }
+      case 'invite': {
+        const q = players.get(msg.id);
+        if (!lead) return no('Only the leader of a clan invites');
+        if (!q || q === p) return;
+        if (!q.persist || !q.token) return no(`${q.name} cannot join a clan`);
+        if (q.clan) return no(`${q.name} is in a clan already`);
+        if (clan.members.size >= CLAN_MAX) return no(`A clan holds ${CLAN_MAX} cats`);
+        q.cinvites.set(clan.id, now + INVITE_TIME);
+        q.events.push({ k: 'cinv', c: clan.id, n: clan.name, by: p.name, t: INVITE_TIME });
+        p.events.push({ k: 'csys', m: `You invited ${q.name} to the clan` });
+        return;
+      }
+      case 'answer': {
+        const c = clans.get(msg.c), until = p.cinvites.get(msg.c) ?? 0;
+        p.cinvites.delete(msg.c);
+        if (!c || until <= now) { if (msg.ok) no('The invitation is no longer open'); return; }
+        if (!msg.ok) { tellClan(c, `${p.name} declined to join the clan`); return; }
+        if (clan) return no('Leave your clan first');
+        if (c.members.size >= CLAN_MAX) return no('The clan is full');
+        c.members.set(p.token, p.name);
+        clanOf.set(p.token, c.id);
+        p.clan = c.id;
+        p.cinvites.clear();
+        clansChanged(false, c);
+        tellClan(c, `${p.name} has joined the clan`);
+        return;
+      }
+      case 'leave': {
+        if (!clan) return;
+        if (lead && clan.members.size === 1) { disband(clan); return; }
+        dropMember(clan, p.token, `${p.name} has left the clan`, 'You have left the clan');
+        return;
+      }
+      case 'kick': {
+        if (!lead) return;
+        const token = [...clan.members.keys()].find((t) => t !== clan.leader && memberKey(t) === msg.key);
+        if (token) dropMember(clan, token, `${clan.members.get(token)} was sent away from the clan`, 'You were sent away from the clan');
+        return;
+      }
+      case 'disband': {
+        if (lead) disband(clan);
+        return;
+      }
+      case 'war': case 'peace': {
+        const other = clans.get(msg.c);
+        if (!lead || !other || other === clan) return;
+        if (msg.a === 'war') {
+          if (clan.wars.has(other.id)) return no(`You have declared war on ${other.name} already`);
+          clan.wars.add(other.id);
+          if (atWar(clan.id, other.id)) broadcast({ t: 'c', sys: 1, m: `The clans ${clan.name} and ${other.name} are at war` });
+          else {
+            tellClan(clan, `You have declared war on ${other.name}. It begins when they answer in kind`);
+            tellClan(other, `The clan ${clan.name} has declared war on you. Your leader can answer in kind`);
+          }
+        } else {
+          const was = atWar(clan.id, other.id);
+          if (!clan.wars.has(other.id) && !other.wars.has(clan.id)) return;
+          clan.wars.delete(other.id);
+          other.wars.delete(clan.id);
+          if (was) broadcast({ t: 'c', sys: 1, m: `The war between ${clan.name} and ${other.name} is over` });
+          else { tellClan(clan, `There is no war with ${other.name}`); tellClan(other, `There is no war with ${clan.name}`); }
+        }
+        clansChanged(false, clan, other);
+        return;
+      }
+    }
   },
   // ---- parties (the rules are told in shared.js)
   pinv(p, msg) {   // invite the cat `id`
@@ -1595,6 +1707,88 @@ const handlers = {
     leaveParty(q, 'was sent away from the party');
   },
 };
+
+// ---- clans
+// They are kept in data/clans.json, beside the characters, by the tokens of their members - the token is who a player
+// is. A member's token never leaves the server: the clan's list names a member by a short hash of it (memberKey).
+const CLANS_FILE = path.join(path.dirname(SAVE_FILE), 'clans.json');
+const clans = new Map();    // id -> { id, name, leader: token, members: Map(token -> name), wars: Set(ids it declared war on), score: Map(id -> kills) }
+const clanOf = new Map();   // token -> clan id
+let nextClanId = 1;
+try {
+  const file = JSON.parse(fs.readFileSync(CLANS_FILE, 'utf8'));
+  for (const c of Array.isArray(file.clans) ? file.clans : []) {
+    if (!Number.isInteger(c.id) || typeof c.name !== 'string' || !Array.isArray(c.members) || !c.members.length) continue;
+    const members = new Map(c.members.filter((m) => Array.isArray(m) && typeof m[0] === 'string' && m[0] && !clanOf.has(m[0])).map(([t, n]) => [t, String(n)]));
+    if (!members.size) continue;
+    const leader = members.has(c.leader) ? c.leader : members.keys().next().value;
+    clans.set(c.id, { id: c.id, name: c.name, leader, members, wars: new Set(Array.isArray(c.wars) ? c.wars : []), score: new Map(Array.isArray(c.score) ? c.score : []) });
+    for (const t of members.keys()) clanOf.set(t, c.id);
+    nextClanId = Math.max(nextClanId, c.id + 1);
+  }
+} catch { /* no clans yet */ }
+function saveClans() {
+  writeFileAtomic(CLANS_FILE, JSON.stringify({ clans: [...clans.values()].map((c) => ({
+    id: c.id, name: c.name, leader: c.leader, members: [...c.members], wars: [...c.wars].filter((id) => clans.has(id)), score: [...c.score],
+  })) }));
+}
+// clans are saved the moment they change, not only with the characters: a war or a member is not lost to a crash
+function keepClans() {
+  try { saveClans(); } catch (err) { console.error(`The clans could not be saved (${err.code ?? err.message}): ${CLANS_FILE}`); }
+}
+const clanName = (id) => clans.get(id)?.name ?? '';
+const atWar = (a, b) => !!a && !!b && a !== b && !!clans.get(a)?.wars.has(b) && !!clans.get(b)?.wars.has(a);
+const memberKey = (token) => sha256(`member:${token}`).digest('hex').slice(0, 12);
+// the members of a clan in the world get their clan window again with the next snapshot
+function clanDirty(clan) { if (clan) for (const p of players.values()) if (p.clan === clan.id) p.clanDirty = true; }
+// after a change of clans: saved, the windows that show it brought up to date, and the tags over the cats
+function clansChanged(everyone, ...touched) {
+  keepClans();
+  if (everyone) for (const p of players.values()) p.clanDirty = true;
+  else for (const c of touched) clanDirty(c);
+  sendRoster();
+}
+function tellClan(clan, text) {
+  for (const p of players.values()) if (p.clan === clan.id) p.events.push({ k: 'csys', m: text });
+}
+// A member leaves, or is sent away. A leader who leaves hands the clan to the member who joined first after it.
+function dropMember(clan, token, toClan, toThem) {
+  clan.members.delete(token);
+  clanOf.delete(token);
+  const q = [...players.values()].find((r) => r.token === token && r.clan === clan.id);
+  if (q) { q.clan = 0; q.clanDirty = true; q.events.push({ k: 'csys', m: toThem }); }
+  tellClan(clan, toClan);
+  if (clan.leader === token) {
+    clan.leader = clan.members.keys().next().value;
+    tellClan(clan, `${clan.members.get(clan.leader)} leads the clan now`);
+  }
+  clansChanged(true, clan);
+}
+function disband(clan) {
+  for (const token of clan.members.keys()) clanOf.delete(token);
+  for (const p of players.values()) if (p.clan === clan.id) { p.clan = 0; p.events.push({ k: 'csys', m: 'Your clan has been disbanded' }); }
+  for (const other of clans.values()) { other.wars.delete(clan.id); other.score.delete(clan.id); }
+  clans.delete(clan.id);
+  clansChanged(true);
+  broadcast({ t: 'c', sys: 1, m: `The clan ${clan.name} has been disbanded` });
+}
+// What a cat's clan window shows. Its clan: the name, the leader, every member - in the world or not, with a level and
+// a class while it is - and every other clan with the state of the war between them and its score. { id: 0 } for a cat
+// in no clan, which only needs to know that.
+function clanView(p) {
+  const clan = clans.get(p.clan);
+  if (!clan) return { id: 0 };
+  const here = new Map([...players.values()].filter((q) => q.clan === clan.id).map((q) => [q.token, q]));
+  return {
+    id: clan.id, name: clan.name, lead: clan.leader === p.token ? 1 : 0, leader: clan.members.get(clan.leader),
+    members: [...clan.members].map(([token, name]) => {
+      const q = here.get(token);
+      return [name, memberKey(token), q ? 1 : 0, q?.level ?? 0, q ? CLASS_KEYS.indexOf(q.cls) : -1, token === clan.leader ? 1 : 0];
+    }),
+    wars: [...clans.values()].filter((c) => c !== clan).map((c) => [c.id, c.name, c.members.size,
+      (clan.wars.has(c.id) ? WAR_OURS : 0) | (c.wars.has(clan.id) ? WAR_THEIRS : 0), clan.score.get(c.id) ?? 0, c.score.get(clan.id) ?? 0]),
+  };
+}
 
 // ---- parties
 const parties = new Map();   // id -> { id, leader, members: [player ids], in the order they came }
@@ -1688,6 +1882,7 @@ function joinPoint(at) {
 
 function leave(p) {
   leaveParty(p, 'has left the world');
+  if (p.clan) { const clan = clans.get(p.clan); p.clan = 0; clanDirty(clan); }   // the others see it is gone
   persist(p);
   players.delete(p.id);
   sendRoster();
@@ -1761,6 +1956,8 @@ function join(ws, msg, conn) {
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
     castAt: 0, swingAt: 0, blow: null, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0, chatLeft: 5, chatSince: now,
     party: 0, invites: new Map(),   // the party it is in, and the invitations it has: inviter id -> until when
+    // its clan - only a character of its own has one - and the clans that have invited it: clan id -> until when
+    clan: keeps && token ? clanOf.get(token) ?? 0 : 0, clanDirty: true, cinvites: new Map(),
     // PvP: fights won, murders, the karma they left - and, never saved, how long the cat stays flagged
     pvp: data.pvp | 0, pk: data.pk | 0, karma: Math.max(0, data.karma | 0), flagUntil: 0,
     stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null,   // what another cat's skills can do to it
@@ -1777,6 +1974,8 @@ function join(ws, msg, conn) {
   grantShield(p);
   refresh(p);   // also brings health and mana down to their maximum
   players.set(p.id, p);
+  const clan = clans.get(p.clan);
+  if (clan) { clan.members.set(token, p.name); clanDirty(clan); }
   const hello = { t: 'w', id: p.id, x: r2(p.x), z: r2(p.z), rev };
   if (test) hello.test = { god: p.god, speed: test.speed === 2 ? 2 : 1 };   // the client moves itself: it applies the speed
   send(ws, hello);

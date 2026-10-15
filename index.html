@@ -113,6 +113,9 @@
   #tgInvite { display: none; margin: 6px 0 0 6px; padding: 3px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: #d8eeff;
     background: rgba(124, 196, 255, .16); border: 1px solid rgba(124, 196, 255, .6); border-radius: 999px; box-shadow: none; }
   #tgInvite:hover { background: rgba(124, 196, 255, .32); transform: none; }
+  #tgClan { display: none; margin: 6px 0 0 6px; padding: 3px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: #e2ffd0;
+    background: rgba(155, 227, 107, .16); border: 1px solid rgba(155, 227, 107, .6); border-radius: 999px; box-shadow: none; }
+  #tgClan:hover { background: rgba(155, 227, 107, .32); transform: none; }
   /* the party, under the cat's own frame: a small frame for every member */
   #party { top: 156px; left: 16px; width: 214px; display: none; padding: 6px 8px; pointer-events: auto; }
   #party .member { padding: 4px 4px 5px; border-radius: 7px; cursor: pointer; }
@@ -136,6 +139,8 @@
   #invite button { padding: 6px 18px; font-size: 13px; box-shadow: none; }
   #chatLog .party, #chatLog .party b { color: #7cc4ff; }
   #chat.sys #chatLog div.party.party { display: block; }   /* the party's lines are in both tabs */
+  #chatLog .clan, #chatLog .clan b { color: #9be36b; }
+  #chat.sys #chatLog div.clan.clan { display: block; }   /* and so are the clan's */
   #notice { position: absolute; top: 31%; left: 0; right: 0; text-align: center; font-size: 17px; font-weight: 700; color: #ffb3c4;
     text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity .25s; }
   #notice.on { opacity: 1; }
@@ -338,6 +343,31 @@
     border: 1px solid rgba(127, 232, 214, .25); background: #18546f; }
 
   /* settings: a name and its control a row, under a heading per group */
+  /* the clan window: its members, then the other clans and the wars with them */
+  #clan { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(420px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
+  #clan.on { display: block; }
+  #clan h2 { margin: 0 0 6px; font-size: 20px; color: #9be36b; }
+  #clan h3 { margin: 12px 0 4px; font-size: 14px; color: var(--teal); }
+  #clanBody .line { margin: 4px 0; font-size: 13px; line-height: 1.35; }
+  #clanBody .dim { opacity: .75; }
+  #clanBody .list { max-height: 26vh; overflow-y: auto; margin: 6px 0; }
+  #clanBody .row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 6px; font-size: 13px; line-height: 20px; }
+  #clanBody .row:nth-child(odd) { background: rgba(255, 255, 255, .05); }
+  #clanBody .row b { flex: 1; min-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #clanBody .row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; opacity: .8; white-space: nowrap; }
+  #clanBody .row.off { opacity: .5; }
+  #clanBody .row.war b, #clanBody .row.war span { color: #ff9a3c; opacity: 1; }
+  #clanBody .acts { display: flex; gap: 8px; margin: 12px 0 8px; }
+  #clanBody button { padding: 6px 12px; font-size: 13px; box-shadow: none; white-space: nowrap; }
+  #clanBody button:hover { transform: none; filter: brightness(1.2); }
+  #clanBody .acts button { flex: 1; }
+  #clanBody .row button { padding: 2px 9px; font-size: 11.5px; }
+  #clanBody .row button.kick { color: #ffb3c4; background: none; font-size: 14px; }
+  #clanBody .row button.war { background: rgba(255, 154, 60, .3); color: #ffe2c6; }
+  #clanBody .row button.peace { background: rgba(255, 255, 255, .12); color: #e8fffa; }
+  #clanBody > button.close { display: block; margin: 0 0 0 auto; padding: 5px 14px; font-size: 12px; color: #e8fffa; background: rgba(255, 255, 255, .1); }
+  #clanName { flex: 1; min-width: 0; padding: 6px 10px; font: inherit; font-size: 14px; color: #fff; background: rgba(0, 0, 0, .35);
+    border: 1px solid rgba(155, 227, 107, .5); border-radius: 8px; }
   /* the enchant window: the weapon, what a scroll would make of it, the odds, and the two ways to try */
   #enchant { top: var(--win-top); left: 50%; transform: translate(-50%, -50%); width: min(360px, 92vw); display: none; padding: 16px 18px; pointer-events: auto; }
   #enchant.on { display: block; }
@@ -596,6 +626,7 @@
     <div id="tgDrops"></div>
     <button id="tgAttack" title="Attack this cat (Ctrl + click on it does the same)">Attack</button>
     <button id="tgInvite" title="Invite this cat to your party">Invite</button>
+    <button id="tgClan" title="Invite this cat to your clan">Clan</button>
   </div>
   <div class="panel" id="party">
     <div id="partyList"></div>
@@ -665,6 +696,10 @@
     <div id="mapLegend"></div>
     <canvas id="mapView"></canvas>
   </div>
+  <div class="panel" id="clan">
+    <h2 id="clanTitle">Clan</h2>
+    <div id="clanBody"></div>
+  </div>
   <div class="panel" id="enchant">
     <h2>Enchant weapon</h2>
     <div id="enchantBody"></div>
@@ -707,6 +742,10 @@
       <h3>Party</h3>
       <div>Invite</div><span>Select a cat and press Invite under its name: up to nine cats share the experience of what they kill together, and never strike each other</span>
       <div><kbd>#</kbd> message</div><span>A chat line that starts with # goes to your party alone</span>
+      <h3>Clan</h3>
+      <div><kbd>N</kbd></div><span>The clan window. From level 10 a cat founds a clan at the Sage; its leader invites cats with Clan under their names</span>
+      <div><kbd>@</kbd> message</div><span>A chat line that starts with @ goes to your clan alone</span>
+      <div>Clan war</div><span>A leader declares war on another clan; once that clan answers in kind, their cats fight anywhere outside the safe places without Ctrl and without turning purple. Enemies' names are orange, and every kill counts for the war</span>
       <h3>Fighting other cats</h3>
       <div><kbd>Ctrl</kbd> + click</div><span>Attack a cat, outside the safe places. So does the Attack button under its name. Attacking turns your name purple for a while: anyone may fight a purple cat</span>
       <div>PvP</div><span>Beating a cat that fought back, or an outlaw, is a fight won</span>

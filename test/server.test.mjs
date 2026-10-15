@@ -940,7 +940,8 @@ const seed = (characters) => (s) => {
 };
 
 // Joins and follows a client: its latest private state, its bag, equipment and action bar (which travel only when they
-// change; `bars` counts how often the bar came), the other players it sees, and every event it was sent.
+// change; `bars` counts how often the bar came; the clan window, kept as me.clan, too), the other players it sees,
+// and every event it was sent.
 async function enter(s, msg) {
   const c = await join(s, msg);
   const f = { c, me: null, inv: null, eq: null, bar: null, bars: 0, others: [], mobs: [], events: [], snaps: 0, send: (m) => c.send(m) };
@@ -952,6 +953,8 @@ async function enter(s, msg) {
     if (m.me.inv) f.inv = m.me.inv;
     if (m.me.eq) f.eq = m.me.eq;
     if (m.me.bar) { f.bar = m.me.bar; f.bars++; }
+    if (m.me.clan) f.clan = m.me.clan;   // the clan window too travels only when it changes
+    f.me.clan = f.clan;
     f.events.push(...m.e);
   });
   // waits until fn() returns something truthy, and resolves with it
@@ -2147,4 +2150,100 @@ check('parties: what one member kills, every member near it gets a share of', as
     const share = partyShare(MOB_TYPES.chaser.xp, 2);
     assert.deepEqual([hero.me.xp - xp[0], pal.me.xp - xp[1], loner.me.xp - xp[2]], [share, share, 0], 'the pal never touched it, the loner is in no party');
   });
+});
+
+// ---------------------------------------------------------------- clans
+
+const SAGE = FILE.npcs.find((n) => n.kind === 'sage');
+const AT_SAGE = [SAGE.x + 1.5, SAGE.z + 1.5];
+const savedClans = (s) => JSON.parse(fs.readFileSync(path.join(s.dataDir, 'clans.json'), 'utf8')).clans;
+
+check('clans: founded at the Sage, an invitation, clan chat, a member sent away, a leader who leaves, and kept on disk', async () => {
+  const s = await withServer({ map: NO_MONSTERS, setup: seed({ a: cat('Ann', 12), b: cat('Bob', 12), l: cat('Low', 5) }) }, async (s) => {
+    const ann = await enter(s, { token: 'a', name: 'Ann', at: AT_SAGE }), bob = await enter(s, { token: 'b', name: 'Bob', at: AT_SAGE });
+    const low = await enter(s, { token: 'l', name: 'Low', at: AT_SAGE }), guest = await enter(s, { name: 'Guest', at: AT_SAGE });
+    assert.deepEqual(ann.me.clan, { id: 0 });
+    await low.send({ t: 'clan', a: 'create', name: 'Mice' });
+    assert.equal((await low.event('err')).m, 'A clan is founded from level 10');
+    await guest.send({ t: 'clan', a: 'create', name: 'Mice' });
+    assert.match((await guest.event('err')).m, /^A clan needs a character of your own/);
+    await ann.send({ t: 'clan', a: 'create', name: '!' });
+    assert.equal((await ann.event('err')).m, 'That cannot be the name of a clan');
+    await ann.send({ t: 'clan', a: 'create', name: 'Whiskers' });
+    await ann.c.take('c', (m) => m.sys && m.m === 'Ann has founded the clan Whiskers');
+    await ann.until('the clan', () => ann.me.clan.id);
+    assert.deepEqual([ann.me.clan.name, ann.me.clan.lead, ann.me.clan.leader, ann.me.clan.members.length], ['Whiskers', 1, 'Ann', 1]);
+    // every cat sees the tag
+    await low.c.take('r', (m) => m.l.some((row) => row[0] === ann.w.id && row[3] === 'Whiskers'));
+    await bob.send({ t: 'clan', a: 'create', name: 'whiskers' });
+    assert.equal((await bob.event('err')).m, 'There is a clan called Whiskers already');
+    // only the leader invites; an invitation and its answer
+    await ann.send({ t: 'clan', a: 'invite', id: bob.w.id });
+    const inv = await bob.event('cinv');
+    assert.deepEqual(inv, { k: 'cinv', c: ann.me.clan.id, n: 'Whiskers', by: 'Ann', t: 30 });
+    await bob.send({ t: 'clan', a: 'answer', c: inv.c, ok: true });
+    await bob.until('in the clan', () => bob.me.clan.members?.length === 2);
+    assert.equal(bob.me.clan.lead, 0);
+    await bob.send({ t: 'clan', a: 'invite', id: low.w.id });
+    assert.equal((await bob.event('err')).m, 'Only the leader of a clan invites');
+    // clan chat: the members hear it, nobody else does
+    await sleep(600);
+    await bob.send({ t: 'c', m: '@ for the clan' });
+    assert.deepEqual(await ann.c.take('c', (m) => m.clan), { t: 'c', n: 'Bob', m: 'for the clan', clan: 1 });
+    await sleep(300);
+    assert.ok(!low.c.inbox.some((m) => m.t === 'c' && m.m === 'for the clan'));
+    // the leader sends Bob away, by the key its list names him with - never his token
+    await ann.until('Bob in the list', () => ann.me.clan.members.length === 2);
+    const key = ann.me.clan.members.find((row) => row[0] === 'Bob')[1];
+    assert.doesNotMatch(JSON.stringify(ann.me.clan), /"b"/);
+    await ann.send({ t: 'clan', a: 'kick', key });
+    await bob.until('out', () => bob.me.clan.id === 0);
+    assert.ok(bob.events.some((ev) => ev.k === 'csys' && ev.m === 'You were sent away from the clan'));
+    // back in; the leader leaves, and the clan is Bob's
+    await ann.send({ t: 'clan', a: 'invite', id: bob.w.id });
+    await bob.send({ t: 'clan', a: 'answer', c: (await bob.event('cinv')).c, ok: true });
+    await bob.until('in again', () => bob.me.clan.members?.length === 2);
+    await ann.send({ t: 'clan', a: 'leave' });
+    await bob.until('the leader', () => bob.me.clan.lead === 1 && bob.me.clan.members.length === 1);
+    await ann.until('out', () => ann.me.clan.id === 0);
+  });
+  assert.deepEqual(savedClans(s).map((c) => [c.name, c.leader, c.members]), [['Whiskers', 'b', [['b', 'Bob']]]]);
+  // the next start finds the clan as it was left
+  await withServer({ map: NO_MONSTERS, setup: (t) => fs.cpSync(s.dataDir, t.dataDir, { recursive: true }) }, async (t) => {
+    const bob = await enter(t, { token: 'b', name: 'Bob', at: FIELD });
+    await bob.until('the clan', () => bob.me.clan?.id);
+    assert.deepEqual([bob.me.clan.name, bob.me.clan.lead], ['Whiskers', 1]);
+  });
+});
+
+check('clans: a war takes both leaders; then their cats fight unflagged, a kill is no murder and counts for the war; peace ends it', async () => {
+  const { WAR_OURS, WAR_THEIRS, AT_WAR } = await import('../src/shared.js');
+  const clans = { clans: [{ id: 1, name: 'Lions', leader: 's', members: [['s', 'Strong']] }, { id: 2, name: 'Mice', leader: 'w', members: [['w', 'Weak']] }] };
+  const setup = (s) => { seed({ s: cat('Strong', 30), w: cat('Weak', 3) })(s); fs.writeFileSync(path.join(s.dataDir, 'clans.json'), JSON.stringify(clans)); };
+  const s = await withServer({ map: NO_MONSTERS, setup }, async (s) => {
+    const strong = await enter(s, { token: 's', name: 'Strong', at: FIELD }), weak = await enter(s, { token: 'w', name: 'Weak', at: BESIDE });
+    await strong.until('the clan', () => strong.me.clan?.wars?.length === 1);
+    assert.deepEqual(strong.me.clan.wars, [[2, 'Mice', 1, 0, 0, 0]]);
+    await strong.send({ t: 'clan', a: 'war', c: 2 });
+    assert.match((await weak.event('csys')).m, /^The clan Lions has declared war on you/);
+    await weak.until('declared', () => weak.me.clan.wars[0][3] === WAR_THEIRS);
+    await strong.until('ours', () => strong.me.clan.wars[0][3] === WAR_OURS);
+    await weak.send({ t: 'clan', a: 'war', c: 1 });
+    await strong.c.take('c', (m) => m.sys && m.m === 'The clans Mice and Lions are at war');
+    await strong.until('at war', () => strong.me.clan.wars[0][3] === AT_WAR);
+    // the weak cat never fought back, and still it is no murder, and nobody turns purple
+    await fight(strong, weak.w.id, () => weak.me.dead, 'the weak cat did not fall');
+    assert.deepEqual(await strong.event('pvp'), { k: 'pvp', n: 'Weak', pk: 0, war: 1 });
+    await strong.c.take('c', (m) => m.sys && m.m === 'Weak of Mice was defeated by Strong of Lions');
+    await strong.until('the score', () => strong.me.clan.wars[0][4] === 1);
+    assert.deepEqual([strong.me.pvp, strong.me.pk, strong.me.karma, strong.me.st], [1, 0, 0, 0]);
+    await weak.until('their score', () => weak.me.clan.wars[0][5] === 1);
+    // either leader ends it, for both
+    await weak.send({ t: 'clan', a: 'peace', c: 1 });
+    await strong.c.take('c', (m) => m.sys && m.m === 'The war between Mice and Lions is over');
+    await strong.until('peace', () => strong.me.clan.wars[0][3] === 0);
+    assert.equal(strong.me.clan.wars[0][4], 1, 'the score of the war stays');
+  });
+  const saved = savedClans(s);
+  assert.deepEqual(saved.map((c) => [c.id, c.wars, c.score]), [[1, [], [[2, 1]]], [2, [], []]]);
 });
