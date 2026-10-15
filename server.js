@@ -10,6 +10,7 @@ import {
   MOB_TYPES, MOB_KEYS, mobStats, CLASSES, CLASS_KEYS, START_CLASSES, PROFESSION_LEVEL, SKILLS, skillsFor, classLine, statsOf, castTime,
   mitigate, hitChance, xpNext, spFor, DEATH_XP_LOSS,
   ENCHANT_SCROLL, ENCHANT_MAX, ENCHANT_SAFE, enchant, smithFee, takeOff, wornPlus, plusOf, itemName,
+  PARTY_MAX, PARTY_REACH, INVITE_TIME, partyShare,
   PVP_FLAG, PVP_DAMAGE, KARMA_DEATH, CAT_R, karmaGain, karmaBurn, PVP_PEACE, PVP_FLAGGED, PVP_OUTLAW,
   TIERS, WEAPON_FAMILIES, weaponFamily, tierForLevel,
   ITEMS, itemOf, EQUIP_SLOTS, SHOP, POTION_CD, STARTER_KIT, KNIGHT_SHIELD, stackMax, sellPrice, heldFamily, fightStyle, equipError, wearItem, roomFor, addItem, takeItem,
@@ -818,11 +819,19 @@ function damageMob(m, hit, dx, dz, knock, p) {
       until: now + 25, gold: coinGold(m.lvl),
     });
   }
-  for (const id of m.dmgBy) {
-    const q = players.get(id);
-    if (!q || q.dead) continue;
-    addXp(q, m.xp);
+  // Who has earned what: a cat alone that wounded the monster, its full experience; a party with a member among those
+  // who wounded it, a share of it for every member near the kill (shared.js). Nobody is paid twice.
+  const paid = new Set(), pay = (q, xp) => {
+    if (!q || q.dead || paid.has(q.id)) return;
+    paid.add(q.id);
+    addXp(q, xp);
     if (q.karma > 0) q.karma = Math.max(0, q.karma - karmaBurn(m.lvl));   // an outlaw works its karma off
+  };
+  for (const id of m.dmgBy) {
+    const q = players.get(id), party = q && parties.get(q.party);
+    if (!party) { pay(q, m.xp); continue; }
+    const near = party.members.map((mid) => players.get(mid)).filter((r) => r && !r.dead && Math.hypot(r.x - m.x, r.z - m.z) <= PARTY_REACH);
+    for (const r of near) pay(r, partyShare(m.xp, near.length));
   }
   // Loot is the killer's. The King is brought down together: everyone alive who wounded him gets a roll of their own.
   const looters = m.type === 'boss' ? [...m.dmgBy].map((id) => players.get(id)).filter((q) => q && !q.dead) : [p];
@@ -897,6 +906,7 @@ const ccFlags = (o) => (now < o.stunUntil ? 1 : 0) | (now < o.sleepUntil ? 2 : 0
 // (A play-test cat that cannot be hurt cannot be fought either.)
 function canFight(p, q) {
   if (q === p || p.dead || q.dead || q.god) return false;
+  if (p.party && p.party === q.party) return false;   // a party does not fight itself
   return !(regions.isSafe(p.x, p.z) || regions.isSafe(q.x, q.z));
 }
 // whether the monster or cat p names is nothing it may strike
@@ -1174,7 +1184,7 @@ function tick() {
       }
       // An area skill never starts a fight: among cats it reaches only those who are in one already, and outlaws.
       for (const q of players.values()) {
-        if (q === p || q.dead || pvpState(q) === PVP_PEACE) continue;
+        if (q === p || q.dead || pvpState(q) === PVP_PEACE || (p.party && q.party === p.party)) continue;
         if (Math.hypot(q.x - b.x, q.z - b.z) < b.radius + CAT_R) strikePlayer(q, (b.phys ? physical : magical)(p, b.power, q.st), p);
       }
     }
@@ -1244,6 +1254,7 @@ function tick() {
         hp: Math.ceil(p.hp), maxHp: p.maxHp, mp: Math.floor(p.mp), maxMp: p.maxMp, xp: p.xp, sp: p.sp, level: p.level, gold: p.gold,
         weapon: p.weapon, cls: p.cls, skills: p.skills, dead: p.dead ? 1 : 0,
         pvp: p.pvp, pk: p.pk, karma: p.karma, st: pvpState(p), cc: ccFlags(p), slow: now < p.slowUntil ? p.slowMult : 1,
+        party: partyRows(p),
         buffs: Object.entries(p.buffs).filter(([, b]) => now < b.until).map(([stat, b]) => [stat, Math.ceil(b.until - now), b.mult]),
       },
       p: [], m: [], g: [],
@@ -1536,9 +1547,86 @@ const handlers = {
     if (p.chatLeft < 1) { refuse(p, 'You are talking too fast'); return; }
     p.chatLeft--;
     p.chatAt = now + 0.5;
+    // a line that starts with # is for the party alone
+    const party = parties.get(p.party);
+    if (text.startsWith('#') && party) {
+      const line = text.slice(1).trim();
+      if (line) for (const id of party.members) { const q = players.get(id); if (q) send(q.ws, { t: 'c', n: p.name, m: line, party: 1 }); }
+      return;
+    }
     broadcast({ t: 'c', n: p.name, m: text });
   },
+  // ---- parties (the rules are told in shared.js)
+  pinv(p, msg) {   // invite the cat `id`
+    const q = players.get(msg.id), party = parties.get(p.party);
+    if (!q || q === p) return;
+    if (p.dead) { refuse(p, DEAD); return; }
+    if (party && party.leader !== p.id) { refuse(p, 'Only the leader of your party invites'); return; }
+    if (party && party.members.length >= PARTY_MAX) { refuse(p, `A party holds ${PARTY_MAX} cats`); return; }
+    if (q.party) { refuse(p, `${q.name} is in a party already`); return; }
+    if ((q.invites.get(p.id) ?? 0) > now) { refuse(p, `${q.name} has your invitation already`); return; }
+    q.invites.set(p.id, now + INVITE_TIME);
+    q.events.push({ k: 'pinv', o: p.id, n: p.name, t: INVITE_TIME });
+    p.events.push({ k: 'pinvsent', n: q.name });
+  },
+  pans(p, msg) {   // answer the invitation of the cat `id`
+    const from = players.get(msg.id), until = p.invites.get(msg.id) ?? 0;
+    p.invites.delete(msg.id);
+    if (!from || until <= now) { if (msg.ok) refuse(p, 'The invitation is no longer open'); return; }
+    if (!msg.ok) { from.events.push({ k: 'pno', n: p.name }); return; }
+    if (p.party) { refuse(p, 'Leave your party first'); return; }
+    let party = parties.get(from.party);
+    if (party && party.leader !== from.id) { refuse(p, 'The invitation is no longer open'); return; }
+    if (!party) {
+      party = { id: nextId++, leader: from.id, members: [from.id] };
+      parties.set(party.id, party);
+      from.party = party.id;
+    }
+    if (party.members.length >= PARTY_MAX) { refuse(p, 'The party is full'); return; }
+    party.members.push(p.id);
+    p.party = party.id;
+    p.invites.clear();
+    tellParty(party, `${p.name} has joined the party`);
+  },
+  pleave(p) { leaveParty(p, 'has left the party'); },
+  pkick(p, msg) {   // the leader sends a member away
+    const party = parties.get(p.party), q = players.get(msg.id);
+    if (!party || party.leader !== p.id || !q || q === p || q.party !== party.id) return;
+    leaveParty(q, 'was sent away from the party');
+  },
 };
+
+// ---- parties
+const parties = new Map();   // id -> { id, leader, members: [player ids], in the order they came }
+function tellParty(party, text) {
+  for (const id of party.members) players.get(id)?.events.push({ k: 'psys', m: text });
+}
+// A cat leaves its party - by its own wish, sent away, or gone from the world. The next one in becomes the leader when
+// the leader goes; a party of one is no party.
+function leaveParty(p, how) {
+  const party = parties.get(p.party);
+  if (!party) return;
+  party.members = party.members.filter((id) => id !== p.id);
+  p.party = 0;
+  p.events.push({ k: 'psys', m: how === 'has left the party' ? 'You have left the party' : 'You were sent away from the party' });
+  tellParty(party, `${p.name} ${how}`);
+  if (party.leader === p.id && party.members.length) {
+    party.leader = party.members[0];
+    tellParty(party, `${players.get(party.leader)?.name ?? 'Somebody'} leads the party now`);
+  }
+  if (party.members.length < 2) {
+    for (const id of party.members) { const q = players.get(id); if (q) { q.party = 0; q.events.push({ k: 'psys', m: 'The party has broken up' }); } }
+    parties.delete(party.id);
+  }
+}
+// What this cat's party frame shows: every member - itself too - with its name, class, level, health and mana, whether
+// it is down, and where it is; the leader first. null outside a party.
+function partyRows(p) {
+  const party = parties.get(p.party);
+  if (!party) return null;
+  return [party.leader, ...party.members.filter((id) => id !== party.leader)].map((id) => players.get(id)).filter(Boolean)
+    .map((q) => [q.id, q.name, CLASS_KEYS.indexOf(q.cls), q.level, Math.ceil(q.hp), q.maxHp, Math.floor(q.mp), q.maxMp, q.dead ? 1 : 0, r2(q.x), r2(q.z)]);
+}
 
 // A play-test character made up by the editor: any class at any level, with every skill of that level at its top rank.
 function testCharacter(test) {
@@ -1599,6 +1687,7 @@ function joinPoint(at) {
 }
 
 function leave(p) {
+  leaveParty(p, 'has left the world');
   persist(p);
   players.delete(p.id);
   sendRoster();
@@ -1671,6 +1760,7 @@ function join(ws, msg, conn) {
     bar: Array.isArray(data.bar) ? cleanBar(data.bar) : null, barDirty: true, knightKit: data.knightKit ? 1 : 0,
     hp: Infinity, mp: Infinity, buffs: {}, cds: {}, sit: false, dead: false, deadUntil: 0,
     castAt: 0, swingAt: 0, blow: null, dashUntil: 0, dashSeq: 0, invulnUntil: 0, hurtAt: -99, chatAt: 0, chatLeft: 5, chatSince: now,
+    party: 0, invites: new Map(),   // the party it is in, and the invitations it has: inviter id -> until when
     // PvP: fights won, murders, the karma they left - and, never saved, how long the cat stays flagged
     pvp: data.pvp | 0, pk: data.pk | 0, karma: Math.max(0, data.karma | 0), flagUntil: 0,
     stunUntil: 0, sleepUntil: 0, slowUntil: 0, slowMult: 1, dot: null,   // what another cat's skills can do to it

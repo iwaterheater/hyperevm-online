@@ -738,6 +738,16 @@ export const spFor = (xp) => Math.ceil(xp / 8);                  // skill points
 export const DEATH_XP_LOSS = 0.04;                               // share of the current level's experience lost on death
 export const upgradeCost = (weapon) => 40 * weapon;
 
+// ---------------------------------------------------------------- parties
+
+// Cats band together as in Lineage II. A cat invites another (who is in no party) and becomes the party's leader; up to
+// PARTY_MAX cats. A monster's experience goes to the party as a whole when one of them has wounded it: shared out
+// evenly among the members near enough to have seen the kill, with PARTY_BONUS more for every member beyond the first.
+// Party members never strike each other, and a line that starts with # goes to the party alone.
+export const PARTY_MAX = 9, PARTY_REACH = 40, PARTY_BONUS = 0.15, INVITE_TIME = 30;
+// what each of `n` members near the kill gets of a monster's `xp`
+export const partyShare = (xp, n) => Math.round(xp * (1 + PARTY_BONUS * (n - 1)) / n);
+
 // ---------------------------------------------------------------- PvP
 
 // Cats may fight each other outside the safe regions - in a safe one nobody is attacked - by the rules of Lineage II:

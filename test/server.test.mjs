@@ -2064,3 +2064,87 @@ check('the characters are copied aside once a day, before the first save of that
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, files[0]), 'utf8')), before, 'the file as it was before this run touched it');
   assert.equal(savedPlayers(s).keeper.gold, 77 - 24);
 });
+
+
+// ---------------------------------------------------------------- parties
+
+check('parties: an invitation and its answer, a leader, party chat, no blows within, and a party that breaks up', async () => {
+  await withServer({ map: NO_MONSTERS, setup: seed({ a: cat('Ann', 12), b: cat('Bob', 12), c: cat('Cid', 12) }) }, async (s) => {
+    const ann = await enter(s, { token: 'a', name: 'Ann', at: FIELD }), bob = await enter(s, { token: 'b', name: 'Bob', at: BESIDE });
+    const cid = await enter(s, { token: 'c', name: 'Cid', at: [FIELD[0], FIELD[1] + 1] });
+    assert.equal(ann.me.party, null);
+    await ann.send({ t: 'pinv', id: bob.w.id });
+    assert.deepEqual(await bob.event('pinv'), { k: 'pinv', o: ann.w.id, n: 'Ann', t: 30 });
+    assert.equal((await ann.event('pinvsent')).n, 'Bob');
+    await ann.send({ t: 'pinv', id: bob.w.id });
+    assert.equal((await ann.event('err')).m, 'Bob has your invitation already');
+    await bob.send({ t: 'pans', id: ann.w.id, ok: true });
+    await bob.until('the party', () => bob.me.party?.length === 2);
+    assert.deepEqual(bob.me.party.map((row) => row[1]), ['Ann', 'Bob'], 'the leader first');
+    const { CLASS_KEYS } = await import('../src/shared.js');
+    assert.deepEqual(bob.me.party[0].slice(0, 4), [ann.w.id, 'Ann', CLASS_KEYS.indexOf('fighter'), 12]);
+    await ann.until('the party', () => ann.me.party?.length === 2);
+    assert.match((await ann.event('psys')).m, /^Bob has joined the party$/);
+    // only the leader invites, and nobody already in a party is invited
+    await bob.send({ t: 'pinv', id: cid.w.id });
+    assert.equal((await bob.event('err')).m, 'Only the leader of your party invites');
+    // party chat: the members hear it, nobody else does
+    await sleep(600);
+    await bob.send({ t: 'c', m: '#  ready?' });
+    assert.deepEqual(await ann.c.take('c', (m) => m.party), { t: 'c', n: 'Bob', m: 'ready?', party: 1 });
+    await sleep(300);
+    assert.ok(!cid.c.inbox.some((m) => m.t === 'c' && m.m === 'ready?'));
+    // a party does not fight itself: the blow is not struck, and nobody is flagged for it
+    for (let i = 0; i < 8; i++) { await ann.send({ t: 'a', id: bob.w.id }); await sleep(100); }
+    await ann.settled();
+    assert.ok(!bob.events.some((ev) => ev.k === 'hurt'));
+    assert.equal(ann.me.st, 0);
+    // the leader sends Bob away: a party of one is no party
+    await ann.send({ t: 'pkick', id: bob.w.id });
+    await bob.until('out', () => bob.me.party === null);
+    await ann.until('broken up', () => ann.me.party === null);
+    assert.ok(bob.events.some((ev) => ev.k === 'psys' && ev.m === 'You were sent away from the party'));
+    // a new party of three; the leader leaves the world, the next one in leads
+    for (const q of [bob, cid]) {
+      await ann.send({ t: 'pinv', id: q.w.id });
+      await q.event('pinv');
+      await q.send({ t: 'pans', id: ann.w.id, ok: true });
+      await q.until('in', () => q.me.party?.some((row) => row[0] === q.w.id));
+    }
+    await cid.until('three', () => cid.me.party?.length === 3);
+    await ann.c.close();
+    await cid.until('two, led by Bob', () => cid.me.party?.length === 2 && cid.me.party[0][1] === 'Bob');
+    assert.ok(cid.events.some((ev) => ev.k === 'psys' && ev.m === 'Bob leads the party now'));
+    // a declined invitation is said to the one who asked
+    await bob.send({ t: 'pleave' });
+    await cid.until('alone', () => cid.me.party === null);
+    await bob.send({ t: 'pinv', id: cid.w.id });
+    await cid.event('pinv');
+    await cid.send({ t: 'pans', id: bob.w.id, ok: false });
+    assert.equal((await bob.event('pno')).n, 'Cid');
+  });
+});
+
+check('parties: what one member kills, every member near it gets a share of', async () => {
+  const { MOB_TYPES, partyShare, PARTY_BONUS } = await import('../src/shared.js');
+  assert.deepEqual([partyShare(100, 1), partyShare(100, 2), partyShare(100, 3)], [100, Math.round(100 * (1 + PARTY_BONUS) / 2), Math.round(100 * (1 + 2 * PARTY_BONUS) / 3)]);
+  const camp = { ...FILE.spawns[0], types: { chaser: 1 }, lvl: [1, 1], x: FIELD[0], z: FIELD[1] + 6, r: 1, count: 1, respawn: 600 };
+  await withServer({ map: edited((file) => { file.spawns = [camp]; }) }, async (s) => {
+    const hero = await enter(s, { test: { at: FIELD, lvl: 20, god: true } }), pal = await enter(s, { test: { at: BESIDE, lvl: 20, god: true } });
+    const loner = await enter(s, { test: { at: [FIELD[0] - 1, FIELD[1]], lvl: 20, god: true } });
+    await hero.send({ t: 'pinv', id: pal.w.id });
+    await pal.event('pinv');
+    await pal.send({ t: 'pans', id: hero.w.id, ok: true });
+    await hero.until('the party', () => hero.me.party?.length === 2);
+    const mob = await hero.until('the monster', () => hero.mobs[0]);
+    const xp = [hero, pal, loner].map((q) => q.me.xp);
+    for (let i = 0; i < 100 && !hero.events.some((ev) => ev.k === 'kill'); i++) {
+      await hero.send({ t: 'm', x: mob[3], y: 0, z: mob[4] - 1.5, yaw: 0, s: 1 });
+      await hero.send({ t: 'a', id: mob[0] });
+      await sleep(150);
+    }
+    await hero.settled();
+    const share = partyShare(MOB_TYPES.chaser.xp, 2);
+    assert.deepEqual([hero.me.xp - xp[0], pal.me.xp - xp[1], loner.me.xp - xp[2]], [share, share, 0], 'the pal never touched it, the loner is in no party');
+  });
+});

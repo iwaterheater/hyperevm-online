@@ -213,6 +213,20 @@ Stand next to the Trader in town and press `T`. He sells the four potions and al
 - Dying costs 4% of the current level's experience (never a level); you respawn in town.
 - The cat is a puppet of rigid parts with elbows, knees, a tail of four segments and ears that turn, and it shows what happens to it: it winds a blow up before it lets it go and steps into it, stoops for a coin and bends down to a chest, gives at the knees when it lands, falls on its back when it is struck down and gets up when it lives again - and with nothing to do it looks about, licks a paw or has a stretch. An archer takes its arrows from a quiver at the hip.
 
+### Parties
+
+Cats band together as in Lineage II. Select a cat and press **Invite** under its name in the target frame; it gets a
+window to join or decline (the invitation stands for 30 seconds). Whoever invites leads the party; up to nine cats.
+
+- **Experience**: when a member has wounded a monster, every member within 40 units of the kill gets a share - the
+  monster's experience shared out evenly, with 15% more for every member beyond the first. A party of three near the
+  kill gets 130% between them.
+- Members **never strike each other**, and area skills pass over them.
+- The **party frame** under your own shows every member - name, class, level, health and mana; click one to select
+  it (when it is in sight). The leader sends a member away with ×; **Leave party** leaves. A leader who goes hands the
+  party to the next member; a party of one breaks up.
+- A chat line that starts with **#** goes to the party alone. Party members are blue on the minimap.
+
 ### Fighting other cats
 
 Cats may fight each other anywhere outside the safe places, by the rules of Lineage II. Nobody attacks by accident: a
@@ -476,7 +490,7 @@ The bots say nothing about being bots, and nothing about being people.
 ## Limitations
 
 - One server process holds the whole world; there is no sharding or horizontal scaling.
-- No accounts and no parties. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
+- No accounts. Items cannot be traded between players or dropped on the ground, and loot belongs to whoever lands the last blow (the King's to everyone who wounded him).
 - Every piece of armour is one model in four tints, and all tiers of a weapon share one model; a greatsword is the sword drawn larger, and the shield is one shape built in code. Only shields go into the off hand: there is no second weapon for it, and a two-handed weapon attacks as fast as any other.
 - The HUD is laid out for a window at least 1280 pixels wide and 720 high; in a smaller one the windows reach over the chat and the radar.
 - Clerics can only heal and bless players standing near them; there is no targeting of other players yet.

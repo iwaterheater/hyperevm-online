@@ -110,6 +110,32 @@
   #tgAttack { display: none; margin-top: 6px; padding: 3px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: #ffd0d6;
     background: rgba(255, 90, 106, .16); border: 1px solid rgba(255, 90, 106, .6); border-radius: 999px; box-shadow: none; }
   #tgAttack:hover { background: rgba(255, 90, 106, .32); transform: none; }
+  #tgInvite { display: none; margin: 6px 0 0 6px; padding: 3px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: #d8eeff;
+    background: rgba(124, 196, 255, .16); border: 1px solid rgba(124, 196, 255, .6); border-radius: 999px; box-shadow: none; }
+  #tgInvite:hover { background: rgba(124, 196, 255, .32); transform: none; }
+  /* the party, under the cat's own frame: a small frame for every member */
+  #party { top: 156px; left: 16px; width: 214px; display: none; padding: 6px 8px; pointer-events: auto; }
+  #party .member { padding: 4px 4px 5px; border-radius: 7px; cursor: pointer; }
+  #party .member:hover { background: rgba(124, 196, 255, .12); }
+  #party .member.me { cursor: default; background: none; }
+  #party .member.down { opacity: .45; }
+  #party .head { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; }
+  #party .head b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d8eeff; }
+  #party .head span { font-size: 10.5px; opacity: .75; white-space: nowrap; }
+  #party .kick { padding: 0 5px; font-size: 13px; line-height: 15px; color: #ffb3c4; background: none; box-shadow: none; }
+  #party .pbar { height: 5px; margin-top: 2px; border-radius: 3px; overflow: hidden; background: rgba(0, 0, 0, .45); }
+  #party .pbar i { display: block; height: 100%; }
+  #party .pbar.hp i { background: linear-gradient(90deg, #ff6b8e, #ffb3c4); }
+  #party .pbar.mp i { background: linear-gradient(90deg, #4f8dff, #a9c8ff); }
+  #partyLeave { display: block; margin: 6px 0 0 auto; padding: 3px 10px; font-size: 11px; color: #e8fffa; background: rgba(255, 255, 255, .1); box-shadow: none; }
+  /* an invitation to a party */
+  #invite { top: 34%; left: 50%; transform: translateX(-50%); display: none; padding: 12px 16px; text-align: center; pointer-events: auto; }
+  #invite.on { display: block; }
+  #inviteText { font-size: 15px; font-weight: 700; color: #d8eeff; margin-bottom: 10px; }
+  #invite .acts { display: flex; gap: 8px; justify-content: center; }
+  #invite button { padding: 6px 18px; font-size: 13px; box-shadow: none; }
+  #chatLog .party, #chatLog .party b { color: #7cc4ff; }
+  #chat.sys #chatLog div.party.party { display: block; }   /* the party's lines are in both tabs */
   #notice { position: absolute; top: 31%; left: 0; right: 0; text-align: center; font-size: 17px; font-weight: 700; color: #ffb3c4;
     text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity .25s; }
   #notice.on { opacity: 1; }
@@ -569,6 +595,15 @@
     <div class="gauge"><i id="tgFill"></i></div>
     <div id="tgDrops"></div>
     <button id="tgAttack" title="Attack this cat (Ctrl + click on it does the same)">Attack</button>
+    <button id="tgInvite" title="Invite this cat to your party">Invite</button>
+  </div>
+  <div class="panel" id="party">
+    <div id="partyList"></div>
+    <button id="partyLeave" type="button">Leave party</button>
+  </div>
+  <div class="panel" id="invite">
+    <div id="inviteText"></div>
+    <div class="acts"><button id="inviteYes" type="button">Join</button><button id="inviteNo" type="button">Decline</button></div>
   </div>
   <div id="fps"></div>
   <div id="banner"></div>
@@ -669,6 +704,9 @@
       <div><kbd>2</kbd> – <kbd>9</kbd>, <kbd>0</kbd></div><span>The other slots of the action bar: cast the skill, drink the potion or wear the gear in the slot</span>
       <div><kbd>Shift</kbd></div><span>Dash, once the Rogue has learned Shadow Step</span>
       <div><kbd>Esc</kbd></div><span>Close the open window, else clear the target</span>
+      <h3>Party</h3>
+      <div>Invite</div><span>Select a cat and press Invite under its name: up to nine cats share the experience of what they kill together, and never strike each other</span>
+      <div><kbd>#</kbd> message</div><span>A chat line that starts with # goes to your party alone</span>
       <h3>Fighting other cats</h3>
       <div><kbd>Ctrl</kbd> + click</div><span>Attack a cat, outside the safe places. So does the Attack button under its name. Attacking turns your name purple for a while: anyone may fight a purple cat</span>
       <div>PvP</div><span>Beating a cat that fought back, or an outlaw, is a fight won</span>

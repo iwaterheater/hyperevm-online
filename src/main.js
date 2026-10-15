@@ -521,9 +521,11 @@ function banner(text) {
 
 // sys: said by the game, not by a player. kind: 'out' and 'in' are the lines of the combat log - what this cat dealt and
 // what it took - which only the System tab shows.
+// kind 'party': a line of the party chat, or of what happens in the party - in both tabs, in the party's colour.
 function chatLine(name, text, sys, kind = '') {
   const div = document.createElement('div');
-  if (sys) div.className = kind ? `sys fight ${kind}` : 'sys';
+  if (kind === 'party') div.className = sys ? 'party sys' : 'party';
+  else if (sys) div.className = kind ? `sys fight ${kind}` : 'sys';
   if (name) {
     const b = document.createElement('b');
     b.textContent = `${name}: `;
@@ -534,7 +536,7 @@ function chatLine(name, text, sys, kind = '') {
   log.append(div);
   // Each kind keeps its own last lines, more than a tab can show: a fight writes many, and must not push what the
   // players said, or what was looted, out of the log.
-  const same = log.querySelectorAll(kind ? '.fight' : sys ? '.sys:not(.fight)' : 'div:not(.sys)');
+  const same = log.querySelectorAll(kind === 'party' ? '.party' : kind ? '.fight' : sys ? '.sys:not(.fight):not(.party)' : 'div:not(.sys):not(.party)');
   for (let i = 0; i < same.length - 30; i++) same[i].remove();
 }
 
@@ -665,7 +667,7 @@ function onMessage(msg) {
     names.clear();
     for (const [id, name] of msg.l) names.set(id, name);
   } else if (msg.t === 'c') {
-    chatLine(msg.n, msg.m, msg.sys);
+    chatLine(msg.party ? `[Party] ${msg.n}` : msg.n, msg.m, msg.sys, msg.party ? 'party' : '');
   } else if (msg.t === 's') {
     onSnapshot(msg);
   }
@@ -886,6 +888,20 @@ function onEvent(ev) {
       banner(`Level ${ev.level}!`);
       sfx(523, 0.5, 'triangle', 0.09, 520);
       break;
+    case 'pinv':   // a cat invites this one to its party
+      showInvite(ev.o, ev.n, ev.t);
+      chatLine('', `${ev.n} invites you to a party`, true, 'party');
+      sfx(660, 0.2, 'triangle', 0.06, 200);
+      break;
+    case 'pinvsent':
+      chatLine('', `You invited ${ev.n} to the party`, true, 'party');
+      break;
+    case 'pno':
+      chatLine('', `${ev.n} declined the invitation`, true, 'party');
+      break;
+    case 'psys':   // somebody came, went, or leads now
+      chatLine('', ev.m, true, 'party');
+      break;
     case 'ench': {   // this cat's scroll has been used: the weapon holds its new number, or is gone
       const text = ev.ok ? `${ITEMS[ev.id].name} is now +${ev.plus}` : `${itemName(ev.id, ev.plus)} has broken`;
       banner(ev.ok ? `+${ev.plus} ${ITEMS[ev.id].name}` : 'The weapon broke!');
@@ -1037,9 +1053,11 @@ function pickTarget(clientX, clientY) {
 
 // Whether the cat `a` may be attacked now; `say` tells the player why not. Nobody in a safe place, and a peaceful cat
 // only once the player has forced the attack (a flagged one and an outlaw are fair game).
+const inParty = (id) => !!stats.party?.some((row) => row[0] === id);
 function catFoe(a, id, say) {
   let why = '';
-  if (isSafe(map, me.x, me.z) || isSafe(map, a.x, a.z)) why = 'No fighting in a safe place';
+  if (inParty(id)) why = `${a.name} is in your party`;
+  else if (isSafe(map, me.x, me.z) || isSafe(map, a.x, a.z)) why = 'No fighting in a safe place';
   else if (a.st === PVP_PEACE && forced !== id) why = 'Ctrl + click to attack a peaceful cat';
   if (why && say) notice(why);
   return !why;
@@ -1148,6 +1166,7 @@ renderer.domElement.addEventListener('wheel', (e) => {
 addEventListener('contextmenu', (e) => e.preventDefault());
 // the Attack button of a cat's target frame: the deliberate act it takes to attack a peaceful cat, without the keyboard
 $('tgAttack').addEventListener('click', () => { setTarget(targetId, true, true); $('tgAttack').blur(); });
+$('tgInvite').addEventListener('click', () => { send({ t: 'pinv', id: targetId }); $('tgInvite').blur(); });
 $('playBtn').addEventListener('click', connect);
 $('reloadBtn').addEventListener('click', () => location.reload());
 // the way back to the map editor: it opens, or moves its camera, at the spot where the cat stands
@@ -2459,7 +2478,53 @@ function renderDrops(tv) {
     }));
 }
 
+// ---- the party: a frame of every member under the cat's own - name, class, level, health and mana - and the window of
+// an invitation. A click on a member selects it, when it is in sight; the leader sends one away with ×.
+const PARTY_COLOR = '#7cc4ff';
+let partyShown = null, inviteFrom = 0, inviteTimer = 0;
+function renderParty() {
+  const rows = stats.party, key = JSON.stringify(rows?.map((r) => [...r.slice(0, 4), Math.round(r[4] / r[5] * 40), Math.round(r[6] / Math.max(1, r[7]) * 40), r[8]]));
+  if (key === partyShown) return;
+  partyShown = key;
+  $('party').style.display = rows ? 'block' : 'none';
+  if (!rows) return;
+  const lead = rows[0][0] === myId;
+  $('partyList').replaceChildren(...rows.map(([id, name, cls, level, hp, maxHp, mp, maxMp, dead], i) => {
+    const row = el('div', `member${dead ? ' down' : ''}${id === myId ? ' me' : ''}`);
+    const head = el('div', 'head');
+    head.append(el('b', '', `${i === 0 ? '★ ' : ''}${name}`), el('span', '', `${CLASSES[CLASS_KEYS[cls]]?.name ?? ''} ${level}`));
+    if (lead && id !== myId) {
+      const kick = el('button', 'kick', '×');
+      kick.title = `Send ${name} away from the party`;
+      kick.addEventListener('click', (e) => { e.stopPropagation(); send({ t: 'pkick', id }); kick.blur(); });
+      head.append(kick);
+    }
+    const bar = (cls2, share) => { const g = el('div', `pbar ${cls2}`), fill = el('i'); fill.style.width = `${Math.max(0, Math.min(1, share)) * 100}%`; g.append(fill); return g; };
+    row.append(head, bar('hp', hp / maxHp), bar('mp', mp / Math.max(1, maxMp)));
+    if (id !== myId) row.addEventListener('click', () => { if (others.has(id)) setTarget(id, false); else notice(`${name} is too far away`); });
+    return row;
+  }));
+}
+function showInvite(from, name, seconds) {
+  inviteFrom = from;
+  $('inviteText').textContent = `${name} invites you to a party`;
+  $('invite').classList.add('on');
+  clearTimeout(inviteTimer);
+  inviteTimer = setTimeout(() => answerInvite(false, true), seconds * 1000);
+}
+// quiet: the invitation ran out; the inviter is not told no, the window just goes
+function answerInvite(ok, quiet = false) {
+  if (inviteFrom && !quiet) send({ t: 'pans', id: inviteFrom, ok });
+  inviteFrom = 0;
+  clearTimeout(inviteTimer);
+  $('invite').classList.remove('on');
+}
+$('inviteYes').addEventListener('click', () => answerInvite(true));
+$('inviteNo').addEventListener('click', () => answerInvite(false));
+$('partyLeave').addEventListener('click', () => { send({ t: 'pleave' }); $('partyLeave').blur(); });
+
 function updateHud() {
+  renderParty();
   const say = (node, text) => { if (node.textContent !== text) node.textContent = text; };
   say($('who'), names.get(myId) || 'Cat');
   $('who').style.color = stats.st ? PVP_COLORS[stats.st] : '';   // the colour the others see over this cat
@@ -2531,7 +2596,10 @@ function updateHud() {
   // never in numbers. A monster's frame also tells what it leaves (renderDrops).
   const tv = mobViews.get(targetId) || others.get(targetId);
   $('target').style.display = tv ? 'block' : 'none';
-  $('tgAttack').style.display = tv?.cat && !attacking ? 'inline-block' : 'none';
+  $('tgAttack').style.display = tv?.cat && !attacking && !inParty(targetId) ? 'inline-block' : 'none';
+  // a cat that is in no party of ours, while we lead one or are in none
+  const leading = !stats.party || stats.party[0][0] === myId;
+  $('tgInvite').style.display = tv?.cat && leading && !inParty(targetId) ? 'inline-block' : 'none';
   renderDrops(tv);
   if (tv) {
     const tint = tv.cat ? PVP_COLORS[tv.st] : threat(tv.lvl), ailing = tv.flags & 1 ? 'Stunned' : tv.flags & 2 ? 'Asleep' : tv.flags & 4 ? 'Slowed' : attacking ? 'Attacking' : '';
@@ -2644,10 +2712,11 @@ function drawMinimap() {
   mark('house', map.start.x, map.start.z, 42, true);          // town
   g.lineWidth = 2;
   g.strokeStyle = 'rgba(4, 16, 14, .85)';
-  for (const a of others.values()) {
+  for (const [id, a] of others) {
+    a.id = id;
     const at = place(a.x, a.z);
     if (!at) continue;
-    g.fillStyle = a.st ? PVP_COLORS[a.st] : '#ffffff';
+    g.fillStyle = inParty(a.id ?? -1) ? PARTY_COLOR : a.st ? PVP_COLORS[a.st] : '#ffffff';
     g.beginPath(); g.arc(at[0], at[1], 8.5, 0, 7); g.fill(); g.stroke();
   }
   // the player: an arrow that points where the cat looks
